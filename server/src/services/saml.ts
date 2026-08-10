@@ -68,17 +68,23 @@ export function createSaml(): SAML {
     throw new Error('SAML IdP is not configured (set SAML_IDP_ENTRY_POINT and SAML_IDP_CERT)')
   }
 
+  // RefexOne / Kissflow IAM signs the Assertion, not the Response wrapper
+  const wantResponseSigned = process.env.SAML_WANT_RESPONSE_SIGNED === 'true'
+  const idpIssuer = String(process.env.SAML_IDP_ISSUER || entryPoint).trim()
+
   return new SAML({
     callbackUrl: sp.acs_url,
     entryPoint,
     logoutUrl: String(process.env.SAML_IDP_SLO_URL || '').trim() || undefined,
     issuer: sp.entity_id,
+    idpIssuer,
     idpCert,
     audience: sp.entity_id,
     identifierFormat: NAME_ID_FORMAT,
+    disableRequestedAuthnContext: true,
     wantAssertionsSigned: process.env.SAML_WANT_ASSERTIONS_SIGNED !== 'false',
-    wantAuthnResponseSigned: process.env.SAML_WANT_RESPONSE_SIGNED !== 'false',
-    acceptedClockSkewMs: Number(process.env.SAML_CLOCK_SKEW_MS || 5000),
+    wantAuthnResponseSigned: wantResponseSigned,
+    acceptedClockSkewMs: Number(process.env.SAML_CLOCK_SKEW_MS || 120000),
     validateInResponseTo: ValidateInResponseTo.never,
   })
 }
