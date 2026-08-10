@@ -50,6 +50,7 @@ import {
 import RolesPermissions from './pages/settings/RolesPermissions'
 import NotificationsSettings from './pages/settings/NotificationsSettings'
 import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordReset'
+import SsoCallback from './pages/SsoCallback'
 import PublicAsset from './pages/assets/PublicAsset'
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -79,6 +80,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/login/sso/callback" element={<SsoCallback />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/asset/:token" element={<PublicAsset />} />

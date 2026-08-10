@@ -634,6 +634,26 @@ settingsRouter.put('/', async (req, res) => {
   return okMessage(res, 'Settings updated', await get(`SELECT * FROM settings WHERE id = 1`))
 })
 
+/** SAML SP values to paste into RefexOne portal. */
+settingsRouter.get('/saml', async (_req, res) => {
+  const { samlEnabled, idpConfigured, samlSpConfig, samlPortalFields } = await import('../services/saml.js')
+  return okItem(res, {
+    enabled: samlEnabled(),
+    idp_configured: idpConfigured(),
+    button_label: process.env.SAML_BUTTON_LABEL || 'RefexOne SSO',
+    ...samlSpConfig(),
+    portal_fields: samlPortalFields(),
+    env_hint: {
+      SAML_ENABLED: 'true',
+      SAML_IDP_ENTRY_POINT: 'SSO URL from RefexOne IdP metadata',
+      SAML_IDP_CERT: 'X.509 cert from RefexOne IdP metadata (PEM or base64)',
+      SAML_IDP_SLO_URL: 'optional IdP logout URL',
+      SAML_AUTO_PROVISION: 'false (set true to auto-create App Users on first SSO)',
+      PUBLIC_APP_URL: 'https://asset.refexone.com',
+    },
+  })
+})
+
 /** Clear all asset QR tokens/URLs/images so Print Label remints against current PUBLIC_APP_URL. */
 settingsRouter.post('/reset-qr', async (req, res) => {
   try {

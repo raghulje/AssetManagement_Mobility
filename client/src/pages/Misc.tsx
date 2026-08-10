@@ -436,6 +436,12 @@ export function SettingsGeneral() {
   const [digestBusy, setDigestBusy] = useState(false)
   const [qrBusy, setQrBusy] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [saml, setSaml] = useState<{
+    enabled?: boolean
+    idp_configured?: boolean
+    portal_fields?: Record<string, string>
+    metadata_url?: string
+  } | null>(null)
 
   useEffect(() => {
     api<Record<string, unknown>>('/settings')
@@ -448,6 +454,14 @@ export function SettingsGeneral() {
       })
       .catch(() => undefined)
       .finally(() => setLoading(false))
+    api<{
+      enabled?: boolean
+      idp_configured?: boolean
+      portal_fields?: Record<string, string>
+      metadata_url?: string
+    }>('/settings/saml')
+      .then((s) => setSaml(s))
+      .catch(() => setSaml(null))
   }, [])
 
   const submit = async (e: FormEvent) => {
@@ -529,6 +543,46 @@ export function SettingsGeneral() {
             {digestBusy ? 'Sending…' : 'Send EOL digest now'}
           </button>
         </form>
+      </Box>
+
+      <Box title="SAML / RefexOne SSO" type="primary">
+        <p className="help-block" style={{ marginTop: 0 }}>
+          Enter these values in the RefexOne portal SAML app registration. Set{' '}
+          <code>PUBLIC_APP_URL=https://asset.refexone.com</code> (no port), then{' '}
+          <code>SAML_ENABLED=true</code> and paste IdP SSO URL + certificate into{' '}
+          <code>server/.env</code>.
+        </p>
+        {saml?.portal_fields ? (
+          <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
+            {Object.entries(saml.portal_fields).map(([label, value]) => (
+              <div key={label}>
+                <div style={{ fontWeight: 650, fontSize: 13, marginBottom: 4 }}>{label}</div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <code style={{ flex: 1, wordBreak: 'break-all', fontSize: 12 }}>{value}</code>
+                  <button
+                    type="button"
+                    className="btn btn-default btn-sm"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(value)
+                      toast.success('Copied')
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-muted">Loading SAML SP config…</p>
+        )}
+        <p className="help-block mb-0">
+          Status: {saml?.enabled ? 'SSO enabled' : 'SSO disabled'} ·{' '}
+          {saml?.idp_configured ? 'IdP configured' : 'IdP not configured yet'}
+          {saml?.metadata_url ? (
+            <> · <a href={saml.metadata_url} target="_blank" rel="noreferrer">SP metadata XML</a></>
+          ) : null}
+        </p>
       </Box>
 
       <Box title="Asset QR codes" type="warning">

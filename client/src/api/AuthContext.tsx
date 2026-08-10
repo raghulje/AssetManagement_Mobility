@@ -17,6 +17,7 @@ type AuthCtx = {
   permissions: Record<string, unknown>
   can: (permission: string) => boolean
   login: (email: string, password: string) => Promise<void>
+  loginWithToken: (token: string) => Promise<void>
   logout: () => void
   refreshUser: () => Promise<void>
 }
@@ -61,6 +62,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await authApi.login(email, password)
       setToken(res.token)
       setUser(res.user as unknown as User)
+    },
+    async loginWithToken(token) {
+      setToken(token)
+      const u = await authApi.me()
+      setUser(u as User)
     },
     logout() {
       setToken(null)

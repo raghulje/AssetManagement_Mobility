@@ -23,6 +23,7 @@ import filesRouter from './routes/files.js'
 import labelsRouter from './routes/labels.js'
 import publicAssetsRouter from './routes/publicAssets.js'
 import agentRouter from './routes/agent.js'
+import samlRouter from './routes/saml.js'
 import { groupsRouter } from './routes/groups.js'
 import { storageRoot } from './services/uploads.js'
 import { moduleGate, requirePerm } from './services/permissions.js'
@@ -71,6 +72,7 @@ export function createApp() {
 
   app.use(compression())
   app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '20mb' }))
+  app.use(express.urlencoded({ extended: false }))
   app.use(process.env.NODE_ENV === 'production' ? morgan('combined') : morgan('dev'))
 
   // Public static files (images, barcodes)
@@ -85,11 +87,13 @@ export function createApp() {
       product: 'Refex Asset Management',
       version: '1.1.0',
       serve_client: process.env.SERVE_CLIENT === 'true',
-      features: ['imports', 'labels', 'uploads', 'signatures', 'reports', 'public-qr', 'agent-sync', 'agent-remote-scan'],
+      features: ['imports', 'labels', 'uploads', 'signatures', 'reports', 'public-qr', 'agent-sync', 'agent-remote-scan', 'saml-sso'],
     })
   })
 
   app.use('/api/v1', authRouter)
+  // SAML SSO (IdP → ACS POST is application/x-www-form-urlencoded; no JWT yet)
+  app.use('/api/v1/auth/saml', samlRouter)
   // Public QR scan + device agent (no session cookie)
   app.use('/api/v1/public', publicAssetsRouter)
   app.use('/api/v1/agent', agentRouter)
