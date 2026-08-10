@@ -5,6 +5,7 @@ import { AppSelect, Box, DataTable, Field, PageForm } from '../../components/ui'
 // import { ModuleInsights } from '../../components/ModuleInsights' // restore with insight cards when needed
 import { DetailLayout } from '../../components/DetailLayout'
 import { MasterSelect, masterPayloadId } from '../../components/MasterSelect'
+import { CompanyEntityFields } from '../../components/CompanyEntityFields'
 import {
   accessoriesApi,
   componentsApi,
@@ -37,6 +38,7 @@ type FormState = {
   name: string
   category_id: string
   company_id: string
+  legal_entity_id: string
   location_id: string
   model_number: string
   qty: string
@@ -49,6 +51,7 @@ const emptyForm: FormState = {
   name: '',
   category_id: '',
   company_id: '',
+  legal_entity_id: '',
   location_id: '',
   model_number: '',
   qty: '1',
@@ -331,6 +334,7 @@ function QtyForm({
           name: String(item.name || ''),
           category_id: nestId(item.category),
           company_id: nestId(item.company),
+          legal_entity_id: nestId(item.legal_entity),
           location_id: nestId(item.location),
           model_number: String(item.model_number || ''),
           qty: String(item.qty ?? 1),
@@ -350,6 +354,7 @@ function QtyForm({
       name: form.name.trim(),
       category_id: form.category_id ? Number(form.category_id) : null,
       company_id: form.company_id ? Number(form.company_id) : null,
+      legal_entity_id: form.legal_entity_id ? Number(form.legal_entity_id) : null,
       location_id: form.location_id ? Number(form.location_id) : null,
       model_number: form.model_number || null,
       qty: Number(form.qty) || 1,
@@ -419,19 +424,14 @@ function QtyForm({
           <input type="number" min={0} className="form-control" value={form.min_amt} onChange={(e) => set('min_amt', e.target.value)} />
         </Field>
 
-        <MasterSelect
-          label="Company"
+        <CompanyEntityFields
           required
-          value={form.company_id}
-          options={companies}
-          onChange={(v) => set('company_id', v)}
-          onOptionsChange={setCompanies}
-          allowEmpty={false}
-          emptyLabel="Select company…"
-          create={async (name) => {
-            const res = await mastersApi.createCompany({ name })
-            return masterPayloadId(res, name)
-          }}
+          companyId={form.company_id}
+          legalEntityId={form.legal_entity_id}
+          companies={companies}
+          onCompaniesChange={setCompanies}
+          onCompanyChange={(v) => set('company_id', v)}
+          onLegalEntityChange={(v) => set('legal_entity_id', v)}
         />
 
         <MasterSelect

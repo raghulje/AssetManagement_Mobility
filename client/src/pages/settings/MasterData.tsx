@@ -17,8 +17,12 @@ const MASTER_META: Record<MasterKind, {
   companies: {
     title: 'Companies',
     basePath: '/companies',
-    columns: [{ key: 'name', label: 'Name' }, { key: 'notes', label: 'Notes' }],
-    subtitle: 'HRMS + manually added company masters',
+    columns: [
+      { key: 'name', label: 'Name' },
+      { key: 'code', label: 'Company / entity code' },
+      { key: 'notes', label: 'Notes' },
+    ],
+    subtitle: 'HRMS companies + LEGAL_ENTITY_CODE (sync masters after HRMS sync)',
   },
   departments: {
     title: 'Departments',
@@ -141,6 +145,7 @@ function ApiMasterForm({ kind }: { kind: MasterKind }) {
   const toast = useToast()
   const isEdit = Boolean(id)
   const [name, setName] = useState('')
+  const [code, setCode] = useState('')
   const [notes, setNotes] = useState('')
   const [address, setAddress] = useState('')
   const [companyId, setCompanyId] = useState('')
@@ -165,6 +170,7 @@ function ApiMasterForm({ kind }: { kind: MasterKind }) {
     api<Record<string, unknown>>(path)
       .then((row) => {
         setName(String(row.name || ''))
+        setCode(String(row.code || ''))
         setNotes(String(row.notes || ''))
         setAddress(String(row.address || ''))
         const co = row.company
@@ -184,8 +190,9 @@ function ApiMasterForm({ kind }: { kind: MasterKind }) {
     setError('')
     try {
       if (kind === 'companies') {
-        if (isEdit && id) await mastersApi.updateCompany(id, { name: name.trim(), notes: notes || null })
-        else await mastersApi.createCompany({ name: name.trim(), notes: notes || null })
+        const body = { name: name.trim(), code: code.trim() || null, notes: notes || null }
+        if (isEdit && id) await mastersApi.updateCompany(id, body)
+        else await mastersApi.createCompany(body)
       } else if (kind === 'departments') {
         const body = {
           name: name.trim(),
@@ -233,6 +240,12 @@ function ApiMasterForm({ kind }: { kind: MasterKind }) {
         <Field label="Name" required>
           <input className="form-control" value={name} onChange={(e) => setName(e.target.value)} required />
         </Field>
+        {kind === 'companies' && (
+          <Field label="Company / entity code">
+            <input className="form-control" value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. Refex" />
+            <p className="help-block">Primary HRMS LEGAL_ENTITY_CODE for this company</p>
+          </Field>
+        )}
         {(kind === 'departments' || kind === 'locations') && (
           <Field label="Company">
             <select className="form-control" value={companyId} onChange={(e) => setCompanyId(e.target.value)}>

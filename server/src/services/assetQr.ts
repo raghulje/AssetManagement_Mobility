@@ -8,10 +8,10 @@ import { storageRoot, publicUrl } from './uploads.js'
 const QR_DIR = path.join(storageRoot, 'public/assets/qr')
 
 function clientBase() {
-  // Prefer PUBLIC_APP_URL (LAN IP for phone QR scans). CLIENT_ORIGIN may be a comma list.
-  const publicUrl = (process.env.PUBLIC_APP_URL || '').trim()
-  if (publicUrl) return publicUrl.replace(/\/$/, '')
-  const firstOrigin = String(process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+  // Prefer PUBLIC_APP_URL / FRONTEND_URL (mapped domain in production). CLIENT_ORIGIN may be a list.
+  const fromEnv = (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || '').trim()
+  if (fromEnv) return fromEnv.replace(/\/$/, '')
+  const firstOrigin = String(process.env.CLIENT_ORIGIN || 'http://localhost:3001')
     .split(',')[0]
     .trim()
   return firstOrigin.replace(/\/$/, '')

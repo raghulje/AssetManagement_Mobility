@@ -4,6 +4,7 @@ import { fail, okItem, okList, okMessage } from '../utils/response.js'
 import { transformAsset } from '../services/transformers.js'
 import { logAction } from '../services/actionLog.js'
 import { actorLabel, notifyWorkflow, resolveAssigneeEmail } from '../services/notify.js'
+import { allocateAssetTag, nextAssetTag } from '../services/assetTag.js'
 
 const router = Router()
 
@@ -111,10 +112,11 @@ function listIds(req: { query: Record<string, unknown> }) {
 
   if (search) {
     sql += ` AND (
-      a.asset_tag LIKE ? OR a.name LIKE ? OR a.serial LIKE ? OR CAST(a.id AS CHAR) = ?
+      a.asset_tag LIKE ? OR a.old_asset_tag LIKE ? OR a.name LIKE ? OR a.serial LIKE ? OR CAST(a.id AS CHAR) = ?
       OR m.name LIKE ? OR c.name LIKE ? OR loc.name LIKE ?
     )`
-    params.push(`%${search}%`, `%${search}%`, `%${search}%`, search, `%${search}%`, `%${search}%`, `%${search}%`)
+    const like = `%${search}%`
+    params.push(like, like, like, like, search, like, like, like)
   }
 
   if (req.query.order_number) {
@@ -178,11 +180,11 @@ router.get('/facets', async (req, res) => {
   }
   if (search) {
     where += ` AND (
-      a.asset_tag LIKE ? OR a.name LIKE ? OR a.serial LIKE ?
+      a.asset_tag LIKE ? OR a.old_asset_tag LIKE ? OR a.name LIKE ? OR a.serial LIKE ?
       OR m.name LIKE ? OR c.name LIKE ? OR loc.name LIKE ?
     )`
     const like = `%${search}%`
-    params.push(like, like, like, like, like, like)
+    params.push(like, like, like, like, like, like, like)
   }
 
   const statusRows = await all<{ value: string }>(`
@@ -294,6 +296,19 @@ router.get('/eol/due', async (_req, res) => {
 })
 
 /** Global ITAgent sync activity (session auth) — must be before /:id */
+/** Preview next auto tag — must be before /:id */
+router.get('/next-tag', async (req, res) => {
+  try {
+    const categoryId = req.query.category_id ? Number(req.query.category_id) : null
+    const companyId = req.query.company_id ? Number(req.query.company_id) : null
+    const legalEntityId = req.query.legal_entity_id ? Number(req.query.legal_entity_id) : null
+    const preview = await nextAssetTag({ companyId, legalEntityId, categoryId })
+    return okItem(res, preview)
+  } catch (e) {
+    return fail(res, e instanceof Error ? e.message : 'Could not preview asset tag')
+  }
+})
+
 router.get('/agent-sync-logs', async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 100, 500)
   const q = String(req.query.search || '').trim()
@@ -394,22 +409,49 @@ function custodyReason(b: Record<string, unknown>): string | null {
 
 router.post('/', async (req, res) => {
   const b = req.body || {}
-  if (!b.asset_tag || !b.model_id || !b.status_id) {
-    return fail(res, 'asset_tag, model_id, and status_id are required')
+  if (!b.model_id || !b.status_id) {
+    return fail(res, 'model_id and status_id are required')
   }
-  const exists = await get(`SELECT id FROM assets WHERE asset_tag = ?`, [b.asset_tag])
-  if (exists) return fail(res, 'Asset tag already exists')
+  if (!b.company_id && !b.legal_entity_id) {
+    return fail(res, 'company_id (or legal_entity_id) is required to generate asset tag')
+  }
+
+  // Prefer explicit category; else take from model
+  let categoryId = b.category_id ? Number(b.category_id) : null
+  if (!categoryId) {
+    const model = await get<{ category_id: number | null }>(
+      `SELECT category_id FROM models WHERE id = ? AND deleted_at IS NULL`,
+      [b.model_id],
+    )
+    categoryId = model?.category_id ? Number(model.category_id) : null
+  }
+  if (!categoryId) return fail(res, 'category_id (asset type) is required to generate asset tag')
+
+  let assetTag: string
+  try {
+    assetTag = await allocateAssetTag({
+      companyId: b.company_id ? Number(b.company_id) : null,
+      legalEntityId: b.legal_entity_id ? Number(b.legal_entity_id) : null,
+      categoryId,
+    })
+  } catch (e) {
+    return fail(res, e instanceof Error ? e.message : 'Asset tag generation failed')
+  }
+
+  const oldTag = b.old_asset_tag != null && String(b.old_asset_tag).trim()
+    ? String(b.old_asset_tag).trim()
+    : null
 
   const ts = now()
   const info = await run(`
     INSERT INTO assets (
-      asset_tag, name, serial, model_id, status_id, company_id, department_id, supplier_id,
+      asset_tag, old_asset_tag, name, serial, model_id, status_id, company_id, legal_entity_id, department_id, supplier_id,
       location_id, rtd_location_id, purchase_date, purchase_cost, order_number,
       warranty_months, asset_eol_date, notes, requestable, byod, next_audit_date, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
-    b.asset_tag, b.name || null, b.serial || null, b.model_id, b.status_id,
-    b.company_id || null, b.department_id || null, b.supplier_id || null, b.location_id || b.rtd_location_id || null,
+    assetTag, oldTag, b.name || null, b.serial || null, b.model_id, b.status_id,
+    b.company_id || null, b.legal_entity_id || null, b.department_id || null, b.supplier_id || null, b.location_id || b.rtd_location_id || null,
     b.rtd_location_id || null, b.purchase_date || null, b.purchase_cost || null,
     b.order_number || null, b.warranty_months || null, b.asset_eol_date || null, b.notes || null,
     b.requestable ? 1 : 0, b.byod ? 1 : 0, b.next_audit_date || null, ts, ts,
@@ -419,11 +461,12 @@ router.post('/', async (req, res) => {
   notifyWorkflow({
     category: 'crud',
     event: 'asset.created',
-    subject: `Asset created: ${b.asset_tag}`,
+    subject: `Asset created: ${assetTag}`,
     title: 'New asset created',
     intro: 'A new asset was added to the inventory.',
     fields: [
-      { label: 'Asset tag', value: String(b.asset_tag) },
+      { label: 'Asset tag', value: assetTag },
+      { label: 'Old asset tag', value: oldTag || '—' },
       { label: 'Serial', value: String(b.serial || '—') },
       { label: 'Created by', value: actorLabel(req.user) },
     ],
@@ -441,11 +484,12 @@ async function updateAsset(req: import('express').Request, res: import('express'
   const id = Number(req.params.id)
   if (!(await transformAsset(id))) return fail(res, 'Asset not found', 404)
   const b = req.body || {}
+  // asset_tag is system-generated and never editable after create
   const fields = [
-    'name', 'serial', 'model_id', 'status_id', 'company_id', 'department_id', 'supplier_id',
+    'name', 'serial', 'model_id', 'status_id', 'company_id', 'legal_entity_id', 'department_id', 'supplier_id',
     'location_id', 'rtd_location_id', 'purchase_date', 'purchase_cost',
     'order_number', 'warranty_months', 'asset_eol_date', 'notes', 'requestable', 'byod',
-    'asset_tag', 'expected_checkin', 'next_audit_date',
+    'old_asset_tag', 'expected_checkin', 'next_audit_date',
   ] as const
   const sets: string[] = []
   const vals: unknown[] = []

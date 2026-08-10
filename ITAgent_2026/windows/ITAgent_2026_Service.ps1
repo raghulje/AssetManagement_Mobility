@@ -4,7 +4,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$apiBase = if ($env:REFEX_API_URL) { $env:REFEX_API_URL.TrimEnd('/') } else { 'http://10.5.7.225:3001/api/v1' }
+$apiBase = if ($env:REFEX_API_URL) { $env:REFEX_API_URL.TrimEnd('/') } else { 'http://localhost:3001/api/v1' }
 $agentKey = $env:REFEX_AGENT_KEY
 $assetTag = $env:REFEX_ASSET_TAG
 $pollMs = if ($env:REFEX_AGENT_POLL_MS) { [int]$env:REFEX_AGENT_POLL_MS } else { 30000 }

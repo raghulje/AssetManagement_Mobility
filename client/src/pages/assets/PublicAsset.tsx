@@ -5,6 +5,7 @@ import { getApiBase, getStorageBase } from '../../api/baseUrl'
 type PublicAsset = {
   id: number
   asset_tag: string
+  old_asset_tag?: string | null
   name?: string | null
   serial?: string | null
   model?: string | null
@@ -113,6 +114,7 @@ export default function PublicAsset() {
 
         <div className="public-asset-grid">
           <Field label="Asset Tag" value={asset.asset_tag} />
+          <Field label="Old Asset Tag" value={asset.old_asset_tag} />
           <Field label="Name" value={asset.name} />
           <Field label="Serial" value={asset.serial} />
           <Field label="Model" value={[asset.model, asset.model_number].filter(Boolean).join(' · ')} />

@@ -140,9 +140,84 @@ usersRouter.delete('/:id', async (req, res) => {
 
 export const mastersRouter = Router()
 
+/** Must be registered before makeCrudRouter mounts so these override default selectlists */
+mastersRouter.get('/companies/selectlist', async (req, res) => {
+  const q = String(req.query.search || '').trim()
+  let sql = `
+    SELECT id, name, code,
+      CASE
+        WHEN code IS NOT NULL AND TRIM(code) <> '' THEN CONCAT(name, ' (', code, ')')
+        ELSE name
+      END AS text
+    FROM companies
+    WHERE deleted_at IS NULL
+  `
+  const params: unknown[] = []
+  if (q) {
+    sql += ' AND (name LIKE ? OR code LIKE ?)'
+    params.push(`%${q}%`, `%${q}%`)
+  }
+  sql += ' ORDER BY name ASC LIMIT 500'
+  const results = await all(sql, params)
+  return res.json({ results, pagination: { more: false } })
+})
+
+mastersRouter.get('/legal-entities/selectlist', async (req, res) => {
+  const q = String(req.query.search || '').trim()
+  const companyId = req.query.company_id ?? req.query.companyId
+  let sql = `
+    SELECT id, code, name, company_id,
+      CASE
+        WHEN name IS NOT NULL AND TRIM(name) <> '' AND name <> code
+          THEN CONCAT(code, ' — ', name)
+        ELSE code
+      END AS text
+    FROM legal_entities
+    WHERE deleted_at IS NULL
+  `
+  const params: unknown[] = []
+  if (companyId != null && String(companyId) !== '') {
+    sql += ' AND company_id = ?'
+    params.push(Number(companyId))
+  }
+  if (q) {
+    sql += ' AND (code LIKE ? OR name LIKE ?)'
+    params.push(`%${q}%`, `%${q}%`)
+  }
+  sql += ' ORDER BY code ASC LIMIT 500'
+  const results = await all(sql, params)
+  return res.json({ results, pagination: { more: false } })
+})
+
 mastersRouter.use('/companies', makeCrudRouter({
-  table: 'companies', resource: 'company', searchable: ['name'], allowedFields: ['name', 'notes'],
-  mapRow: (r) => ({ id: r.id, name: r.name, notes: r.notes }),
+  table: 'companies',
+  resource: 'company',
+  searchable: ['name', 'code'],
+  allowedFields: ['name', 'code', 'notes'],
+  mapRow: (r) => ({ id: r.id, name: r.name, code: r.code, notes: r.notes }),
+}))
+
+mastersRouter.use('/legal-entities', makeCrudRouter({
+  table: 'legal_entities',
+  resource: 'legal_entity',
+  searchable: ['code', 'name'],
+  allowedFields: ['company_id', 'code', 'name', 'notes'],
+  mapRow: async (row) => {
+    const company = row.company_id
+      ? await get<{ name: string; code: string | null }>(
+        `SELECT name, code FROM companies WHERE id = ?`,
+        [row.company_id],
+      )
+      : null
+    return {
+      id: row.id,
+      company_id: row.company_id,
+      code: row.code,
+      name: row.name || row.code,
+      notes: row.notes,
+      company: nest(row.company_id as number, company?.name || null, { code: company?.code || null }),
+    }
+  },
 }))
 
 mastersRouter.use('/locations', makeCrudRouter({
@@ -190,6 +265,25 @@ mastersRouter.use('/suppliers', makeCrudRouter({
   allowedFields: ['name', 'url', 'address', 'contact', 'email', 'phone', 'notes'],
 }))
 
+/** Asset types (Laptop / Desktop / …) — filter with ?category_type=asset */
+mastersRouter.get('/categories/selectlist', async (req, res) => {
+  const q = String(req.query.search || '').trim()
+  const type = String(req.query.category_type || req.query.type || '').trim()
+  let sql = `SELECT id, name as text, category_type FROM categories WHERE deleted_at IS NULL`
+  const params: unknown[] = []
+  if (type) {
+    sql += ' AND category_type = ?'
+    params.push(type)
+  }
+  if (q) {
+    sql += ' AND name LIKE ?'
+    params.push(`%${q}%`)
+  }
+  sql += ' ORDER BY name ASC LIMIT 500'
+  const results = await all(sql, params)
+  return res.json({ results, pagination: { more: false } })
+})
+
 mastersRouter.use('/categories', makeCrudRouter({
   table: 'categories', resource: 'category', searchable: ['name'],
   allowedFields: ['name', 'category_type', 'require_acceptance', 'checkin_email', 'eula_text', 'use_default_eula'],
@@ -216,8 +310,13 @@ mastersRouter.use('/models', (() => {
   const r = Router()
   r.get('/selectlist', async (req, res) => {
     const q = String(req.query.search || '').trim()
-    let sql = `SELECT id, name as text FROM models WHERE deleted_at IS NULL`
+    const categoryId = req.query.category_id ?? req.query.categoryId
+    let sql = `SELECT id, name as text, category_id FROM models WHERE deleted_at IS NULL`
     const params: unknown[] = []
+    if (categoryId != null && String(categoryId) !== '') {
+      sql += ' AND category_id = ?'
+      params.push(Number(categoryId))
+    }
     if (q) {
       sql += ' AND (name LIKE ? OR model_number LIKE ?)'
       params.push(`%${q}%`, `%${q}%`)

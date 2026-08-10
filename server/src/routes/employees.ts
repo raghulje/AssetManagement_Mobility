@@ -202,7 +202,7 @@ employeesRouter.post('/sync-masters', async (req, res) => {
       actionType: 'sync',
       itemType: 'master',
       itemId: 0,
-      note: `HRMS masters: companies=${masters.companies.total} locations=${masters.locations.total}`,
+      note: `HRMS masters: companies=${masters.companies.total} entities=${masters.legal_entities.total} locations=${masters.locations.total}`,
       meta: masters,
     })
     return okMessage(res, 'HRMS masters synced', masters)

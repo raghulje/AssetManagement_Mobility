@@ -66,6 +66,17 @@ export const hardwareApi = {
     return api<{ statuses: string[]; assignees: string[] }>(`/hardware/facets?${q}`)
   },
   get: (id: number | string) => api<Record<string, unknown>>(`/hardware/${id}`),
+  nextTag: (params: {
+    company_id?: string | number
+    legal_entity_id?: string | number
+    category_id?: string | number
+  }) => {
+    const q = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== '') q.set(k, String(v))
+    })
+    return api<{ asset_tag: string; prefix: string; sequence: number }>(`/hardware/next-tag?${q}`)
+  },
   create: (body: unknown) => api('/hardware', { method: 'POST', json: body }),
   update: (id: number | string, body: unknown) => api(`/hardware/${id}`, { method: 'PUT', json: body }),
   remove: (id: number | string) => api(`/hardware/${id}`, { method: 'DELETE' }),
@@ -106,7 +117,7 @@ export const reportsApi = {
   activity: () => api<ApiList<Record<string, unknown>>>('/reports/activity'),
 }
 
-export type SelectOption = { id: number; text: string }
+export type SelectOption = { id: number; text: string; code?: string | null; company_id?: number }
 
 export const usersApi = {
   list: (params: Record<string, string | number | undefined> = {}) => {
@@ -143,17 +154,36 @@ export const groupsApi = {
 export const mastersApi = {
   companies: (search?: string) =>
     api<{ results: SelectOption[] }>(`/companies/selectlist${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+  legalEntities: (companyId?: string | number, search?: string) => {
+    const q = new URLSearchParams()
+    if (companyId != null && companyId !== '') q.set('company_id', String(companyId))
+    if (search) q.set('search', search)
+    const s = q.toString()
+    return api<{ results: SelectOption[] }>(`/legal-entities/selectlist${s ? `?${s}` : ''}`)
+  },
   departments: (search?: string) =>
     api<{ results: SelectOption[] }>(`/departments/selectlist${search ? `?search=${encodeURIComponent(search)}` : ''}`),
   locations: (search?: string) =>
     api<{ results: SelectOption[] }>(`/locations/selectlist${search ? `?search=${encodeURIComponent(search)}` : ''}`),
-  models: (search?: string) =>
-    api<{ results: SelectOption[] }>(`/models/selectlist${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+  models: (search?: string, categoryId?: string | number) => {
+    const q = new URLSearchParams()
+    if (search) q.set('search', search)
+    if (categoryId != null && categoryId !== '') q.set('category_id', String(categoryId))
+    const s = q.toString()
+    return api<{ results: SelectOption[] }>(`/models/selectlist${s ? `?${s}` : ''}`)
+  },
   statuslabels: () => api<{ results: SelectOption[] }>('/statuslabels/selectlist'),
   suppliers: (search?: string) =>
     api<{ results: SelectOption[] }>(`/suppliers/selectlist${search ? `?search=${encodeURIComponent(search)}` : ''}`),
-  categories: (search?: string) =>
-    api<{ results: SelectOption[] }>(`/categories/selectlist${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+  categories: (search?: string, categoryType?: string) => {
+    const q = new URLSearchParams()
+    if (search) q.set('search', search)
+    if (categoryType) q.set('category_type', categoryType)
+    const s = q.toString()
+    return api<{ results: SelectOption[] }>(`/categories/selectlist${s ? `?${s}` : ''}`)
+  },
+  /** Hardware asset types: Laptop, Desktop, Tablet, Mobile, … */
+  assetTypes: (search?: string) => mastersApi.categories(search, 'asset'),
   manufacturers: (search?: string) =>
     api<{ results: SelectOption[] }>(`/manufacturers/selectlist${search ? `?search=${encodeURIComponent(search)}` : ''}`),
 
@@ -162,18 +192,36 @@ export const mastersApi = {
     Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== '') q.set(k, String(v)) })
     return api<ApiList<Record<string, unknown>>>(`/companies?${q}`)
   },
-  createCompany: (body: { name: string; notes?: string | null }) =>
-    api<{ status: string; messages: string[]; payload: { id: number; name: string } }>('/companies', {
+  createCompany: (body: { name: string; code?: string | null; notes?: string | null }) =>
+    api<{ status: string; messages: string[]; payload: { id: number; name: string; code?: string | null } }>('/companies', {
       method: 'POST',
       json: body,
     }),
-  updateCompany: (id: number | string, body: { name?: string; notes?: string | null }) =>
+  updateCompany: (id: number | string, body: { name?: string; code?: string | null; notes?: string | null }) =>
     api<{ status: string; messages: string[]; payload: Record<string, unknown> }>(`/companies/${id}`, {
       method: 'PUT',
       json: body,
     }),
   removeCompany: (id: number | string) =>
     api<{ status: string; messages: string[] }>(`/companies/${id}`, { method: 'DELETE' }),
+
+  listLegalEntities: (params: Record<string, string | number | undefined> = {}) => {
+    const q = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== '') q.set(k, String(v)) })
+    return api<ApiList<Record<string, unknown>>>(`/legal-entities?${q}`)
+  },
+  createLegalEntity: (body: { company_id: number; code: string; name?: string | null; notes?: string | null }) =>
+    api<{ status: string; messages: string[]; payload: { id: number } }>('/legal-entities', {
+      method: 'POST',
+      json: body,
+    }),
+  updateLegalEntity: (id: number | string, body: Record<string, unknown>) =>
+    api<{ status: string; messages: string[]; payload: Record<string, unknown> }>(`/legal-entities/${id}`, {
+      method: 'PUT',
+      json: body,
+    }),
+  removeLegalEntity: (id: number | string) =>
+    api<{ status: string; messages: string[] }>(`/legal-entities/${id}`, { method: 'DELETE' }),
 
   listDepartments: (params: Record<string, string | number | undefined> = {}) => {
     const q = new URLSearchParams()

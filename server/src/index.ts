@@ -26,14 +26,14 @@ app.listen(port, host, () => {
   console.log(`Refex API listening on http://${host}:${port}`)
   console.log(`Local:  http://localhost:${port}`)
   if (serveClient) {
-    console.log(`LAN UI: open http://<Wi‑Fi-IP>:${port}  (SERVE_CLIENT=true — single process like Biogas_MIS_Vizag)`)
+    console.log(`Mode:   SERVE_CLIENT=true (API + client/out on one port — Biogas_MIS style)`)
     if (publicApp) console.log(`Public: ${publicApp}`)
+    else console.log(`Public: set PUBLIC_APP_URL / FRONTEND_URL in server/.env to your mapped domain`)
   } else {
-    console.log(`LAN:    set PUBLIC_APP_URL / open UI via your Wi‑Fi IP (e.g. http://10.x.x.x:5173)`)
-    console.log(`        Or set SERVE_CLIENT=true + build client/out for single-port LAN (recommended)`)
+    console.log(`Dev:    Vite on :5173 + API on :${port} (set SERVE_CLIENT=true for single-port deploy)`)
   }
   console.log(`Health: http://localhost:${port}/api/v1/status`)
-  console.log(`Login:  POST /api/v1/login  { "email": "raghul.je@refex.co.in", "password": "Welcome@2026" }`)
+  console.log(`Login:  POST /api/v1/login  { "email": "…", "password": "…" }`)
   startHrmsAutoSync()
   startEolAlertScheduler()
 })

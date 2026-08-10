@@ -1,31 +1,28 @@
-# LAN / Wi‑Fi access (Biogas_MIS_Vizag style)
+# Local / LAN access
 
-**Recommended:** single URL on port **3001** (server serves built UI).
+For **server hosting with a domain**, follow [DEPLOY.md](DEPLOY.md) (Biogas_MIS style: `.env` + `docker-compose` + external `proxy` network).
 
-Your PC Wi‑Fi IP (update when it changes): check with PowerShell below.
+This page is only for a quick local smoke test on one machine.
 
-## Production-style LAN (recommended)
+## Local single-port test
 
 ```powershell
 cd client
 npm run build
 
 cd ..\server
-# Ensure SERVE_CLIENT=true and PUBLIC_APP_URL=http://YOUR_IP:3001 in .env
+# In .env: SERVE_CLIENT=true, FRONTEND_URL / PUBLIC_APP_URL / CLIENT_ORIGIN = http://localhost:3001
 npm start
 ```
 
 | What | URL |
 |------|-----|
-| App (login) | `http://YOUR_IP:3001` |
-| API health | `http://YOUR_IP:3001/api/v1/status` |
-| Public asset QR | `http://YOUR_IP:3001/asset/{qr_token}` |
-
-Full steps: [DEPLOY.md](DEPLOY.md).
+| App | `http://localhost:3001` |
+| API health | `http://localhost:3001/api/v1/status` |
 
 ## Split dev (Vite + API)
 
-Only if `SERVE_CLIENT=false`:
+`SERVE_CLIENT=false` in `server/.env`:
 
 ```powershell
 # Terminal 1
@@ -39,19 +36,7 @@ npm run dev
 
 | What | URL |
 |------|-----|
-| App | `http://YOUR_IP:5173` |
-| API | `http://YOUR_IP:3001/api/v1/status` |
+| App | `http://localhost:5173` |
+| API | `http://localhost:3001/api/v1/status` |
 
-## Login note
-
-Same Wi‑Fi only opens the login page. Accounts must exist and be listed in `ALLOWED_LOGIN_EMAILS`.
-
-## Firewall / network
-
-1. Same Wi‑Fi (not guest/isolated)
-2. Allow Node / port **3001** (and **5173** if using Vite) on Private networks
-3. If IP changes, update `PUBLIC_APP_URL`, `FRONTEND_URL`, `CLIENT_ORIGIN`
-
-```powershell
-Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -like '10.*' -or $_.IPAddress -like '192.168.*' }
-```
+Login still requires an App User listed in `ALLOWED_LOGIN_EMAILS`.

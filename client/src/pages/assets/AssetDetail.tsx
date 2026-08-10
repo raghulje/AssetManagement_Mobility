@@ -232,6 +232,7 @@ export default function AssetDetail() {
         onTabChange={(t) => setTab(t as TabId)}
         fields={tab === 'details' ? [
           { label: 'Asset Tag', value: String(a.asset_tag) },
+          { label: 'Old Asset Tag', value: String(a.old_asset_tag || '—') },
           { label: 'Serial', value: String(a.serial || '—') },
           { label: 'Model', value: `${nest(a.model)}${a.model_number ? ` (${String(a.model_number)})` : ''}` },
           {

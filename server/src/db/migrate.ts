@@ -57,6 +57,11 @@ async function migrate() {
       .replace(/CREATE DATABASE[\s\S]*?;/i, '')
       .replace(/USE\s+`?[\w]+`?\s*;/gi, '')
     await root.query(sql)
+    const versionName = file.replace(/\.sql$/, '')
+    await root.query(
+      `INSERT IGNORE INTO schema_migrations (version) VALUES (?)`,
+      [versionName],
+    ).catch(() => undefined)
     void applied
   }
 

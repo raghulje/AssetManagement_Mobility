@@ -8,7 +8,7 @@ import os from 'node:os'
 import fs from 'node:fs'
 import path from 'node:path'
 
-const apiBase = (process.env.REFEX_API_URL || 'http://10.5.7.225:3001/api/v1').replace(/\/$/, '')
+const apiBase = (process.env.REFEX_API_URL || 'http://localhost:3001/api/v1').replace(/\/$/, '')
 const agentKey = process.env.REFEX_AGENT_KEY || ''
 const assetTag = process.env.REFEX_ASSET_TAG || ''
 const agentVersion = '2026.1'

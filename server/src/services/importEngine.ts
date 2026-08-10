@@ -3,10 +3,12 @@ import { parse } from 'csv-parse/sync'
 import bcrypt from 'bcryptjs'
 import { all, get, run, now } from '../db/index.js'
 import { logAction } from './actionLog.js'
+import { allocateAssetTag } from './assetTag.js'
 
 export const IMPORT_FIELDS: Record<string, { key: string; label: string; required?: boolean; aliases?: string[] }[]> = {
   asset: [
-    { key: 'asset_tag', label: 'Asset Tag', required: true, aliases: ['tag', 'asset', 'assettag'] },
+    { key: 'asset_tag', label: 'Asset Tag (legacy → old_asset_tag)', required: true, aliases: ['tag', 'asset', 'assettag', 'old_asset_tag'] },
+    { key: 'category', label: 'Asset Type', required: false, aliases: ['asset_type', 'type', 'category'] },
     { key: 'name', label: 'Name' },
     { key: 'serial', label: 'Serial', aliases: ['serialnumber', 'serial_number'] },
     { key: 'model', label: 'Model', required: true },
@@ -148,15 +150,27 @@ async function findOrCreateByName(table: string, name: string, extra: Record<str
   }
 }
 
-async function resolveModel(name: string) {
+async function resolveModel(name: string, categoryId?: number | null) {
   if (!name) return null
-  const m = await get<{ id: number }>(`SELECT id FROM models WHERE name = ? AND deleted_at IS NULL LIMIT 1`, [name])
-  if (m) return m.id
-  const cat = await get<{ id: number }>(`SELECT id FROM categories WHERE category_type='asset' AND deleted_at IS NULL LIMIT 1`)
+  const m = await get<{ id: number; category_id: number | null }>(
+    `SELECT id, category_id FROM models WHERE name = ? AND deleted_at IS NULL LIMIT 1`,
+    [name],
+  )
+  if (m) {
+    if (categoryId && !m.category_id) {
+      await run(`UPDATE models SET category_id = ?, updated_at = ? WHERE id = ?`, [categoryId, now(), m.id])
+    }
+    return m.id
+  }
+  let catId = categoryId || null
+  if (!catId) {
+    const cat = await get<{ id: number }>(`SELECT id FROM categories WHERE category_type='asset' AND deleted_at IS NULL LIMIT 1`)
+    catId = cat?.id || null
+  }
   const ts = now()
   const info = await run(
     `INSERT INTO models (name, category_id, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-    [name, cat?.id || null, ts, ts],
+    [name, catId, ts, ts],
   )
   return info.insertId
 }
@@ -274,35 +288,62 @@ export async function processImport(opts: {
     const rowNum = i + 2
     try {
       if (opts.type === 'asset') {
-        const tag = cell(row, map, 'asset_tag')
+        const legacyTag = cell(row, map, 'asset_tag')
         const modelName = cell(row, map, 'model')
-        if (!tag || !modelName) throw new Error('asset_tag and model are required')
-        const modelId = await resolveModel(modelName)
+        if (!legacyTag || !modelName) throw new Error('asset_tag and model are required')
+        const categoryName = cell(row, map, 'category')
+        let categoryId: number | null = null
+        if (categoryName) categoryId = await ensureCategory(categoryName, 'asset', ts)
+        const modelId = await resolveModel(modelName, categoryId)
+        if (!categoryId && modelId) {
+          const m = await get<{ category_id: number | null }>(`SELECT category_id FROM models WHERE id = ?`, [modelId])
+          categoryId = m?.category_id ? Number(m.category_id) : null
+        }
+        if (!categoryId) {
+          const fallback = await get<{ id: number }>(
+            `SELECT id FROM categories WHERE category_type='asset' AND deleted_at IS NULL ORDER BY id LIMIT 1`,
+          )
+          categoryId = fallback?.id ? Number(fallback.id) : null
+        }
         const statusId = await resolveStatus(cell(row, map, 'status'))
         const companyId = await findOrCreateByName('companies', cell(row, map, 'company'))
         const locationId = await findOrCreateByName('locations', cell(row, map, 'location'), { company_id: companyId })
         const supplierId = await findOrCreateByName('suppliers', cell(row, map, 'supplier'))
-        const existing = await get<{ id: number }>(`SELECT id FROM assets WHERE asset_tag = ? LIMIT 1`, [tag])
+        // Match by legacy tag (old) or current system tag
+        const existing = await get<{ id: number }>(`
+          SELECT id FROM assets
+          WHERE deleted_at IS NULL AND (old_asset_tag = ? OR asset_tag = ?)
+          LIMIT 1
+        `, [legacyTag, legacyTag])
         const cost = cell(row, map, 'purchase_cost') ? Number(cell(row, map, 'purchase_cost')) : null
         if (existing && opts.updateExisting) {
           await run(`
             UPDATE assets SET name=?, serial=?, model_id=?, status_id=?, company_id=?, location_id=?, rtd_location_id=COALESCE(?, rtd_location_id),
-              supplier_id=?, purchase_date=NULLIF(?,''), purchase_cost=?, order_number=NULLIF(?,''), notes=?, updated_at=?, deleted_at=NULL
+              supplier_id=?, purchase_date=NULLIF(?,''), purchase_cost=?, order_number=NULLIF(?,''), notes=?,
+              old_asset_tag=COALESCE(old_asset_tag, ?), updated_at=?, deleted_at=NULL
             WHERE id=?
           `, [
             cell(row, map, 'name') || null, cell(row, map, 'serial') || null, modelId, statusId, companyId, locationId, locationId,
-            supplierId, cell(row, map, 'purchase_date'), cost, cell(row, map, 'order_number'), cell(row, map, 'notes') || null, ts, existing.id,
+            supplierId, cell(row, map, 'purchase_date'), cost, cell(row, map, 'order_number'), cell(row, map, 'notes') || null,
+            legacyTag, ts, existing.id,
           ])
           updated++
         } else if (existing) {
-          throw new Error(`Asset tag ${tag} already exists`)
+          throw new Error(`Asset tag ${legacyTag} already exists`)
         } else {
+          if (!companyId) throw new Error('company is required to generate asset tag')
+          if (!categoryId) throw new Error('asset type/category is required to generate asset tag')
+          const newTag = await allocateAssetTag({
+            companyId,
+            legalEntityId: null,
+            categoryId,
+          })
           const info = await run(`
-            INSERT INTO assets (asset_tag, name, serial, model_id, status_id, company_id, location_id, rtd_location_id, supplier_id,
+            INSERT INTO assets (asset_tag, old_asset_tag, name, serial, model_id, status_id, company_id, location_id, rtd_location_id, supplier_id,
               purchase_date, purchase_cost, order_number, notes, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?,''), ?, NULLIF(?,''), ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?,''), ?, NULLIF(?,''), ?, ?, ?)
           `, [
-            tag, cell(row, map, 'name') || null, cell(row, map, 'serial') || null, modelId, statusId, companyId, locationId, locationId,
+            newTag, legacyTag, cell(row, map, 'name') || null, cell(row, map, 'serial') || null, modelId, statusId, companyId, locationId, locationId,
             supplierId, cell(row, map, 'purchase_date'), cost, cell(row, map, 'order_number'), cell(row, map, 'notes') || null, ts, ts,
           ])
           created++

@@ -12,7 +12,7 @@ router.get('/assets/:token', async (req, res) => {
   if (!token) return fail(res, 'Token required', 400)
 
   let asset = await get<Record<string, unknown>>(`
-    SELECT a.id, a.asset_tag, a.name, a.serial, a.qr_token, a.qr_url, a.qr_image_path,
+    SELECT a.id, a.asset_tag, a.old_asset_tag, a.name, a.serial, a.qr_token, a.qr_url, a.qr_image_path,
       a.purchase_date, a.purchase_cost, a.order_number, a.warranty_months, a.asset_eol_date,
       a.notes, a.last_checkout, a.last_checkin, a.last_audit_date, a.next_audit_date,
       a.assigned_to, a.assigned_type, a.label_printed_at, a.label_print_count,
@@ -50,7 +50,7 @@ router.get('/assets/:token', async (req, res) => {
   // Fallback: numeric id only if QR not yet minted (admin preview) — prefer token
   if (!asset && /^\d+$/.test(token)) {
     asset = await get<Record<string, unknown>>(`
-      SELECT a.id, a.asset_tag, a.name, a.serial, a.qr_token, a.qr_url, a.qr_image_path,
+      SELECT a.id, a.asset_tag, a.old_asset_tag, a.name, a.serial, a.qr_token, a.qr_url, a.qr_image_path,
         a.purchase_date, a.purchase_cost, a.order_number, a.warranty_months, a.asset_eol_date,
         a.notes, a.last_checkout, a.last_checkin, a.last_audit_date, a.next_audit_date,
         a.assigned_to, a.assigned_type, a.label_printed_at, a.label_print_count,
@@ -100,6 +100,7 @@ router.get('/assets/:token', async (req, res) => {
   return okItem(res, {
     id: asset.id,
     asset_tag: asset.asset_tag,
+    old_asset_tag: asset.old_asset_tag || null,
     name: asset.name,
     serial: asset.serial,
     model: asset.model_name,

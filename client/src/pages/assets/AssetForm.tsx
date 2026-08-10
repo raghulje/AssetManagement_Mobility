@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import AppLayout from '../../layout/AppLayout'
 import { DateField, Field, FileInput, PageForm } from '../../components/ui'
 import { MasterSelect, masterPayloadId } from '../../components/MasterSelect'
+import { CompanyEntityFields } from '../../components/CompanyEntityFields'
 import AssetAttachments, {
   uploadAssetFile,
   type PendingAttachment,
@@ -14,9 +15,12 @@ import { useToast } from '../../components/Toast'
 
 type FormState = {
   company_id: string
+  legal_entity_id: string
   department_id: string
   asset_tag: string
+  old_asset_tag: string
   serial: string
+  category_id: string
   model_id: string
   status_id: string
   rtd_location_id: string
@@ -32,9 +36,12 @@ type FormState = {
 
 const empty: FormState = {
   company_id: '',
+  legal_entity_id: '',
   department_id: '',
   asset_tag: '',
+  old_asset_tag: '',
   serial: '',
+  category_id: '',
   model_id: '',
   status_id: '',
   rtd_location_id: '',
@@ -91,6 +98,7 @@ export default function AssetForm() {
   const [companies, setCompanies] = useState<SelectOption[]>([])
   const [departments, setDepartments] = useState<SelectOption[]>([])
   const [locations, setLocations] = useState<SelectOption[]>([])
+  const [assetTypes, setAssetTypes] = useState<SelectOption[]>([])
   const [models, setModels] = useState<SelectOption[]>([])
   const [statuses, setStatuses] = useState<SelectOption[]>([])
   const [suppliers, setSuppliers] = useState<SelectOption[]>([])
@@ -104,30 +112,55 @@ export default function AssetForm() {
       mastersApi.companies(),
       mastersApi.departments(),
       mastersApi.locations(),
-      mastersApi.models(),
+      mastersApi.assetTypes(),
       mastersApi.statuslabels(),
       mastersApi.suppliers(),
     ])
-      .then(([c, d, l, m, s, sup]) => {
+      .then(([c, d, l, types, s, sup]) => {
         setCompanies(c.results || [])
         setDepartments(d.results || [])
         setLocations(l.results || [])
-        setModels(m.results || [])
+        setAssetTypes(types.results || [])
         setStatuses(s.results || [])
         setSuppliers(sup.results || [])
         if (!isEdit) {
+          const defaultType = types.results?.find((t) => /laptop/i.test(t.text)) || types.results?.[0]
           setForm((f) => ({
             ...f,
             company_id: f.company_id || (c.results?.[0] ? String(c.results[0].id) : ''),
             department_id: f.department_id || '',
             rtd_location_id: f.rtd_location_id || (l.results?.[0] ? String(l.results[0].id) : ''),
-            model_id: f.model_id || (m.results?.[0] ? String(m.results[0].id) : ''),
+            category_id: f.category_id || (defaultType ? String(defaultType.id) : ''),
             status_id: f.status_id || (s.results?.[0] ? String(s.results[0].id) : ''),
           }))
         }
       })
       .catch((e: Error) => setError(e.message))
   }, [isEdit])
+
+  // Models for the selected asset type (Laptop / Desktop / …)
+  useEffect(() => {
+    if (!form.category_id) {
+      setModels([])
+      return
+    }
+    let cancelled = false
+    mastersApi
+      .models(undefined, form.category_id)
+      .then((m) => {
+        if (cancelled) return
+        const rows = m.results || []
+        setModels(rows)
+        setForm((f) => {
+          if (f.model_id && rows.some((r) => String(r.id) === String(f.model_id))) return f
+          return { ...f, model_id: '' }
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setModels([])
+      })
+    return () => { cancelled = true }
+  }, [form.category_id])
 
   useEffect(() => {
     employeesApi
@@ -144,9 +177,12 @@ export default function AssetForm() {
       .then((a) => {
         setForm({
           company_id: nestId(a.company),
+          legal_entity_id: nestId(a.legal_entity),
           department_id: nestId(a.department),
           asset_tag: String(a.asset_tag || ''),
+          old_asset_tag: String(a.old_asset_tag || ''),
           serial: String(a.serial || ''),
+          category_id: nestId(a.category),
           model_id: nestId(a.model),
           status_id: nestId(a.status),
           rtd_location_id: nestId(a.rtd_location) || nestId(a.location),
@@ -165,6 +201,39 @@ export default function AssetForm() {
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
   }, [id])
+
+  // Preview auto-generated tag when creating (company/entity + asset type)
+  useEffect(() => {
+    if (isEdit) return
+    const companyId = form.company_id
+    const legalEntityId = form.legal_entity_id
+    const categoryId = form.category_id
+    if (!categoryId || (!companyId && !legalEntityId)) {
+      setForm((f) => (f.asset_tag ? { ...f, asset_tag: '' } : f))
+      return
+    }
+    let cancelled = false
+    const t = window.setTimeout(() => {
+      hardwareApi
+        .nextTag({
+          company_id: companyId || undefined,
+          legal_entity_id: legalEntityId || undefined,
+          category_id: categoryId,
+        })
+        .then((r) => {
+          if (cancelled) return
+          const tag = String((r as { asset_tag?: string }).asset_tag || '')
+          setForm((f) => ({ ...f, asset_tag: tag }))
+        })
+        .catch(() => {
+          if (!cancelled) setForm((f) => ({ ...f, asset_tag: '' }))
+        })
+    }, 200)
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
+  }, [isEdit, form.company_id, form.legal_entity_id, form.category_id])
 
   useEffect(() => {
     if (!pendingImage) {
@@ -218,19 +287,25 @@ export default function AssetForm() {
 
   const submit = async () => {
     setError('')
-    if (!form.asset_tag || !form.model_id || !form.status_id) {
-      setError('Asset tag, model, and status are required')
+    if (!form.category_id || !form.model_id || !form.status_id) {
+      setError('Asset type, model, and status are required')
+      setTab('details')
+      return
+    }
+    if (!isEdit && !form.company_id && !form.legal_entity_id) {
+      setError('Company or legal entity is required to generate the asset tag')
       setTab('details')
       return
     }
     setBusy(true)
     try {
-      const body = {
-        asset_tag: form.asset_tag.trim(),
+      const body: Record<string, unknown> = {
         serial: form.serial || null,
+        category_id: form.category_id ? Number(form.category_id) : null,
         model_id: Number(form.model_id),
         status_id: Number(form.status_id),
         company_id: form.company_id ? Number(form.company_id) : null,
+        legal_entity_id: form.legal_entity_id ? Number(form.legal_entity_id) : null,
         department_id: form.department_id ? Number(form.department_id) : null,
         rtd_location_id: form.rtd_location_id ? Number(form.rtd_location_id) : null,
         location_id: form.rtd_location_id ? Number(form.rtd_location_id) : null,
@@ -241,6 +316,7 @@ export default function AssetForm() {
         warranty_months: form.warranty_months ? Number(form.warranty_months) : null,
         asset_eol_date: form.asset_eol_date || null,
         notes: form.notes || null,
+        old_asset_tag: form.old_asset_tag.trim() || null,
       }
 
       if (isEdit && id) {
@@ -323,20 +399,14 @@ export default function AssetForm() {
           submitLabel={busy ? 'Saving…' : isEdit ? 'Update' : 'Create'}
           submitDisabled={busy}
         >
-          <MasterSelect
-            label="Company"
+          <CompanyEntityFields
             required
-            value={form.company_id}
-            options={companies}
-            onChange={(v) => set('company_id', v)}
-            onOptionsChange={setCompanies}
-            allowEmpty={false}
-            emptyLabel="Select company…"
-            help="HRMS-synced or add a new company here / under Settings → Companies"
-            create={async (name) => {
-              const res = await mastersApi.createCompany({ name })
-              return masterPayloadId(res, name)
-            }}
+            companyId={form.company_id}
+            legalEntityId={form.legal_entity_id}
+            companies={companies}
+            onCompaniesChange={setCompanies}
+            onCompanyChange={(v) => set('company_id', v)}
+            onLegalEntityChange={(v) => set('legal_entity_id', v)}
           />
 
           <MasterSelect
@@ -375,14 +445,49 @@ export default function AssetForm() {
             }}
           />
 
-          <Field label="Asset Tag" required>
+          <MasterSelect
+            label="Asset type"
+            required
+            value={form.category_id}
+            options={assetTypes}
+            onChange={(v) => {
+              set('category_id', v)
+              set('model_id', '')
+            }}
+            onOptionsChange={setAssetTypes}
+            allowEmpty={false}
+            emptyLabel="Select type…"
+            help="Laptop, Desktop, Tablet, Mobile, Monitor, Printer, …"
+            create={async (name) => {
+              const res = await mastersApi.createCategory({ name, category_type: 'asset' })
+              return masterPayloadId(res, name)
+            }}
+          />
+
+          <Field label="Asset Tag">
             <input
               className="form-control"
-              value={form.asset_tag}
-              onChange={(e) => set('asset_tag', e.target.value)}
-              required
-              disabled={isEdit}
+              value={form.asset_tag || (isEdit ? '' : 'Select company & asset type…')}
+              readOnly
+              disabled
             />
+            <p className="help-block" style={{ marginBottom: 0 }}>
+              {isEdit
+                ? 'Auto-generated — not editable'
+                : 'Auto-generated from company/entity code + asset type + sequence (e.g. REFEX-LAPTOP-0001)'}
+            </p>
+          </Field>
+
+          <Field label="Old Asset Tag">
+            <input
+              className="form-control"
+              value={form.old_asset_tag}
+              onChange={(e) => set('old_asset_tag', e.target.value)}
+              placeholder="Previous / imported tag"
+            />
+            <p className="help-block" style={{ marginBottom: 0 }}>
+              Legacy tag from import or previous system (optional)
+            </p>
           </Field>
 
           <Field label="Serial">
@@ -397,10 +502,15 @@ export default function AssetForm() {
             onChange={(v) => set('model_id', v)}
             onOptionsChange={setModels}
             allowEmpty={false}
-            emptyLabel="Select model…"
-            help="Add a new asset model here, or manage under Masters → Asset Models"
+            emptyLabel={form.category_id ? 'Select model…' : 'Select asset type first…'}
+            disabled={!form.category_id}
+            help="Models for the selected asset type (or add a new model)"
             create={async (name) => {
-              const res = await mastersApi.createModel({ name })
+              if (!form.category_id) throw new Error('Select asset type first')
+              const res = await mastersApi.createModel({
+                name,
+                category_id: Number(form.category_id),
+              })
               return masterPayloadId(res, name)
             }}
           />

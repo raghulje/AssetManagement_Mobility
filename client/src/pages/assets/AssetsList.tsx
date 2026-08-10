@@ -32,6 +32,7 @@ function flattenAsset(a: Row): Row {
   return {
     id: a.id,
     asset_tag: a.asset_tag,
+    old_asset_tag: a.old_asset_tag,
     name: a.name,
     serial: a.serial,
     model: model?.name,
@@ -45,7 +46,7 @@ function flattenAsset(a: Row): Row {
   }
 }
 
-const LIST_COLUMNS = ['asset_tag', 'serial', 'model', 'status', 'assigned_to', 'location', 'company', 'actions']
+const LIST_COLUMNS = ['asset_tag', 'old_asset_tag', 'serial', 'model', 'status', 'assigned_to', 'location', 'company', 'actions']
 
 export default function AssetsList() {
   const [params] = useSearchParams()
@@ -155,6 +156,12 @@ export default function AssetsList() {
       render: (r) => (
         <Link to={`/hardware/${r.id}`} className="asset-tag-link">{String(r.asset_tag)}</Link>
       ),
+    },
+    {
+      key: 'old_asset_tag',
+      label: 'Old Asset Tag',
+      sortable: true,
+      render: (r) => cell(r.old_asset_tag),
     },
     { key: 'serial', label: 'Serial', sortable: true, render: (r) => cell(r.serial) },
     { key: 'model', label: 'Model', sortable: true, render: (r) => cell(r.model) },

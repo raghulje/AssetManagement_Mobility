@@ -18,11 +18,13 @@ function remainingSql(cfg: QtyConfig) {
 
 async function transform(cfg: QtyConfig, id: number) {
   const row = await get<Record<string, unknown>>(`
-    SELECT t.*, cat.name as category_name, co.name as company_name, loc.name as location_name,
+    SELECT t.*, cat.name as category_name, co.name as company_name, co.code as company_code,
+      le.code as legal_entity_code, loc.name as location_name,
       ${remainingSql(cfg)} as checked_out
     FROM ${cfg.table} t
     LEFT JOIN categories cat ON cat.id = t.category_id
     LEFT JOIN companies co ON co.id = t.company_id
+    LEFT JOIN legal_entities le ON le.id = t.legal_entity_id
     LEFT JOIN locations loc ON loc.id = t.location_id
     WHERE t.id = ? AND t.deleted_at IS NULL
   `, [id])
@@ -33,7 +35,10 @@ async function transform(cfg: QtyConfig, id: number) {
     id: row.id,
     name: row.name,
     category: nest(row.category_id as number, row.category_name as string),
-    company: nest(row.company_id as number, row.company_name as string),
+    company: nest(row.company_id as number, row.company_name as string, { code: row.company_code || null }),
+    legal_entity: nest(row.legal_entity_id as number, (row.legal_entity_code as string) || null, {
+      code: row.legal_entity_code || null,
+    }),
     location: nest(row.location_id as number, row.location_name as string),
     model_number: row.model_number,
     qty: row.qty,
@@ -87,10 +92,10 @@ function makeQtyRouter(cfg: QtyConfig) {
     if (!b.name) return fail(res, 'name required')
     const ts = now()
     const info = await run(`
-      INSERT INTO ${cfg.table} (name, category_id, company_id, location_id, model_number, qty, min_amt, purchase_cost, notes, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO ${cfg.table} (name, category_id, company_id, legal_entity_id, location_id, model_number, qty, min_amt, purchase_cost, notes, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
-      b.name, b.category_id || null, b.company_id || null, b.location_id || null,
+      b.name, b.category_id || null, b.company_id || null, b.legal_entity_id || null, b.location_id || null,
       b.model_number || null, b.qty || 1, b.min_amt || 0, b.purchase_cost || null, b.notes || null, ts, ts,
     ])
     const id = Number(info.insertId)
@@ -118,7 +123,7 @@ function makeQtyRouter(cfg: QtyConfig) {
     const id = Number(req.params.id)
     if (!(await transform(cfg, id))) return fail(res, 'Not found', 404)
     const b = req.body || {}
-    const fields = ['name', 'category_id', 'company_id', 'location_id', 'model_number', 'qty', 'min_amt', 'purchase_cost', 'notes'] as const
+    const fields = ['name', 'category_id', 'company_id', 'legal_entity_id', 'location_id', 'model_number', 'qty', 'min_amt', 'purchase_cost', 'notes'] as const
     const sets: string[] = []
     const vals: unknown[] = []
     for (const f of fields) {

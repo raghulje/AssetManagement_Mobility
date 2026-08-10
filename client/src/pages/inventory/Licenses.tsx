@@ -5,6 +5,7 @@ import { AppSelect, Box, DataTable, DateField, Field, PageForm } from '../../com
 // import { ModuleInsights } from '../../components/ModuleInsights' // restore with insight cards when needed
 import { DetailLayout, DetailPanel } from '../../components/DetailLayout'
 import { MasterSelect, masterPayloadId } from '../../components/MasterSelect'
+import { CompanyEntityFields } from '../../components/CompanyEntityFields'
 import {
   // dashboardApi, // restore with insight cards when needed
   hardwareApi,
@@ -39,6 +40,7 @@ type FormState = {
   seats: string
   manufacturer_id: string
   company_id: string
+  legal_entity_id: string
   category_id: string
   expiration_date: string
   purchase_date: string
@@ -52,6 +54,7 @@ const emptyForm: FormState = {
   seats: '1',
   manufacturer_id: '',
   company_id: '',
+  legal_entity_id: '',
   category_id: '',
   expiration_date: '',
   purchase_date: '',
@@ -369,6 +372,7 @@ export function LicenseForm() {
           seats: String(lic.seats ?? 1),
           manufacturer_id: nestId(lic.manufacturer),
           company_id: nestId(lic.company),
+          legal_entity_id: nestId(lic.legal_entity),
           category_id: nestId(lic.category),
           expiration_date: dateVal(lic.expiration_date),
           purchase_date: dateVal(lic.purchase_date),
@@ -389,6 +393,7 @@ export function LicenseForm() {
       seats: Number(form.seats) || 1,
       manufacturer_id: form.manufacturer_id ? Number(form.manufacturer_id) : null,
       company_id: form.company_id ? Number(form.company_id) : null,
+      legal_entity_id: form.legal_entity_id ? Number(form.legal_entity_id) : null,
       category_id: form.category_id ? Number(form.category_id) : null,
       expiration_date: form.expiration_date || null,
       purchase_date: form.purchase_date || null,
@@ -453,19 +458,14 @@ export function LicenseForm() {
           }}
         />
 
-        <MasterSelect
-          label="Company"
+        <CompanyEntityFields
           required
-          value={form.company_id}
-          options={companies}
-          onChange={(v) => set('company_id', v)}
-          onOptionsChange={setCompanies}
-          allowEmpty={false}
-          emptyLabel="Select company…"
-          create={async (name) => {
-            const res = await mastersApi.createCompany({ name })
-            return masterPayloadId(res, name)
-          }}
+          companyId={form.company_id}
+          legalEntityId={form.legal_entity_id}
+          companies={companies}
+          onCompaniesChange={setCompanies}
+          onCompanyChange={(v) => set('company_id', v)}
+          onLegalEntityChange={(v) => set('legal_entity_id', v)}
         />
 
         <MasterSelect

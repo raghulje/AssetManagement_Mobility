@@ -8,7 +8,8 @@ export async function transformAsset(id: number) {
       c.name as category_name, c.id as category_id,
       mf.name as manufacturer_name, mf.id as manufacturer_id,
       s.name as status_name, s.type as status_type, s.color as status_color,
-      co.name as company_name,
+      co.name as company_name, co.code as company_code,
+      le.code as legal_entity_code, le.name as legal_entity_name,
       dep.name as department_name,
       loc.name as location_name,
       rtd.name as rtd_location_name,
@@ -34,6 +35,7 @@ export async function transformAsset(id: number) {
     LEFT JOIN manufacturers mf ON mf.id = m.manufacturer_id
     LEFT JOIN status_labels s ON s.id = a.status_id
     LEFT JOIN companies co ON co.id = a.company_id
+    LEFT JOIN legal_entities le ON le.id = a.legal_entity_id
     LEFT JOIN departments dep ON dep.id = a.department_id
     LEFT JOIN locations loc ON loc.id = a.location_id
     LEFT JOIN locations rtd ON rtd.id = a.rtd_location_id
@@ -47,6 +49,7 @@ export async function transformAsset(id: number) {
     id: a.id,
     name: a.name,
     asset_tag: a.asset_tag,
+    old_asset_tag: a.old_asset_tag || null,
     serial: a.serial,
     model: nest(a.model_id as number, a.model_name as string),
     model_number: a.model_number,
@@ -59,7 +62,10 @@ export async function transformAsset(id: number) {
     }),
     category: nest(a.category_id as number, a.category_name as string),
     manufacturer: nest(a.manufacturer_id as number, a.manufacturer_name as string),
-    company: nest(a.company_id as number, a.company_name as string),
+    company: nest(a.company_id as number, a.company_name as string, { code: a.company_code || null }),
+    legal_entity: nest(a.legal_entity_id as number, (a.legal_entity_code as string) || null, {
+      code: a.legal_entity_code || null,
+    }),
     department: nest(a.department_id as number, a.department_name as string),
     location: nest(a.location_id as number, a.location_name as string),
     rtd_location: nest(a.rtd_location_id as number, a.rtd_location_name as string),
@@ -145,10 +151,13 @@ export async function transformUser(id: number, opts?: { includeDeleted?: boolea
 
 export async function transformLicense(id: number) {
   const l = await get<Record<string, unknown>>(`
-    SELECT l.*, c.name as company_name, m.name as manufacturer_name, cat.name as category_name,
+    SELECT l.*, c.name as company_name, c.code as company_code,
+      le.code as legal_entity_code,
+      m.name as manufacturer_name, cat.name as category_name,
       (SELECT COUNT(*) FROM license_seats WHERE license_id=l.id AND (assigned_to IS NOT NULL OR asset_id IS NOT NULL)) as used
     FROM licenses l
     LEFT JOIN companies c ON c.id = l.company_id
+    LEFT JOIN legal_entities le ON le.id = l.legal_entity_id
     LEFT JOIN manufacturers m ON m.id = l.manufacturer_id
     LEFT JOIN categories cat ON cat.id = l.category_id
     WHERE l.id = ? AND l.deleted_at IS NULL
@@ -163,7 +172,10 @@ export async function transformLicense(id: number) {
     seats,
     free_seats_count: seats - used,
     remaining: seats - used,
-    company: nest(l.company_id as number, l.company_name as string),
+    company: nest(l.company_id as number, l.company_name as string, { code: l.company_code || null }),
+    legal_entity: nest(l.legal_entity_id as number, (l.legal_entity_code as string) || null, {
+      code: l.legal_entity_code || null,
+    }),
     manufacturer: nest(l.manufacturer_id as number, l.manufacturer_name as string),
     category: nest(l.category_id as number, l.category_name as string),
     expiration_date: l.expiration_date ? { date: l.expiration_date, formatted: l.expiration_date } : null,

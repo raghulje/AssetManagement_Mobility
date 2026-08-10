@@ -51,10 +51,10 @@ router.post('/', async (req, res) => {
   const seats = Number(b.seats) || 1
   const ts = now()
   const info = await run(`
-    INSERT INTO licenses (name, serial, seats, company_id, manufacturer_id, category_id, expiration_date, purchase_cost, purchase_date, notes, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO licenses (name, serial, seats, company_id, legal_entity_id, manufacturer_id, category_id, expiration_date, purchase_cost, purchase_date, notes, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
-    b.name, b.product_key || b.serial || null, seats, b.company_id || null, b.manufacturer_id || null,
+    b.name, b.product_key || b.serial || null, seats, b.company_id || null, b.legal_entity_id || null, b.manufacturer_id || null,
     b.category_id || null, b.expiration_date || null, b.purchase_cost || null, b.purchase_date || null,
     b.notes || null, ts, ts,
   ])
@@ -91,7 +91,7 @@ router.put('/:id', async (req, res) => {
   if (!(await transformLicense(id))) return fail(res, 'License not found', 404)
   const b = req.body || {}
   const map: Record<string, unknown> = {}
-  for (const f of ['name', 'company_id', 'manufacturer_id', 'category_id', 'expiration_date', 'purchase_cost', 'purchase_date', 'notes'] as const) {
+  for (const f of ['name', 'company_id', 'legal_entity_id', 'manufacturer_id', 'category_id', 'expiration_date', 'purchase_cost', 'purchase_date', 'notes'] as const) {
     if (b[f] !== undefined) map[f] = b[f]
   }
   if (b.product_key !== undefined || b.serial !== undefined) map.serial = b.product_key ?? b.serial

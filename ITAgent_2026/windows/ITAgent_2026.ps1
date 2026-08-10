@@ -13,7 +13,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$apiBase = if ($env:REFEX_API_URL) { $env:REFEX_API_URL.TrimEnd('/') } else { 'http://10.5.7.225:3001/api/v1' }
+$apiBase = if ($env:REFEX_API_URL) { $env:REFEX_API_URL.TrimEnd('/') } else { 'http://localhost:3001/api/v1' }
 $agentKey = $env:REFEX_AGENT_KEY
 $assetTag = $env:REFEX_ASSET_TAG
 $stateDir = if ($env:REFEX_AGENT_STATE_DIR) { $env:REFEX_AGENT_STATE_DIR } else {
@@ -189,7 +189,7 @@ try {
   Write-Host " Asset tag: $tag" -ForegroundColor Green
   Write-Host " Asset id : $assetId" -ForegroundColor Green
   Write-Host " Matched  : $matchedBy" -ForegroundColor Green
-  Write-Host " Open     : http://10.5.7.225:3001/hardware/$assetId  (Agent tab)" -ForegroundColor Cyan
+  Write-Host " Open     : http://localhost:3001/hardware/$assetId  (Agent tab)" -ForegroundColor Cyan
   Write-Host " Message  : $($response.messages -join '; ')" -ForegroundColor Green
   Write-Host "========================================" -ForegroundColor Green
   Write-Host ""

@@ -11,7 +11,7 @@
 param(
   [ValidateSet('gui', 'install', 'uninstall', 'sync', 'service')]
   [string]$Mode = 'gui',
-  [string]$ApiUrl = $(if ($env:REFEX_API_URL) { $env:REFEX_API_URL } else { 'http://10.5.7.225:3001/api/v1' }),
+  [string]$ApiUrl = $(if ($env:REFEX_API_URL) { $env:REFEX_API_URL } else { 'http://localhost:3001/api/v1' }),
   [string]$AgentKey = $(if ($env:REFEX_AGENT_KEY) { $env:REFEX_AGENT_KEY } else { '' }),
   [string]$AssetTag = $(if ($env:REFEX_ASSET_TAG) { $env:REFEX_ASSET_TAG } else { '' }),
   [int]$PollMs = $(if ($env:REFEX_AGENT_POLL_MS) { [int]$env:REFEX_AGENT_POLL_MS } else { 30000 }),
