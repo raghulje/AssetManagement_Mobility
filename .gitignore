@@ -1,0 +1,47 @@
+# Dependencies & builds
+node_modules/
+dist/
+dist-ssr/
+build/
+.turbo/
+
+# Secrets & local env
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Runtime data / uploads
+server/data/
+**/private_uploads/
+**/storage/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Logs & OS
+logs/
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Binaries / installers (not source)
+*.exe
+*.msi
+*.SED
+
+# Local scratch / analysis
+_phase0_analysis.json
+
+# Local business / PII data dumps (keep out of git)
+Employee_List*.xlsx
+*.xlsx
+Invoice-*.pdf
+Receipt-*.pdf
+Sentinels_*.csv
+sample-user.csv

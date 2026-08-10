@@ -1,0 +1,698 @@
+import { Router } from 'express'
+import { all, get, run, now, limitSql } from '../db/index.js'
+import { fail, okItem, okList, okMessage } from '../utils/response.js'
+import { transformAsset } from '../services/transformers.js'
+import { logAction } from '../services/actionLog.js'
+
+const router = Router()
+
+function listIds(req: { query: Record<string, unknown> }) {
+  const statusType = String(req.query.status_type || req.query.status || '')
+  const search = String(req.query.search || req.query.q || '').trim()
+  const companyId = req.query.company_id ? Number(req.query.company_id) : null
+  const locationId = req.query.location_id ? Number(req.query.location_id) : null
+  const sort = String(req.query.sort || 'id').toLowerCase()
+  const order = String(req.query.order || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC'
+
+  let sql = `
+    SELECT a.id FROM assets a
+    LEFT JOIN status_labels s ON s.id = a.status_id
+    LEFT JOIN companies c ON c.id = a.company_id
+    LEFT JOIN locations loc ON loc.id = COALESCE(a.location_id, a.rtd_location_id)
+    LEFT JOIN models m ON m.id = a.model_id
+    WHERE a.deleted_at IS NULL
+  `
+  const params: unknown[] = []
+
+  if (statusType === 'Deployed' || statusType === 'Assigned') {
+    sql += ' AND a.assigned_to IS NOT NULL'
+  } else if (statusType === 'RTD' || statusType === 'ReadyToAssign') {
+    sql += " AND a.assigned_to IS NULL AND s.type = 'deployable'"
+  } else if (statusType === 'Pending') {
+    sql += " AND s.type = 'pending'"
+  } else if (statusType === 'Undeployable' || statusType === 'NotAssignable') {
+    sql += " AND s.type = 'undeployable'"
+  } else if (statusType === 'Archived') {
+    sql += " AND s.type = 'archived'"
+  } else if (statusType === 'Requestable') {
+    sql += ' AND a.requestable = 1'
+  } else if (statusType === 'byod') {
+    sql += ' AND a.byod = 1'
+  } else if (statusType === 'Deleted') {
+    sql = `
+      SELECT a.id FROM assets a
+      LEFT JOIN status_labels s ON s.id = a.status_id
+      LEFT JOIN companies c ON c.id = a.company_id
+      LEFT JOIN locations loc ON loc.id = COALESCE(a.location_id, a.rtd_location_id)
+      LEFT JOIN models m ON m.id = a.model_id
+      WHERE a.deleted_at IS NOT NULL
+    `
+  }
+
+  if (companyId) {
+    sql += ' AND a.company_id = ?'
+    params.push(companyId)
+  }
+
+  if (locationId) {
+    sql += ' AND (a.location_id = ? OR a.rtd_location_id = ?)'
+    params.push(locationId, locationId)
+  }
+
+  const statusId = req.query.status_id ? Number(req.query.status_id) : null
+  if (statusId) {
+    sql += ' AND a.status_id = ?'
+    params.push(statusId)
+  }
+
+  // Column filter by displayed Status value (Assigned | status label name)
+  const statusValue = String(req.query.status_value || '').trim()
+  if (statusValue === 'Assigned') {
+    sql += ' AND a.assigned_to IS NOT NULL'
+  } else if (statusValue) {
+    sql += ' AND a.assigned_to IS NULL AND s.name = ?'
+    params.push(statusValue)
+  }
+
+  // Column filter: assigned=1 | assigned=0 | assigned_to + assigned_type | assigned_name
+  const assignedFlag = String(req.query.assigned || '').toLowerCase()
+  if (assignedFlag === '1' || assignedFlag === 'yes' || assignedFlag === 'assigned') {
+    sql += ' AND a.assigned_to IS NOT NULL'
+  } else if (assignedFlag === '0' || assignedFlag === 'no' || assignedFlag === 'unassigned' || assignedFlag === 'none') {
+    sql += ' AND a.assigned_to IS NULL'
+  }
+  const assignedTo = req.query.assigned_to ? Number(req.query.assigned_to) : null
+  if (assignedTo) {
+    const assignedType = String(req.query.assigned_type || 'employee')
+    sql += ' AND a.assigned_to = ? AND a.assigned_type = ?'
+    params.push(assignedTo, assignedType)
+  }
+  const assignedName = String(req.query.assigned_name || '').trim()
+  if (assignedName === '—' || assignedName.toLowerCase() === 'unassigned') {
+    sql += ' AND a.assigned_to IS NULL'
+  } else if (assignedName) {
+    sql += ` AND a.assigned_to IS NOT NULL AND (
+      (a.assigned_type = 'employee' AND (
+        SELECT CONCAT(first_name, ' ', last_name, ' (', employee_code, ')') FROM employees WHERE id = a.assigned_to
+      ) = ?)
+      OR (a.assigned_type = 'user' AND (
+        SELECT CONCAT(first_name, ' ', last_name) FROM users WHERE id = a.assigned_to
+      ) = ?)
+      OR (a.assigned_type = 'location' AND (
+        SELECT name FROM locations WHERE id = a.assigned_to
+      ) = ?)
+      OR (a.assigned_type = 'asset' AND (
+        SELECT asset_tag FROM assets WHERE id = a.assigned_to
+      ) = ?)
+    )`
+    params.push(assignedName, assignedName, assignedName, assignedName)
+  }
+
+  if (search) {
+    sql += ` AND (
+      a.asset_tag LIKE ? OR a.name LIKE ? OR a.serial LIKE ? OR CAST(a.id AS CHAR) = ?
+      OR m.name LIKE ? OR c.name LIKE ? OR loc.name LIKE ?
+    )`
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`, search, `%${search}%`, `%${search}%`, `%${search}%`)
+  }
+
+  if (req.query.order_number) {
+    sql += ' AND a.order_number = ?'
+    params.push(req.query.order_number)
+  }
+
+  const sortMap: Record<string, string> = {
+    id: 'a.id',
+    asset_tag: 'a.asset_tag',
+    name: 'a.name',
+    serial: 'a.serial',
+    model: 'm.name',
+    status: 's.name',
+    company: 'c.name',
+    location: 'loc.name',
+    purchase_date: 'a.purchase_date',
+    created_at: 'a.created_at',
+  }
+  const sortCol = sortMap[sort] || 'a.id'
+  sql += ` ORDER BY ${sortCol} ${order}, a.id DESC`
+  return { sql, params }
+}
+
+router.get('/', async (req, res) => {
+  const { sql, params } = listIds(req)
+  const limit = Math.min(Number(req.query.limit) || 50, 500)
+  const offset = Number(req.query.offset) || 0
+  const totalRow = await get<{ c: number }>(`SELECT COUNT(*) as c FROM (${sql}) AS _count_q`, params)
+  const total = Number(totalRow?.c || 0)
+  const ids = await all<{ id: number }>(`${sql} ${limitSql(limit, offset)}`, params)
+  const rows = (await Promise.all(ids.map((r) => transformAsset(r.id)))).filter(Boolean)
+  return okList(res, rows, total)
+})
+
+/** Distinct Status / Assigned To values as shown in the assets list columns. */
+router.get('/facets', async (req, res) => {
+  const companyId = req.query.company_id ? Number(req.query.company_id) : null
+  const locationId = req.query.location_id ? Number(req.query.location_id) : null
+  const search = String(req.query.search || req.query.q || '').trim()
+  const statusType = String(req.query.status_type || req.query.status || '')
+
+  let where = 'a.deleted_at IS NULL'
+  const params: unknown[] = []
+  if (statusType === 'Deployed' || statusType === 'Assigned') {
+    where += ' AND a.assigned_to IS NOT NULL'
+  } else if (statusType === 'RTD' || statusType === 'ReadyToAssign') {
+    where += " AND a.assigned_to IS NULL AND s.type = 'deployable'"
+  } else if (statusType === 'Pending') {
+    where += " AND s.type = 'pending'"
+  } else if (statusType === 'Deleted') {
+    where = 'a.deleted_at IS NOT NULL'
+  }
+  if (companyId) {
+    where += ' AND a.company_id = ?'
+    params.push(companyId)
+  }
+  if (locationId) {
+    where += ' AND (a.location_id = ? OR a.rtd_location_id = ?)'
+    params.push(locationId, locationId)
+  }
+  if (search) {
+    where += ` AND (
+      a.asset_tag LIKE ? OR a.name LIKE ? OR a.serial LIKE ?
+      OR m.name LIKE ? OR c.name LIKE ? OR loc.name LIKE ?
+    )`
+    const like = `%${search}%`
+    params.push(like, like, like, like, like, like)
+  }
+
+  const statusRows = await all<{ value: string }>(`
+    SELECT DISTINCT
+      CASE
+        WHEN a.assigned_to IS NOT NULL THEN 'Assigned'
+        ELSE COALESCE(NULLIF(TRIM(s.name), ''), 'Unknown')
+      END AS value
+    FROM assets a
+    LEFT JOIN status_labels s ON s.id = a.status_id
+    LEFT JOIN companies c ON c.id = a.company_id
+    LEFT JOIN locations loc ON loc.id = COALESCE(a.location_id, a.rtd_location_id)
+    LEFT JOIN models m ON m.id = a.model_id
+    WHERE ${where}
+    ORDER BY value ASC
+  `, params)
+
+  const assigneeRows = await all<{ value: string }>(`
+    SELECT DISTINCT TRIM(assignee) AS value FROM (
+      SELECT
+        CASE
+          WHEN a.assigned_to IS NULL THEN 'Unassigned'
+          WHEN a.assigned_type = 'employee' THEN (
+            SELECT CONCAT(first_name, ' ', last_name, ' (', employee_code, ')') FROM employees WHERE id = a.assigned_to
+          )
+          WHEN a.assigned_type = 'user' THEN (
+            SELECT CONCAT(first_name, ' ', last_name) FROM users WHERE id = a.assigned_to
+          )
+          WHEN a.assigned_type = 'location' THEN (
+            SELECT name FROM locations WHERE id = a.assigned_to
+          )
+          WHEN a.assigned_type = 'asset' THEN (
+            SELECT asset_tag FROM assets WHERE id = a.assigned_to
+          )
+          ELSE CONCAT('Assignee #', a.assigned_to)
+        END AS assignee
+      FROM assets a
+      LEFT JOIN status_labels s ON s.id = a.status_id
+      LEFT JOIN companies c ON c.id = a.company_id
+      LEFT JOIN locations loc ON loc.id = COALESCE(a.location_id, a.rtd_location_id)
+      LEFT JOIN models m ON m.id = a.model_id
+      WHERE ${where}
+    ) t
+    WHERE assignee IS NOT NULL AND TRIM(assignee) <> ''
+    ORDER BY
+      CASE WHEN value = 'Unassigned' THEN 0 ELSE 1 END,
+      value ASC
+  `, params)
+
+  return okItem(res, {
+    statuses: statusRows.map((r) => String(r.value)).filter(Boolean),
+    assignees: assigneeRows.map((r) => String(r.value)).filter(Boolean),
+  })
+})
+
+router.get('/selectlist', async (req, res) => {
+  const q = String(req.query.search || '').trim()
+  let sql = `SELECT id, CONCAT(asset_tag, ' - ', COALESCE(name, '')) as text FROM assets WHERE deleted_at IS NULL`
+  const params: unknown[] = []
+  if (q) {
+    sql += ' AND (asset_tag LIKE ? OR name LIKE ?)'
+    params.push(`%${q}%`, `%${q}%`)
+  }
+  if (req.query.companyId) {
+    sql += ' AND company_id = ?'
+    params.push(Number(req.query.companyId))
+  }
+  const results = await all(sql + ' ORDER BY id DESC LIMIT 50', params)
+  return res.json({ results, pagination: { more: false } })
+})
+
+router.get('/bytag/:tag', async (req, res) => {
+  const row = await get<{ id: number }>(`SELECT id FROM assets WHERE asset_tag = ? AND deleted_at IS NULL`, [req.params.tag])
+  if (!row) return fail(res, 'Asset not found', 404)
+  return okItem(res, await transformAsset(row.id))
+})
+
+router.get('/byserial/:serial', async (req, res) => {
+  const row = await get<{ id: number }>(`SELECT id FROM assets WHERE serial = ? AND deleted_at IS NULL`, [req.params.serial])
+  if (!row) return fail(res, 'Asset not found', 404)
+  return okItem(res, await transformAsset(row.id))
+})
+
+router.get('/audit/due', async (_req, res) => {
+  const ids = await all<{ id: number }>(`
+    SELECT id FROM assets
+    WHERE deleted_at IS NULL AND next_audit_date IS NOT NULL
+      AND DATE(next_audit_date) <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+    ORDER BY next_audit_date ASC
+  `)
+  const rows = (await Promise.all(ids.map((r) => transformAsset(r.id)))).filter(Boolean)
+  return okList(res, rows)
+})
+
+router.get('/checkins/due', async (_req, res) => {
+  const ids = await all<{ id: number }>(`
+    SELECT id FROM assets
+    WHERE deleted_at IS NULL AND expected_checkin IS NOT NULL AND assigned_to IS NOT NULL
+    ORDER BY expected_checkin ASC
+  `)
+  const rows = (await Promise.all(ids.map((r) => transformAsset(r.id)))).filter(Boolean)
+  return okList(res, rows)
+})
+
+router.get('/eol/due', async (_req, res) => {
+  const { listEolDueAssets } = await import('../services/eolAlerts.js')
+  const rows = await listEolDueAssets()
+  return okList(res, rows)
+})
+
+router.get('/:id', async (req, res) => {
+  const asset = await transformAsset(Number(req.params.id))
+  if (!asset) return fail(res, 'Asset not found', 404)
+  return okItem(res, asset)
+})
+
+router.get('/:id/history', async (req, res) => {
+  const rows = await all(`
+    SELECT al.*, u.username as admin,
+      CASE
+        WHEN al.target_type = 'user' THEN (SELECT CONCAT(first_name, ' ', last_name) FROM users WHERE id = al.target_id)
+        WHEN al.target_type = 'employee' THEN (
+          SELECT TRIM(CONCAT(COALESCE(first_name,''), ' ', COALESCE(last_name,''))) FROM employees WHERE id = al.target_id
+        )
+        WHEN al.target_type = 'location' THEN (SELECT name FROM locations WHERE id = al.target_id)
+        WHEN al.target_type = 'asset' THEN (SELECT asset_tag FROM assets WHERE id = al.target_id)
+        ELSE CAST(al.target_id AS CHAR)
+      END as target_name
+    FROM action_logs al
+    LEFT JOIN users u ON u.id = al.user_id
+    WHERE al.item_type = 'asset' AND al.item_id = ? AND al.deleted_at IS NULL
+    ORDER BY al.action_date DESC, al.id DESC
+  `, [req.params.id])
+  return okList(res, rows)
+})
+
+/** ITAgent status for this asset (session auth) */
+router.get('/:id/agent', async (req, res) => {
+  const id = Number(req.params.id)
+  const asset = await get(`SELECT id FROM assets WHERE id = ? AND deleted_at IS NULL`, [id])
+  if (!asset) return fail(res, 'Asset not found', 404)
+  const { getAssetAgentStatus } = await import('../services/agentControl.js')
+  return okItem(res, await getAssetAgentStatus(id))
+})
+
+/** Queue remote inventory scan — agent picks up on next heartbeat */
+router.post('/:id/agent/scan', async (req, res) => {
+  const id = Number(req.params.id)
+  const asset = await get(`SELECT id FROM assets WHERE id = ? AND deleted_at IS NULL`, [id])
+  if (!asset) return fail(res, 'Asset not found', 404)
+  const { enqueueScanCommand } = await import('../services/agentControl.js')
+  const result = await enqueueScanCommand({
+    assetId: id,
+    requestedBy: req.user?.id || null,
+    command: String((req.body || {}).command || 'scan') === 'rerun' ? 'rerun' : 'scan',
+  })
+  if (!result.ok) return fail(res, result.error, 404)
+  return okMessage(res, result.message, result)
+})
+
+/** Agent snapshot history (session auth) */
+router.get('/:id/agent/snapshots', async (req, res) => {
+  const id = Number(req.params.id)
+  const asset = await get(`SELECT id FROM assets WHERE id = ? AND deleted_at IS NULL`, [id])
+  if (!asset) return fail(res, 'Asset not found', 404)
+  const limit = Math.min(Number(req.query.limit) || 20, 100)
+  const rows = await all(`
+    SELECT id, asset_id, serial_number, hostname, platform, matched_by, created_at, payload
+    FROM asset_agent_snapshots WHERE asset_id = ?
+    ORDER BY id DESC LIMIT ${limit}
+  `, [id])
+  return okList(res, rows)
+})
+
+function custodyReason(b: Record<string, unknown>): string | null {
+  const raw = b.reason ?? b.note ?? b.notes
+  if (raw == null) return null
+  const s = String(raw).trim()
+  return s || null
+}
+
+router.post('/', async (req, res) => {
+  const b = req.body || {}
+  if (!b.asset_tag || !b.model_id || !b.status_id) {
+    return fail(res, 'asset_tag, model_id, and status_id are required')
+  }
+  const exists = await get(`SELECT id FROM assets WHERE asset_tag = ?`, [b.asset_tag])
+  if (exists) return fail(res, 'Asset tag already exists')
+
+  const ts = now()
+  const info = await run(`
+    INSERT INTO assets (
+      asset_tag, name, serial, model_id, status_id, company_id, department_id, supplier_id,
+      location_id, rtd_location_id, purchase_date, purchase_cost, order_number,
+      warranty_months, asset_eol_date, notes, requestable, byod, next_audit_date, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [
+    b.asset_tag, b.name || null, b.serial || null, b.model_id, b.status_id,
+    b.company_id || null, b.department_id || null, b.supplier_id || null, b.location_id || b.rtd_location_id || null,
+    b.rtd_location_id || null, b.purchase_date || null, b.purchase_cost || null,
+    b.order_number || null, b.warranty_months || null, b.asset_eol_date || null, b.notes || null,
+    b.requestable ? 1 : 0, b.byod ? 1 : 0, b.next_audit_date || null, ts, ts,
+  ])
+  const id = Number(info.insertId)
+  await logAction({ userId: req.user?.id, actionType: 'create', itemType: 'asset', itemId: id })
+  return okMessage(res, 'Asset created successfully', await transformAsset(id), 201)
+})
+
+router.put('/:id', (req, res) => updateAsset(req, res))
+router.patch('/:id', (req, res) => updateAsset(req, res))
+
+async function updateAsset(req: import('express').Request, res: import('express').Response) {
+  const id = Number(req.params.id)
+  if (!(await transformAsset(id))) return fail(res, 'Asset not found', 404)
+  const b = req.body || {}
+  const fields = [
+    'name', 'serial', 'model_id', 'status_id', 'company_id', 'department_id', 'supplier_id',
+    'location_id', 'rtd_location_id', 'purchase_date', 'purchase_cost',
+    'order_number', 'warranty_months', 'asset_eol_date', 'notes', 'requestable', 'byod',
+    'asset_tag', 'expected_checkin', 'next_audit_date',
+  ] as const
+  const sets: string[] = []
+  const vals: unknown[] = []
+  for (const f of fields) {
+    if (b[f] !== undefined) {
+      sets.push(`${f} = ?`)
+      vals.push(typeof b[f] === 'boolean' ? (b[f] ? 1 : 0) : b[f])
+    }
+  }
+  if (!sets.length) return fail(res, 'No valid fields')
+  vals.push(now(), id)
+  await run(`UPDATE assets SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`, vals)
+  await logAction({ userId: req.user?.id, actionType: 'update', itemType: 'asset', itemId: id })
+  return okMessage(res, 'Asset updated successfully', await transformAsset(id))
+}
+
+router.delete('/:id', async (req, res) => {
+  const id = Number(req.params.id)
+  if (!(await transformAsset(id))) return fail(res, 'Asset not found', 404)
+  await run(`UPDATE assets SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now(), now(), id])
+  await logAction({ userId: req.user?.id, actionType: 'delete', itemType: 'asset', itemId: id })
+  return okMessage(res, 'Asset deleted successfully')
+})
+
+router.post('/:id/checkout', async (req, res) => {
+  const id = Number(req.params.id)
+  const asset = await get<Record<string, unknown>>(`SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL`, [id])
+  if (!asset) return fail(res, 'Asset not found', 404)
+  if (asset.assigned_to) {
+    return fail(res, 'Asset is already assigned. Unassign it before assigning to someone else.', 409)
+  }
+  const statusRow = await get<{ type?: string }>(
+    `SELECT type FROM status_labels WHERE id = ?`,
+    [asset.status_id],
+  )
+  if (statusRow && statusRow.type !== 'deployable') {
+    return fail(res, 'Only in-stock (ready to assign) assets can be assigned', 422)
+  }
+  const b = req.body || {}
+  const reason = custodyReason(b)
+  const checkoutToType = b.checkout_to_type || b.assigned_type || 'user'
+  const assignedTo = Number(
+    b.assigned_employee || b.assigned_user || b.assigned_location || b.assigned_asset || b.assigned_to,
+  )
+  if (!assignedTo) return fail(res, 'Assign target is required')
+  if (checkoutToType === 'employee') {
+    const emp = await get(`SELECT id FROM employees WHERE id = ? AND deleted_at IS NULL`, [assignedTo])
+    if (!emp) return fail(res, 'Employee not found', 404)
+  }
+
+  const statusId = b.status_id || asset.status_id
+  const ts = now()
+  await run(`
+    UPDATE assets SET
+      assigned_to = ?, assigned_type = ?, status_id = ?,
+      expected_checkin = ?, last_checkout = ?,
+      location_id = CASE WHEN ? = 'location' THEN ? ELSE location_id END,
+      checkout_counter = checkout_counter + 1, updated_at = ?
+    WHERE id = ?
+  `, [
+    assignedTo, checkoutToType, statusId,
+    b.expected_checkin || null, ts,
+    checkoutToType, checkoutToType === 'location' ? assignedTo : null,
+    ts, id,
+  ])
+
+  await logAction({
+    userId: req.user?.id,
+    actionType: 'checkout',
+    itemType: 'asset',
+    itemId: id,
+    targetType: checkoutToType,
+    targetId: assignedTo,
+    note: reason,
+  })
+
+  if (checkoutToType === 'user') {
+    const needs = await get<{ require_acceptance: number }>(`
+      SELECT c.require_acceptance FROM assets a
+      JOIN models m ON m.id = a.model_id
+      JOIN categories c ON c.id = m.category_id
+      WHERE a.id = ?
+    `, [id])
+    if (needs?.require_acceptance) {
+      await run(`
+        INSERT INTO checkout_acceptances (checkoutable_id, checkoutable_type, assigned_to, created_at, updated_at)
+        VALUES (?, 'asset', ?, ?, ?)
+      `, [id, assignedTo, ts, ts])
+    }
+  }
+
+  return okMessage(res, 'Asset assigned successfully', await transformAsset(id))
+})
+
+router.post('/:id/checkin', async (req, res) => {
+  const id = Number(req.params.id)
+  const asset = await get<Record<string, unknown>>(`SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL`, [id])
+  if (!asset) return fail(res, 'Asset not found', 404)
+  if (!asset.assigned_to) return fail(res, 'Asset is not assigned')
+
+  const b = req.body || {}
+  const reason = custodyReason(b)
+  if (!reason) return fail(res, 'Reason is required to unassign')
+
+  const prevTarget = Number(asset.assigned_to)
+  const prevType = String(asset.assigned_type)
+  const statusId = b.status_id || asset.status_id
+  const locationId = b.location_id || asset.rtd_location_id || asset.location_id
+  const ts = now()
+
+  await run(`
+    UPDATE assets SET
+      assigned_to = NULL, assigned_type = NULL, status_id = ?,
+      location_id = ?, expected_checkin = NULL, last_checkin = ?,
+      checkin_counter = checkin_counter + 1, updated_at = ?
+    WHERE id = ?
+  `, [statusId, locationId, ts, ts, id])
+
+  if (b.checkin_licenses !== false) {
+    await run(`UPDATE license_seats SET asset_id = NULL, updated_at = ? WHERE asset_id = ?`, [ts, id])
+  }
+
+  await logAction({
+    userId: req.user?.id,
+    actionType: 'checkin',
+    itemType: 'asset',
+    itemId: id,
+    targetType: prevType,
+    targetId: prevTarget,
+    locationId: locationId ? Number(locationId) : null,
+    note: reason,
+  })
+
+  return okMessage(res, 'Asset unassigned successfully', await transformAsset(id))
+})
+
+/** Replace assigned asset with another (checkin old + checkout new) for the same employee. */
+router.post('/:id/replace', async (req, res) => {
+  const oldId = Number(req.params.id)
+  const b = req.body || {}
+  const newId = Number(b.new_asset_id)
+  const reason = custodyReason(b)
+  if (!newId) return fail(res, 'new_asset_id is required')
+  if (!reason) return fail(res, 'Reason is required to replace an asset')
+  if (newId === oldId) return fail(res, 'Replacement asset must be different')
+
+  const oldAsset = await get<Record<string, unknown>>(`SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL`, [oldId])
+  if (!oldAsset) return fail(res, 'Current asset not found', 404)
+  if (!oldAsset.assigned_to || String(oldAsset.assigned_type) !== 'employee') {
+    return fail(res, 'Current asset must be assigned to an employee')
+  }
+  const employeeId = Number(oldAsset.assigned_to)
+
+  const newAsset = await get<Record<string, unknown>>(`SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL`, [newId])
+  if (!newAsset) return fail(res, 'Replacement asset not found', 404)
+  if (newAsset.assigned_to) return fail(res, 'Replacement asset is already assigned')
+
+  const deployable = await get<{ type: string }>(`
+    SELECT type FROM status_labels WHERE id = ?
+  `, [newAsset.status_id])
+  if (deployable && String(deployable.type) !== 'deployable') {
+    return fail(res, 'Replacement asset must be in a deployable (In Stock) status')
+  }
+
+  const ts = now()
+  const locationId = oldAsset.rtd_location_id || oldAsset.location_id || newAsset.location_id
+  const statusId = oldAsset.status_id
+
+  const { withTransaction } = await import('../db/index.js')
+  await withTransaction(async (conn) => {
+    await conn.query(`
+      UPDATE assets SET
+        assigned_to = NULL, assigned_type = NULL, status_id = ?,
+        location_id = COALESCE(?, location_id), expected_checkin = NULL, last_checkin = ?,
+        checkin_counter = checkin_counter + 1, updated_at = ?
+      WHERE id = ?
+    `, [statusId, locationId, ts, ts, oldId])
+
+    await conn.query(`
+      UPDATE license_seats SET asset_id = NULL, updated_at = ? WHERE asset_id = ?
+    `, [ts, oldId])
+
+    await conn.query(`
+      INSERT INTO action_logs (
+        user_id, action_type, target_id, target_type, item_id, item_type,
+        location_id, note, log_meta, action_date, created_at, updated_at
+      ) VALUES (?, 'replace_out', ?, 'employee', ?, 'asset', ?, ?, ?, ?, ?, ?)
+    `, [
+      req.user?.id ?? null, employeeId, oldId,
+      locationId ? Number(locationId) : null, reason,
+      JSON.stringify({ new_asset_id: newId }),
+      ts, ts, ts,
+    ])
+
+    await conn.query(`
+      UPDATE assets SET
+        assigned_to = ?, assigned_type = 'employee', last_checkout = ?,
+        checkout_counter = checkout_counter + 1, updated_at = ?
+      WHERE id = ?
+    `, [employeeId, ts, ts, newId])
+
+    await conn.query(`
+      INSERT INTO action_logs (
+        user_id, action_type, target_id, target_type, item_id, item_type,
+        location_id, note, log_meta, action_date, created_at, updated_at
+      ) VALUES (?, 'replace_in', ?, 'employee', ?, 'asset', NULL, ?, ?, ?, ?, ?)
+    `, [
+      req.user?.id ?? null, employeeId, newId, reason,
+      JSON.stringify({ old_asset_id: oldId }),
+      ts, ts, ts,
+    ])
+  })
+
+  return okMessage(res, 'Asset replaced successfully', {
+    previous: await transformAsset(oldId),
+    current: await transformAsset(newId),
+  })
+})
+
+router.post('/:id/audit', async (req, res) => {
+  const id = Number(req.params.id)
+  if (!(await transformAsset(id))) return fail(res, 'Asset not found', 404)
+  const b = req.body || {}
+  const ts = now()
+  await run(`
+    UPDATE assets SET
+      last_audit_date = ?, next_audit_date = COALESCE(?, next_audit_date),
+      location_id = COALESCE(?, location_id), updated_at = ?
+    WHERE id = ?
+  `, [ts, b.next_audit_date || null, b.location_id || null, ts, id])
+
+  await logAction({
+    userId: req.user?.id,
+    actionType: 'audit',
+    itemType: 'asset',
+    itemId: id,
+    locationId: b.location_id ? Number(b.location_id) : null,
+    note: b.note || b.notes || null,
+  })
+  return okMessage(res, 'Asset audited successfully', await transformAsset(id))
+})
+
+router.post('/audit', async (req, res) => {
+  const tag = req.body?.asset_tag
+  if (!tag) return fail(res, 'asset_tag required')
+  const row = await get<{ id: number }>(`SELECT id FROM assets WHERE asset_tag = ? AND deleted_at IS NULL`, [tag])
+  if (!row) return fail(res, 'Asset not found', 404)
+  const b = req.body || {}
+  const ts = now()
+  await run(`
+    UPDATE assets SET last_audit_date = ?, next_audit_date = COALESCE(?, next_audit_date),
+      location_id = COALESCE(?, location_id), updated_at = ?
+    WHERE id = ?
+  `, [ts, b.next_audit_date || null, b.location_id || null, ts, row.id])
+  await logAction({ userId: req.user?.id, actionType: 'audit', itemType: 'asset', itemId: row.id, note: b.note || null })
+  return okMessage(res, 'Asset audited successfully', await transformAsset(row.id))
+})
+
+router.post('/checkinbytag', async (req, res) => {
+  const tag = req.body?.asset_tag
+  if (!tag) return fail(res, 'asset_tag required')
+  const row = await get<{ id: number }>(`SELECT id FROM assets WHERE asset_tag = ? AND deleted_at IS NULL`, [tag])
+  if (!row) return fail(res, 'Asset not found', 404)
+  const asset = await get<Record<string, unknown>>(`SELECT * FROM assets WHERE id = ?`, [row.id])
+  if (!asset?.assigned_to) return fail(res, 'Asset is not assigned')
+  const b = req.body || {}
+  const reason = custodyReason(b) || 'Quickscan unassign'
+  const prevTarget = Number(asset.assigned_to)
+  const prevType = String(asset.assigned_type || '')
+  const ts = now()
+  await run(`
+    UPDATE assets SET assigned_to = NULL, assigned_type = NULL, last_checkin = ?,
+      location_id = COALESCE(?, location_id), checkin_counter = checkin_counter + 1, updated_at = ?
+    WHERE id = ?
+  `, [ts, b.location_id || asset.rtd_location_id, ts, row.id])
+  await logAction({
+    userId: req.user?.id,
+    actionType: 'checkin',
+    itemType: 'asset',
+    itemId: row.id,
+    targetType: prevType || null,
+    targetId: prevTarget || null,
+    note: reason,
+  })
+  return okMessage(res, 'Asset unassigned successfully', await transformAsset(row.id))
+})
+
+router.post('/:id/restore', async (req, res) => {
+  await run(`UPDATE assets SET deleted_at = NULL, updated_at = ? WHERE id = ?`, [now(), req.params.id])
+  await logAction({ userId: req.user?.id, actionType: 'restore', itemType: 'asset', itemId: Number(req.params.id) })
+  return okMessage(res, 'Asset restored', await transformAsset(Number(req.params.id)))
+})
+
+export default router
