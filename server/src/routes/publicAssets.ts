@@ -2,7 +2,6 @@ import { Router } from 'express'
 import { get } from '../db/index.js'
 import { fail, okItem } from '../utils/response.js'
 import { ensureAssetQr, publicAssetPageUrl } from '../services/assetQr.js'
-import { publicUrl } from '../services/uploads.js'
 
 const router = Router()
 
@@ -95,7 +94,9 @@ router.get('/assets/:token', async (req, res) => {
   if (!asset) return fail(res, 'Asset not found', 404)
 
   const qrToken = String(asset.qr_token || token)
-  const imagePath = asset.qr_image_path ? publicUrl(String(asset.qr_image_path)) : null
+  const imagePath = asset.qr_image_path
+    ? `/storage/${String(asset.qr_image_path).replace(/\\/g, '/').replace(/^public\//, '')}`
+    : null
 
   return okItem(res, {
     id: asset.id,

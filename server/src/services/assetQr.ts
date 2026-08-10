@@ -3,18 +3,33 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import QRCode from 'qrcode'
 import { get, run, now } from '../db/index.js'
-import { storageRoot, publicUrl } from './uploads.js'
+import { storageRoot } from './uploads.js'
 
 const QR_DIR = path.join(storageRoot, 'public/assets/qr')
 
-function clientBase() {
-  // Prefer PUBLIC_APP_URL / FRONTEND_URL (mapped domain in production). CLIENT_ORIGIN may be a list.
+/**
+ * Browser-facing origin for QR / email links.
+ * Must be the proxied HTTPS domain — never container PORT (e.g. :3053).
+ * Example: https://asset.refexone.com  (not https://asset.refexone.com:3053)
+ */
+export function clientBase() {
   const fromEnv = (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || '').trim()
-  if (fromEnv) return fromEnv.replace(/\/$/, '')
-  const firstOrigin = String(process.env.CLIENT_ORIGIN || 'http://localhost:3001')
-    .split(',')[0]
-    .trim()
-  return firstOrigin.replace(/\/$/, '')
+  let base = fromEnv
+    || String(process.env.CLIENT_ORIGIN || 'http://localhost:3001').split(',')[0].trim()
+  base = base.replace(/\/$/, '')
+
+  const listenPort = String(process.env.PORT || '').trim()
+  try {
+    const u = new URL(base)
+    // Drop mistaken ":3053" (or whatever PORT) — TLS proxy serves on 443 / default
+    if (listenPort && u.port === listenPort) u.port = ''
+    // Prefer https public links when FORCE_HTTPS is on
+    if (process.env.FORCE_HTTPS === 'true' && u.protocol === 'http:') u.protocol = 'https:'
+    base = u.toString().replace(/\/$/, '')
+  } catch {
+    /* keep as-is */
+  }
+  return base
 }
 
 export function publicAssetPageUrl(token: string) {
@@ -26,7 +41,8 @@ function qrDiskPath(token: string) {
 }
 
 function qrPublicPath(token: string) {
-  return publicUrl(`public/assets/qr/${token}.png`)
+  // Served via app.use('/storage', static(storage/public)) → /storage/assets/qr/<token>.png
+  return `/storage/assets/qr/${token}.png`
 }
 
 async function ensureDir() {
@@ -89,7 +105,7 @@ export async function ensureAssetQr(assetId: number, opts?: { refreshImage?: boo
     fs.writeFileSync(urlSidecar, pageUrl, 'utf8')
   }
 
-  // Keep qr_url pointing at the public page (scan target), not the PNG
+  // Always sync qr_url to current PUBLIC_APP_URL (fixes old …:3053/asset/… rows)
   if (asset.qr_url !== pageUrl || !asset.qr_image_path) {
     await run(`
       UPDATE assets SET qr_url = ?, qr_image_path = COALESCE(qr_image_path, ?), updated_at = ?
@@ -116,4 +132,48 @@ export async function markLabelPrinted(assetId: number) {
       updated_at = ?
     WHERE id = ?
   `, [now(), now(), assetId])
+}
+
+/**
+ * Clear all minted QR tokens/URLs/images so Print Label regenerates against current PUBLIC_APP_URL.
+ * Also deletes PNG files under storage/public/assets/qr/.
+ */
+export async function resetAllAssetQr(): Promise<{ cleared: number; files_removed: number }> {
+  const before = await get<{ c: number }>(`
+    SELECT COUNT(*) AS c FROM assets
+    WHERE deleted_at IS NULL AND (
+      qr_token IS NOT NULL OR qr_url IS NOT NULL OR qr_image_path IS NOT NULL
+      OR label_printed_at IS NOT NULL OR COALESCE(label_print_count, 0) > 0
+    )
+  `)
+  const cleared = Number(before?.c || 0)
+
+  await run(`
+    UPDATE assets SET
+      qr_token = NULL,
+      qr_url = NULL,
+      qr_image_path = NULL,
+      label_printed_at = NULL,
+      label_print_count = 0,
+      updated_at = ?
+    WHERE qr_token IS NOT NULL
+       OR qr_url IS NOT NULL
+       OR qr_image_path IS NOT NULL
+       OR label_printed_at IS NOT NULL
+       OR COALESCE(label_print_count, 0) > 0
+  `, [now()])
+
+  let files_removed = 0
+  try {
+    await ensureDir()
+    const entries = await fs.promises.readdir(QR_DIR)
+    for (const name of entries) {
+      try {
+        await fs.promises.unlink(path.join(QR_DIR, name))
+        files_removed += 1
+      } catch { /* ignore */ }
+    }
+  } catch { /* dir missing — fine */ }
+
+  return { cleared, files_removed }
 }

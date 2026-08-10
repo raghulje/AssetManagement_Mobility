@@ -12,19 +12,14 @@ const router = Router()
 
 const RESET_TTL_MS = 60 * 60 * 1000 // 1 hour
 
+/** Public site origin for emails/links — never use raw CLIENT_ORIGIN (may be a CSV list). */
 function clientOrigin() {
-  return (process.env.CLIENT_ORIGIN || 'http://localhost:5173').replace(/\/$/, '')
-}
-
-function allowedLoginEmails() {
-  return (
-    process.env.ALLOWED_LOGIN_EMAILS
-    || process.env.ALLOWED_LOGIN_USERNAMES
-    || 'admin@refex.com,raghul.je@refex.co.in,reginold.j@refex.co.in,murugesh.k@refex.co.in,gowtham.s@refex.co.in'
-  )
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean)
+  const fromEnv = (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || '').trim()
+  if (fromEnv) return fromEnv.replace(/\/$/, '')
+  const first = String(process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+    .split(',')[0]
+    .trim()
+  return first.replace(/\/$/, '')
 }
 
 router.post('/login', async (req, res) => {
@@ -32,16 +27,12 @@ router.post('/login', async (req, res) => {
   const { password } = req.body || {}
   if (!email || !password) return fail(res, 'Email and password required')
 
-  const allowed = allowedLoginEmails()
   const emailNorm = email.toLowerCase()
-  if (allowed.length && !allowed.includes(emailNorm)) {
-    return fail(res, 'Invalid credentials', 401)
-  }
-
   const user = await get<Record<string, unknown>>(`
     SELECT * FROM users WHERE LOWER(email) = ? AND deleted_at IS NULL
   `, [emailNorm])
 
+  // Any activated App User can sign in (admin-created accounts included)
   if (!user || !user.activated) return fail(res, 'Invalid credentials', 401)
   if (!bcrypt.compareSync(String(password), String(user.password))) {
     return fail(res, 'Invalid credentials', 401)
@@ -73,11 +64,6 @@ router.post('/password/forgot', async (req, res) => {
   const generic = 'If that email is registered, a reset link has been sent.'
 
   try {
-    const allowed = allowedLoginEmails()
-    if (allowed.length && !allowed.includes(email)) {
-      return okMessage(res, generic)
-    }
-
     const user = await get<{ id: number; email: string; first_name: string; activated: number }>(`
       SELECT id, email, first_name, activated FROM users
       WHERE LOWER(email) = ? AND deleted_at IS NULL

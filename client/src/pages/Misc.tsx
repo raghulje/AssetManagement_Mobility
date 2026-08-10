@@ -423,6 +423,8 @@ export function LoginPage() {
 
 export function SettingsGeneral() {
   const toast = useToast()
+  const { can } = useAuth()
+  const canEdit = can('settings.edit')
   const [site, setSite] = useState(siteName)
   const [currency, setCurrency] = useState('INR')
   const [dateFormat, setDateFormat] = useState('YYYY-MM-DD')
@@ -432,6 +434,7 @@ export function SettingsGeneral() {
   const [okMsg, setOkMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [digestBusy, setDigestBusy] = useState(false)
+  const [qrBusy, setQrBusy] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -501,11 +504,11 @@ export function SettingsGeneral() {
           <Field label="Full Multiple Companies Support">
             <label className="checkbox"><input type="checkbox" checked={fmcs} onChange={(e) => setFmcs(e.target.checked)} /> Enable FMCS</label>
           </Field>
-          <button type="submit" className="btn btn-theme" disabled={busy}>{busy ? 'Saving…' : 'Save Settings'}</button>{' '}
+          <button type="submit" className="btn btn-theme" disabled={busy || !canEdit}>{busy ? 'Saving…' : 'Save Settings'}</button>{' '}
           <button
             type="button"
             className="btn btn-default"
-            disabled={digestBusy || !alertEmail.trim()}
+            disabled={digestBusy || !alertEmail.trim() || !canEdit}
             onClick={() => {
               setDigestBusy(true)
               setError('')
@@ -526,6 +529,44 @@ export function SettingsGeneral() {
             {digestBusy ? 'Sending…' : 'Send EOL digest now'}
           </button>
         </form>
+      </Box>
+
+      <Box title="Asset QR codes" type="warning">
+        <p className="help-block" style={{ marginTop: 0 }}>
+          Clears every asset&apos;s QR token, public URL, image path, and printed-label counters, and deletes
+          stored QR PNG files. Use after changing the public domain (e.g. to{' '}
+          <code>https://asset.refexone.com</code>) so Print Label mints fresh codes without{' '}
+          <code>:3053</code>.
+        </p>
+        <button
+          type="button"
+          className="btn btn-danger"
+          disabled={qrBusy || !canEdit}
+          onClick={() => {
+            if (!window.confirm(
+              'Reset ALL asset QR codes?\n\nExisting printed labels will stop matching until you Print Label again for each asset.',
+            )) return
+            setQrBusy(true)
+            setError('')
+            setOkMsg('')
+            api<{ messages?: string[]; payload?: { cleared?: number; files_removed?: number } }>(
+              '/settings/reset-qr',
+              { method: 'POST' },
+            )
+              .then((res) => {
+                const msg = Array.isArray(res.messages) ? res.messages.join(' ') : 'QR reset complete'
+                setOkMsg(msg)
+                toast.success(msg)
+              })
+              .catch((err: Error) => {
+                setError(err.message)
+                toast.error(err.message)
+              })
+              .finally(() => setQrBusy(false))
+          }}
+        >
+          {qrBusy ? 'Resetting…' : 'Reset all QR codes'}
+        </button>
       </Box>
     </AppLayout>
   )

@@ -634,6 +634,28 @@ settingsRouter.put('/', async (req, res) => {
   return okMessage(res, 'Settings updated', await get(`SELECT * FROM settings WHERE id = 1`))
 })
 
+/** Clear all asset QR tokens/URLs/images so Print Label remints against current PUBLIC_APP_URL. */
+settingsRouter.post('/reset-qr', async (req, res) => {
+  try {
+    const { resetAllAssetQr } = await import('../services/assetQr.js')
+    const result = await resetAllAssetQr()
+    await logAction({
+      userId: req.user?.id,
+      actionType: 'reset_qr',
+      itemType: 'settings',
+      itemId: 1,
+      note: `Cleared QR on ${result.cleared} asset(s); removed ${result.files_removed} file(s)`,
+    })
+    return okMessage(
+      res,
+      `QR reset complete — ${result.cleared} asset(s) cleared, ${result.files_removed} file(s) removed. Print Label again to mint new codes.`,
+      result,
+    )
+  } catch (e) {
+    return fail(res, e instanceof Error ? e.message : 'QR reset failed', 500)
+  }
+})
+
 export const accountRouter = Router()
 
 accountRouter.get('/assets', async (req, res) => {

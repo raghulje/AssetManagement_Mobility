@@ -1,5 +1,6 @@
 import { get } from '../db/index.js'
 import { nest } from '../utils/response.js'
+import { publicAssetPageUrl } from './assetQr.js'
 
 export async function transformAsset(id: number) {
   const a = await get<Record<string, unknown>>(`
@@ -79,9 +80,13 @@ export async function transformAsset(id: number) {
       ? `/storage/${String(a.image).replace(/\\/g, '/').replace(/^public\//, '')}`
       : null,
     qr_token: a.qr_token || null,
-    qr_url: a.qr_url || null,
+    // Always expose current public domain (ignore stale :PORT values stored in DB)
+    qr_url: a.qr_token ? publicAssetPageUrl(String(a.qr_token)) : (a.qr_url || null),
     qr_image_path: a.qr_image_path || null,
-    qr_image_url: a.qr_image_path ? `/storage/${String(a.qr_image_path).replace(/\\/g, '/')}` : null,
+    // express.static(/storage) mounts storage/public — strip leading public/
+    qr_image_url: a.qr_image_path
+      ? `/storage/${String(a.qr_image_path).replace(/\\/g, '/').replace(/^public\//, '')}`
+      : null,
     label_printed_at: a.label_printed_at || null,
     label_print_count: Number(a.label_print_count || 0),
     last_agent_sync_at: a.last_agent_sync_at || null,

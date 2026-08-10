@@ -1,0 +1,25 @@
+# Copy to docker-compose.yml on the server (docker-compose.yml is gitignored).
+# Prereq once: docker network create proxy
+#
+# Set PORT in server/.env to match expose (default 3053).
+# Map your reverse proxy → itam-uat:<PORT>
+
+services:
+  itam-uat:
+    image: node:18
+    container_name: itam-uat
+    working_dir: /app/server
+    volumes:
+      - ./server:/app/server
+      - ./client:/app/client
+    command: npm start
+    env_file:
+      - ./server/.env
+    expose:
+      - "3053"
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true
