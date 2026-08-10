@@ -5,7 +5,7 @@ import { Box, DataTable, Field, PageForm } from '../../components/ui'
 import { DetailLayout, DetailPanel } from '../../components/DetailLayout'
 import { useToast } from '../../components/Toast'
 import { MasterSelect, masterPayloadId } from '../../components/MasterSelect'
-import { mastersApi, usersApi, type SelectOption } from '../../api/client'
+import { groupsApi, mastersApi, usersApi, type SelectOption } from '../../api/client'
 
 type Row = Record<string, unknown>
 type Nest = { id?: number; name?: string | null } | null
@@ -363,6 +363,7 @@ type FormState = {
   activated: boolean
   is_admin: boolean
   is_superuser: boolean
+  group_id: string
 }
 
 const emptyForm: FormState = {
@@ -381,6 +382,7 @@ const emptyForm: FormState = {
   activated: true,
   is_admin: false,
   is_superuser: false,
+  group_id: '',
 }
 
 export function UserForm() {
@@ -395,6 +397,7 @@ export function UserForm() {
   const [companies, setCompanies] = useState<SelectOption[]>([])
   const [departments, setDepartments] = useState<SelectOption[]>([])
   const [locations, setLocations] = useState<SelectOption[]>([])
+  const [roles, setRoles] = useState<SelectOption[]>([])
   const [loading, setLoading] = useState(Boolean(id))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -408,10 +411,12 @@ export function UserForm() {
       mastersApi.companies().catch(() => ({ results: [] as SelectOption[] })),
       mastersApi.departments().catch(() => ({ results: [] as SelectOption[] })),
       mastersApi.locations().catch(() => ({ results: [] as SelectOption[] })),
-    ]).then(([c, d, l]) => {
+      groupsApi.list().catch(() => ({ rows: [] as Record<string, unknown>[], total: 0 })),
+    ]).then(([c, d, l, g]) => {
       setCompanies(c.results || [])
       setDepartments(d.results || [])
       setLocations(l.results || [])
+      setRoles((g.rows || []).map((r) => ({ id: Number(r.id), text: String(r.name || r.id) })))
     })
   }, [])
 
@@ -426,6 +431,7 @@ export function UserForm() {
       .get(id)
       .then((u) => {
         const flat = flattenUser(u)
+        const gids = Array.isArray(u.group_ids) ? u.group_ids.map(Number) : []
         setForm({
           first_name: String(flat.first_name || ''),
           last_name: String(flat.last_name || ''),
@@ -442,6 +448,7 @@ export function UserForm() {
           activated: Boolean(flat.activated),
           is_admin: Boolean(flat.is_admin),
           is_superuser: Boolean(flat.is_superuser),
+          group_id: gids[0] != null ? String(gids[0]) : '',
         })
         setError('')
       })
@@ -475,6 +482,7 @@ export function UserForm() {
       activated: form.activated,
       is_admin: form.is_admin || form.is_superuser,
       is_superuser: form.is_superuser,
+      group_ids: form.group_id ? [Number(form.group_id)] : [],
     }
     if (form.password) body.password = form.password
 
@@ -647,7 +655,24 @@ export function UserForm() {
             {' '}User can login
           </label>
         </Field>
-        <Field label="Permissions">
+        <Field label="Role">
+          <select
+            className="form-control"
+            value={form.group_id}
+            onChange={(e) => set('group_id', e.target.value)}
+            disabled={saving}
+          >
+            <option value="">— Select role —</option>
+            {roles.map((r) => (
+              <option key={r.id} value={String(r.id)}>{r.text}</option>
+            ))}
+          </select>
+          <span className="help-block">
+            Module access comes from the role. Manage the matrix under{' '}
+            <Link to="/settings/roles">Settings → Roles & permissions</Link>.
+          </span>
+        </Field>
+        <Field label="Flags">
           <label className="checkbox" style={{ display: 'block' }}>
             <input
               type="checkbox"
@@ -655,7 +680,7 @@ export function UserForm() {
               onChange={(e) => set('is_admin', e.target.checked)}
               disabled={saving}
             />
-            {' '}Admin
+            {' '}Admin (full access bypass)
           </label>
           <label className="checkbox" style={{ display: 'block' }}>
             <input
@@ -664,7 +689,7 @@ export function UserForm() {
               onChange={(e) => set('is_superuser', e.target.checked)}
               disabled={saving}
             />
-            {' '}Superuser
+            {' '}Superuser (full access bypass)
           </label>
         </Field>
         {saving ? <p className="text-muted">Saving…</p> : null}

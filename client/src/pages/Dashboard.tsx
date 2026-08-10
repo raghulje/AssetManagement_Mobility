@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import AppLayout from '../layout/AppLayout'
 import { SmallBox, Box } from '../components/ui'
-import { ModuleInsights } from '../components/ModuleInsights'
 import { dashboardApi, reportsApi } from '../api/client'
 
 type DashCounts = Record<string, number>
@@ -17,7 +16,6 @@ const emptyCounts: DashCounts = {
   employees: 0,
   deployed: 0,
   rtd: 0,
-  pending: 0,
   audit_due: 0,
   eol_due: 0,
 }
@@ -62,7 +60,6 @@ export default function Dashboard() {
   const bars = [
     { label: 'Assigned', value: counts.deployed || 0, tone: 'amber' },
     { label: 'In stock', value: counts.rtd || 0, tone: 'teal' },
-    { label: 'Pending', value: counts.pending || 0, tone: 'slate' },
   ]
 
   return (
@@ -76,16 +73,12 @@ export default function Dashboard() {
         <SmallBox to="/employees" count={counts.employees || counts.users} label="Employees" color="bg-navy" icon="fas fa-users" />
       </div>
 
-      <ModuleInsights
-        title="Asset inventory snapshot"
-        cards={[
-          { label: 'Assigned', value: counts.deployed || 0, to: '/hardware?status_type=Assigned' },
-          { label: 'In stock', value: counts.rtd || 0, to: '/hardware?status_type=RTD' },
-          { label: 'Pending', value: counts.pending || 0, to: '/hardware?status_type=Pending' },
-          { label: 'Audit due', value: counts.audit_due || 0, to: '/hardware/audit/due' },
-          { label: 'EOL due', value: counts.eol_due || 0, to: '/hardware/eol/due' },
-        ]}
-      />
+      <div className="module-insights-title" style={{ marginTop: 4 }}>Asset inventory snapshot</div>
+      <div className="row">
+        <SmallBox to="/hardware?status_type=Assigned" count={counts.deployed || 0} label="Assigned" color="bg-orange" icon="fas fa-user-check" />
+        <SmallBox to="/hardware?status_type=RTD" count={counts.rtd || 0} label="In stock" color="bg-olive" icon="fas fa-warehouse" />
+        <SmallBox to="/hardware/eol/due" count={counts.eol_due || 0} label="EOL due" color="bg-red" icon="fas fa-calendar-times" />
+      </div>
 
       <div className="row">
         <div className="col-md-8">
@@ -137,6 +130,7 @@ export default function Dashboard() {
               ))}
             </div>
           </Box>
+          {/* Quick Links — hidden for now
           <Box title="Quick Links" type="default">
             <p><Link to="/hardware?status_type=RTD">In Stock</Link></p>
             <p><Link to="/hardware/audit/due">Audit Due</Link></p>
@@ -145,6 +139,7 @@ export default function Dashboard() {
             <p><Link to="/reports/unaccepted">Unaccepted Assets</Link></p>
             <p><Link to="/hardware/create" className="btn btn-theme btn-sm"><i className="fas fa-plus" /> Create Asset</Link></p>
           </Box>
+          */}
         </div>
       </div>
     </AppLayout>

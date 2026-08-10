@@ -1,15 +1,28 @@
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
 import AppLayout from '../../layout/AppLayout'
 import { AppSelect, Box, Field } from '../../components/ui'
 import { hardwareApi, mastersApi, usersApi, type SelectOption } from '../../api/client'
 import { employeesApi } from '../../api/employees'
 import { useToast } from '../../components/Toast'
 
+function useAssetReturnPath(assetId: string | number) {
+  const [params] = useSearchParams()
+  const fromEmployeeId = params.get('from') === 'employee' ? params.get('employee_id') : null
+  const returnQs = useMemo(() => {
+    if (!fromEmployeeId) return ''
+    return `?from=employee&employee_id=${encodeURIComponent(fromEmployeeId)}`
+  }, [fromEmployeeId])
+  const assetPath = `/hardware/${assetId}${returnQs}`
+  const afterActionPath = fromEmployeeId ? `/employees/${fromEmployeeId}` : assetPath
+  return { returnQs, assetPath, afterActionPath, fromEmployeeId }
+}
+
 export function AssetCheckout() {
   const { id } = useParams()
   const navigate = useNavigate()
   const toast = useToast()
+  const { returnQs, assetPath, afterActionPath } = useAssetReturnPath(id || '')
   const [asset, setAsset] = useState<Record<string, unknown> | null>(null)
   const [targetType, setTargetType] = useState('employee')
   const [targetId, setTargetId] = useState('')
@@ -77,8 +90,8 @@ export function AssetCheckout() {
             Unassign it first before assigning to someone else.
           </p>
         </div>
-        <Link to={`/hardware/${assetId}/checkin`} className="btn btn-primary">Unassign</Link>{' '}
-        <Link to={`/hardware/${assetId}`} className="btn btn-default">Back to asset</Link>
+        <Link to={`/hardware/${assetId}/checkin${returnQs}`} className="btn btn-primary">Unassign</Link>{' '}
+        <Link to={assetPath} className="btn btn-default">Back to asset</Link>
       </AppLayout>
     )
   }
@@ -89,7 +102,7 @@ export function AssetCheckout() {
         <div className="callout callout-warning">
           <p>This asset cannot be assigned in its current status. Set it to In Stock (Ready to Assign) first.</p>
         </div>
-        <Link to={`/hardware/${assetId}`} className="btn btn-default">Back to asset</Link>
+        <Link to={assetPath} className="btn btn-default">Back to asset</Link>
       </AppLayout>
     )
   }
@@ -119,7 +132,7 @@ export function AssetCheckout() {
                   if (note.trim()) body.note = note.trim()
                   await hardwareApi.checkout(assetId, body)
                   toast.success('Asset assigned')
-                  navigate(`/hardware/${assetId}`)
+                  navigate(afterActionPath)
                 } catch (err) {
                   setError(err instanceof Error ? err.message : 'Assign failed')
                 } finally {
@@ -184,7 +197,7 @@ export function AssetCheckout() {
               <button type="submit" className="btn btn-theme" disabled={busy}>
                 {busy ? 'Assigning…' : 'Assign'}
               </button>{' '}
-              <Link to={`/hardware/${assetId}`} className="btn btn-default">Cancel</Link>
+              <Link to={assetPath} className="btn btn-default">Cancel</Link>
             </form>
           </Box>
         </div>
@@ -203,6 +216,7 @@ export function AssetCheckin() {
   const { id } = useParams()
   const navigate = useNavigate()
   const toast = useToast()
+  const { assetPath, afterActionPath } = useAssetReturnPath(id || '')
   const [asset, setAsset] = useState<Record<string, unknown> | null>(null)
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
@@ -244,7 +258,7 @@ export function AssetCheckin() {
               try {
                 await hardwareApi.checkin(assetId, { status_id: 1, reason: reason.trim() })
                 toast.success('Asset unassigned')
-                navigate(`/hardware/${assetId}`)
+                navigate(afterActionPath)
               } catch (err) {
                 setError(err instanceof Error ? err.message : 'Unassign failed')
               } finally {
@@ -267,7 +281,7 @@ export function AssetCheckin() {
             <button type="submit" className="btn btn-theme" disabled={busy}>
               {busy ? 'Unassigning…' : 'Unassign'}
             </button>{' '}
-            <Link to={`/hardware/${assetId}`} className="btn btn-default">Cancel</Link>
+            <Link to={assetPath} className="btn btn-default">Cancel</Link>
           </form>
         </Box>
       </div>

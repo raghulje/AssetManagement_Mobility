@@ -26,29 +26,38 @@ After install, the agent **registers**, sends **heartbeats**, and runs a full in
 
 Match order for assets: **serial → asset_tag → hostname**. QR tokens are never changed.
 
-## Windows (recommended)
+## Windows (recommended) — single EXE
 
-Install as a startup task (elevated PowerShell):
+Build once (developer PC):
 
 ```powershell
 cd ITAgent_2026\windows
-.\Install-ITAgent.ps1 -ApiUrl "http://10.5.7.96:3001/api/v1"
-# Optional: -AgentKey "your-shared-key" -AssetTag "RIL-PC-001"
+.\Build-ITAgentExe.ps1
+# → dist\ITAgent_2026.exe
 ```
 
-State / credentials: `%ProgramData%\ITAgent_2026\agent.json`  
+On each laptop/desktop: copy **`ITAgent_2026.exe`** only, double‑click:
+
+1. Confirm API URL (default `http://10.5.7.225:3001/api/v1`)
+2. Click **Install & Start** (approve UAC) — registers agent + startup task for remote scan
+3. Or **Sync once** for a single inventory push
+4. **Uninstall** removes the startup task
+
+State / logs: `%ProgramData%\ITAgent_2026\`  
 Task name: `ITAgent_2026`
 
-One-shot sync (no remote control):
+### Advanced (raw PowerShell scripts — still available)
+
+| Script | Purpose |
+|--------|---------|
+| `ITAgent_2026_App.ps1` | Same GUI/CLI as the EXE (source) |
+| `Install-ITAgent.ps1` | Install startup task only |
+| `ITAgent_2026.ps1` | One-shot sync |
+| `ITAgent_2026_Service.ps1` | Long-running service loop |
 
 ```powershell
-$env:REFEX_API_URL = "http://10.5.7.96:3001/api/v1"
+.\Install-ITAgent.ps1 -ApiUrl "http://10.5.7.225:3001/api/v1"
 .\ITAgent_2026.ps1
-```
-
-Service loop without installing a task:
-
-```powershell
 .\ITAgent_2026_Service.ps1
 ```
 
@@ -57,7 +66,7 @@ Service loop without installing a task:
 ```bash
 cd ITAgent_2026/node
 npm install
-export REFEX_API_URL="http://10.5.7.96:3001/api/v1"
+export REFEX_API_URL="http://10.5.7.225:3001/api/v1"
 npm run watch   # register + heartbeat + remote scan
 # npm run sync  # one-shot
 ```
@@ -73,7 +82,7 @@ npm run watch   # register + heartbeat + remote scan
 
 | Variable | Default | Notes |
 |----------|---------|--------|
-| `REFEX_API_URL` | `http://localhost:3001/api/v1` | Server API base |
+| `REFEX_API_URL` | `http://10.5.7.225:3001/api/v1` | Server API base |
 | `REFEX_AGENT_KEY` | _(empty)_ | Must match server `AGENT_API_KEY` when set |
 | `REFEX_ASSET_TAG` | _(empty)_ | Force bind to a tag |
 | `REFEX_AGENT_POLL_MS` | `30000` | Heartbeat / command poll |

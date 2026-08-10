@@ -2,14 +2,14 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useEffect, useState, type FormEvent } from 'react'
 import AppLayout from '../../layout/AppLayout'
 import { AppSelect, Box, DataTable, Field, PageForm } from '../../components/ui'
-import { ModuleInsights } from '../../components/ModuleInsights'
+// import { ModuleInsights } from '../../components/ModuleInsights' // restore with insight cards when needed
 import { DetailLayout } from '../../components/DetailLayout'
 import { MasterSelect, masterPayloadId } from '../../components/MasterSelect'
 import {
   accessoriesApi,
   componentsApi,
   consumablesApi,
-  dashboardApi,
+  // dashboardApi, // restore with insight cards when needed
   hardwareApi,
   kitsApi,
   mastersApi,
@@ -74,22 +74,23 @@ function QtyList({
   const [loading, setLoading] = useState(true)
   const [companyId, setCompanyId] = useState('')
   const [companies, setCompanies] = useState<SelectOption[]>([])
-  const [dash, setDash] = useState<Record<string, number>>({})
+  // const [dash, setDash] = useState<Record<string, number>>({}) // restore with insight cards when needed
 
   useEffect(() => {
     mastersApi.companies().then((c) => setCompanies(c.results || [])).catch(() => undefined)
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
-    dashboardApi
-      .counts({ company_id: companyId || undefined, search: q || undefined })
-      .then((c) => {
-        if (!cancelled) setDash(c as Record<string, number>)
-      })
-      .catch(() => undefined)
-    return () => { cancelled = true }
-  }, [companyId, q])
+  // restore with insight cards when needed
+  // useEffect(() => {
+  //   let cancelled = false
+  //   dashboardApi
+  //     .counts({ company_id: companyId || undefined, search: q || undefined })
+  //     .then((c) => {
+  //       if (!cancelled) setDash(c as Record<string, number>)
+  //     })
+  //     .catch(() => undefined)
+  //   return () => { cancelled = true }
+  // }, [companyId, q])
 
   const load = () => {
     setLoading(true)
@@ -111,24 +112,16 @@ function QtyList({
     return () => clearTimeout(t)
   }, [q, companyId, api])
 
-  const kindKey = basePath.replace(/^\//, '') as 'accessories' | 'consumables' | 'components'
-  const kindIcon =
-    kindKey === 'accessories' ? 'fas fa-keyboard'
-      : kindKey === 'consumables' ? 'fas fa-tint'
-        : 'fas fa-hdd'
-  const kindColor =
-    kindKey === 'accessories' ? 'bg-orange'
-      : kindKey === 'consumables' ? 'bg-purple'
-        : 'bg-olive'
-  const insightCards = [
-    { label: 'Catalog items', value: dash[kindKey] ?? total, color: kindColor, icon: kindIcon },
-    { label: 'Assigned qty', value: dash[`${kindKey}_assigned`] ?? 0, color: 'bg-maroon', icon: 'fas fa-share' },
-    { label: 'Available qty', value: dash[`${kindKey}_available`] ?? 0, color: 'bg-teal', icon: 'fas fa-box-open' },
-  ]
+  // restore with insight cards when needed
+  // const kindKey = basePath.replace(/^\//, '') as 'accessories' | 'consumables' | 'components'
+  // const kindIcon = ...
+  // const insightCards = [...]
 
   return (
     <AppLayout title={title} subtitle={loading ? 'Loading…' : `${total} items`}>
+      {/* Module insight cards — restore when needed (kept on Dashboard / Assets / People only)
       <ModuleInsights title={`${title} insights`} cards={insightCards} />
+      */}
       <Box
         title={title}
         tools={<Link to={`${basePath}/create`} className="btn btn-primary btn-sm"><i className="fas fa-plus icon-white" /> {createLabel}</Link>}

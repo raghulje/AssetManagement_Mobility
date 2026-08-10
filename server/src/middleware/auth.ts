@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from 'express'
 import jwt from 'jsonwebtoken'
 import { get } from '../db/index.js'
 import { fail } from '../utils/response.js'
+import { hasPermission } from '../services/permissions.js'
 
 export type AuthUser = {
   id: number
@@ -51,14 +52,10 @@ export async function authRequired(req: Request, res: Response, next: NextFuncti
   }
 }
 
-/** Soft permission gate — superuser bypass via permissions.superuser */
+/** Permission gate — superuser / admin bypass; empty perms no longer allow all. */
 export function can(permission: string) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const perms = req.user?.permissions || {}
-    if (perms.superuser === '1' || perms.superuser === true || perms.superuser === 1) return next()
-    if (perms[permission] === '1' || perms[permission] === true || perms[permission] === 1) return next()
-    // Demo clone: allow authenticated users for read/write unless explicitly denied
-    if (Object.keys(perms).length === 0) return next()
+    if (hasPermission(req.user?.permissions, permission)) return next()
     return fail(res, `Forbidden: missing ${permission}`, 403)
   }
 }

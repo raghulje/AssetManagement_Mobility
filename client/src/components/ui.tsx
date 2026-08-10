@@ -88,6 +88,10 @@ export function DataTable({
   onBulkDelete,
   selectable = true,
   storageKey,
+  page,
+  pageSize,
+  total,
+  onPageChange,
 }: {
   columns: {
     key: string
@@ -107,6 +111,11 @@ export function DataTable({
   selectable?: boolean
   /** Persist column visibility */
   storageKey?: string
+  /** 0-based page index for server-side pagination */
+  page?: number
+  pageSize?: number
+  total?: number
+  onPageChange?: (page: number) => void
 }) {
   const toast = useToast()
   const [selected, setSelected] = useState<Set<number>>(() => new Set())
@@ -325,9 +334,48 @@ export function DataTable({
           </tbody>
         </table>
       </div>
-      <div className="pagination">
-        <span className="text-muted" style={{ padding: '6px 10px' }}>{rows.length} row(s) on this page</span>
-      </div>
+      {page != null && pageSize != null && total != null && onPageChange ? (
+        (() => {
+          const pageCount = Math.max(1, Math.ceil(total / pageSize))
+          const safePage = Math.min(Math.max(0, page), pageCount - 1)
+          return (
+            <div className="pagination" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 12 }}>
+              <button type="button" disabled={safePage <= 0} onClick={() => onPageChange(0)} title="First page">«</button>
+              <button type="button" disabled={safePage <= 0} onClick={() => onPageChange(Math.max(0, safePage - 1))}>Prev</button>
+              {Array.from({ length: pageCount }, (_, i) => i)
+                .filter((i) => i === 0 || i === pageCount - 1 || Math.abs(i - safePage) <= 2)
+                .reduce<number[]>((acc, i) => {
+                  if (acc.length && i - acc[acc.length - 1] > 1) acc.push(-1)
+                  acc.push(i)
+                  return acc
+                }, [])
+                .map((i, idx) => (
+                  i < 0
+                    ? <span key={`gap-${idx}`} className="text-muted" style={{ padding: '0 4px' }}>…</span>
+                    : (
+                      <button
+                        key={i}
+                        type="button"
+                        className={i === safePage ? 'active' : undefined}
+                        onClick={() => onPageChange(i)}
+                      >
+                        {i + 1}
+                      </button>
+                    )
+                ))}
+              <button type="button" disabled={safePage + 1 >= pageCount} onClick={() => onPageChange(safePage + 1)}>Next</button>
+              <button type="button" disabled={safePage + 1 >= pageCount} onClick={() => onPageChange(pageCount - 1)} title="Last page">»</button>
+              <span className="text-muted" style={{ padding: '0 8px', alignSelf: 'center' }}>
+                {total === 0 ? '0 items' : `${safePage * pageSize + 1}–${Math.min(total, (safePage + 1) * pageSize)} of ${total}`}
+              </span>
+            </div>
+          )
+        })()
+      ) : (
+        <div className="pagination">
+          <span className="text-muted" style={{ padding: '6px 10px' }}>{rows.length} row(s) on this page</span>
+        </div>
+      )}
     </>
   )
 }

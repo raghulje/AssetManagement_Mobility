@@ -8,13 +8,13 @@ router.get('/templates', (_req, res) => {
   return okItem(res, {
     rows: [
       {
-        name: 'Default 4x2',
+        name: 'Compact 2.05x0.9',
         unit: 'in',
-        width: 4,
-        height: 2,
-        support_1d_barcode: true,
+        width: 2.05,
+        height: 0.9,
+        support_1d_barcode: false,
         support_2d_barcode: true,
-        fields: ['asset_tag', 'name', 'model', 'serial', 'location'],
+        fields: ['asset_tag', 'company'],
       },
     ],
   })

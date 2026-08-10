@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { all, get, run, now, limitSql } from '../db/index.js'
 import { fail, nest, okItem, okList, okMessage } from '../utils/response.js'
 import { logAction } from '../services/actionLog.js'
+import { actorLabel, notifyWorkflow, resolveAssigneeEmail } from '../services/notify.js'
 
 type QtyConfig = {
   table: 'accessories' | 'consumables' | 'components'
@@ -94,7 +95,23 @@ function makeQtyRouter(cfg: QtyConfig) {
     ])
     const id = Number(info.insertId)
     await logAction({ userId: req.user?.id, actionType: 'create', itemType: cfg.itemType, itemId: id })
-    return okMessage(res, 'Created', await transform(cfg, id), 201)
+    const created = await transform(cfg, id)
+    notifyWorkflow({
+      category: 'inventory',
+      event: `${cfg.itemType}.created`,
+      subject: `${cfg.itemType} added: ${b.name}`,
+      title: `${cfg.itemType.charAt(0).toUpperCase()}${cfg.itemType.slice(1)} added`,
+      intro: `A new ${cfg.itemType} was added to the catalog.`,
+      fields: [
+        { label: 'Name', value: String(b.name) },
+        { label: 'Qty', value: String(b.qty ?? 1) },
+        { label: 'Created by', value: actorLabel(req.user) },
+      ],
+      ctaPath: `/${cfg.table}/${id}`,
+      itemType: cfg.itemType,
+      itemId: id,
+    })
+    return okMessage(res, 'Created', created, 201)
   })
 
   router.put('/:id', async (req, res) => {
@@ -139,6 +156,24 @@ function makeQtyRouter(cfg: QtyConfig) {
         VALUES (?, ?, 'user', ?, ?, ?, ?)
       `, [id, assignedTo, qty, req.body?.note || null, req.user?.id || null, ts])
       await logAction({ userId: req.user?.id, actionType: 'checkout', itemType: 'accessory', itemId: id, targetType: 'user', targetId: assignedTo })
+      const email = await resolveAssigneeEmail('user', assignedTo)
+      notifyWorkflow({
+        category: 'custody',
+        event: 'accessory.assigned',
+        subject: `Accessory assigned: ${item.name}`,
+        title: 'Accessory assigned',
+        intro: 'An accessory was checked out to a user.',
+        fields: [
+          { label: 'Accessory', value: String(item.name) },
+          { label: 'Qty', value: String(qty) },
+          { label: 'User id', value: String(assignedTo) },
+          { label: 'Assigned by', value: actorLabel(req.user) },
+        ],
+        ctaPath: `/accessories/${id}`,
+        itemType: 'accessory',
+        itemId: id,
+        assigneeEmail: email,
+      })
     } else if (cfg.table === 'consumables') {
       const assignedTo = Number(req.body?.assigned_to || req.body?.assigned_user)
       if (!assignedTo) return fail(res, 'assigned_to required')
@@ -147,6 +182,24 @@ function makeQtyRouter(cfg: QtyConfig) {
         VALUES (?, ?, ?, ?, ?, ?)
       `, [id, assignedTo, qty, req.body?.note || null, req.user?.id || null, ts])
       await logAction({ userId: req.user?.id, actionType: 'checkout', itemType: 'consumable', itemId: id, targetType: 'user', targetId: assignedTo })
+      const email = await resolveAssigneeEmail('user', assignedTo)
+      notifyWorkflow({
+        category: 'custody',
+        event: 'consumable.issued',
+        subject: `Consumable issued: ${item.name}`,
+        title: 'Consumable issued',
+        intro: 'A consumable was issued to a user.',
+        fields: [
+          { label: 'Consumable', value: String(item.name) },
+          { label: 'Qty', value: String(qty) },
+          { label: 'User id', value: String(assignedTo) },
+          { label: 'Issued by', value: actorLabel(req.user) },
+        ],
+        ctaPath: `/consumables/${id}`,
+        itemType: 'consumable',
+        itemId: id,
+        assigneeEmail: email,
+      })
     } else {
       const assetId = Number(req.body?.assigned_to || req.body?.asset_id)
       if (!assetId) return fail(res, 'asset_id required')
@@ -155,6 +208,22 @@ function makeQtyRouter(cfg: QtyConfig) {
         VALUES (?, ?, ?, ?, ?, ?)
       `, [id, assetId, qty, req.body?.note || null, req.user?.id || null, ts])
       await logAction({ userId: req.user?.id, actionType: 'checkout', itemType: 'component', itemId: id, targetType: 'asset', targetId: assetId })
+      notifyWorkflow({
+        category: 'custody',
+        event: 'component.assigned',
+        subject: `Component assigned: ${item.name}`,
+        title: 'Component assigned to asset',
+        intro: 'A component was installed / assigned to an asset.',
+        fields: [
+          { label: 'Component', value: String(item.name) },
+          { label: 'Qty', value: String(qty) },
+          { label: 'Asset id', value: String(assetId) },
+          { label: 'Assigned by', value: actorLabel(req.user) },
+        ],
+        ctaPath: `/components/${id}`,
+        itemType: 'component',
+        itemId: id,
+      })
     }
     return okMessage(res, 'Checked out', await transform(cfg, id))
   })

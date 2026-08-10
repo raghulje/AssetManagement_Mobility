@@ -7,6 +7,7 @@ import { fail, okItem, okList, okMessage } from '../utils/response.js'
 import { logAction } from '../services/actionLog.js'
 import { transformAsset } from '../services/transformers.js'
 import { recordUpload, storageRoot } from '../services/uploads.js'
+import { actorLabel, notifyWorkflow, resolveAssigneeEmail } from '../services/notify.js'
 
 export const reportsRouter = Router()
 
@@ -276,15 +277,25 @@ reportsRouter.get('/custom/export', async (_req, res) => {
 
 export const maintenancesRouter = Router()
 
-maintenancesRouter.get('/', async (_req, res) => {
+const MAINTENANCE_TYPES = new Set([
+  'Maintenance',
+  'Repair',
+  'Upgrade',
+  'Software Support',
+  'Hardware Support',
+])
+
+maintenancesRouter.get('/', async (req, res) => {
+  const assetId = req.query.asset_id ? Number(req.query.asset_id) : null
   const rows = await all(`
     SELECT m.*, a.asset_tag, a.name as asset_name, s.name as supplier_name
     FROM maintenances m
     LEFT JOIN assets a ON a.id = m.asset_id
     LEFT JOIN suppliers s ON s.id = m.supplier_id
     WHERE m.deleted_at IS NULL
+      ${assetId ? 'AND m.asset_id = ?' : ''}
     ORDER BY m.id DESC
-  `)
+  `, assetId ? [assetId] : [])
   return okList(res, rows)
 })
 
@@ -303,40 +314,139 @@ maintenancesRouter.get('/:id', async (req, res) => {
 maintenancesRouter.post('/', async (req, res) => {
   const b = req.body || {}
   if (!b.asset_id || !b.title) return fail(res, 'asset_id and title required')
+  const reason = String(b.note || '').trim()
+  if (!reason) return fail(res, 'Reason / description is required')
+  const type = String(b.asset_maintenance_type || 'Maintenance')
+  if (!MAINTENANCE_TYPES.has(type)) return fail(res, 'Invalid maintenance type')
   const ts = now()
   const info = await run(`
     INSERT INTO maintenances (asset_id, supplier_id, asset_maintenance_type, title, start_date, completion_date, note, cost, is_warranty, user_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
-    b.asset_id, b.supplier_id || null, b.asset_maintenance_type || 'Maintenance', b.title,
-    b.start_date || ts.slice(0, 10), b.completion_date || null, b.note || null, b.cost || 0,
+    b.asset_id, b.supplier_id || null, type, b.title,
+    b.start_date || ts.slice(0, 10), b.completion_date || null, reason, b.cost || 0,
     b.is_warranty ? 1 : 0, req.user?.id || null, ts, ts,
   ])
-  await logAction({ userId: req.user?.id, actionType: 'create', itemType: 'maintenance', itemId: Number(info.insertId) })
-  return okMessage(res, 'Maintenance created', { id: info.insertId }, 201)
+  const maintenanceId = Number(info.insertId)
+  await logAction({
+    userId: req.user?.id,
+    actionType: 'maintenance',
+    itemType: 'asset',
+    itemId: Number(b.asset_id),
+    note: `${type}: ${String(b.title)} — ${reason}`,
+    meta: { maintenance_id: maintenanceId, asset_maintenance_type: type, title: b.title },
+  })
+  await logAction({ userId: req.user?.id, actionType: 'create', itemType: 'maintenance', itemId: maintenanceId })
+  const asset = await get<{ asset_tag: string; assigned_to: number | null; assigned_type: string | null }>(
+    `SELECT asset_tag, assigned_to, assigned_type FROM assets WHERE id = ?`,
+    [b.asset_id],
+  )
+  const assigneeEmail = await resolveAssigneeEmail(asset?.assigned_type, asset?.assigned_to ? Number(asset.assigned_to) : null)
+  notifyWorkflow({
+    category: 'maintenance',
+    event: 'maintenance.created',
+    subject: `Maintenance scheduled: ${b.title}`,
+    title: 'Maintenance scheduled',
+    intro: 'A maintenance record was created for an asset.',
+    fields: [
+      { label: 'Asset', value: String(asset?.asset_tag || b.asset_id) },
+      { label: 'Title', value: String(b.title) },
+      { label: 'Type', value: type },
+      { label: 'Reason', value: reason },
+      { label: 'Start date', value: String(b.start_date || ts.slice(0, 10)) },
+      { label: 'Scheduled by', value: actorLabel(req.user) },
+    ],
+    ctaPath: `/hardware/${b.asset_id}`,
+    itemType: 'maintenance',
+    itemId: maintenanceId,
+    assigneeEmail,
+    assigneeOnlyExtraNote: 'Maintenance has been scheduled for an asset assigned to you.',
+  })
+  return okMessage(res, 'Maintenance created', { id: maintenanceId }, 201)
 })
 
 maintenancesRouter.put('/:id', async (req, res) => {
   const b = req.body || {}
+  if (b.note !== undefined && !String(b.note || '').trim()) {
+    return fail(res, 'Reason / description is required')
+  }
+  if (b.asset_maintenance_type !== undefined && !MAINTENANCE_TYPES.has(String(b.asset_maintenance_type))) {
+    return fail(res, 'Invalid maintenance type')
+  }
+  const existing = await get<{ asset_id: number; title: string; asset_maintenance_type: string; note: string | null }>(`
+    SELECT asset_id, title, asset_maintenance_type, note FROM maintenances WHERE id = ? AND deleted_at IS NULL
+  `, [req.params.id])
+  if (!existing) return fail(res, 'Maintenance not found', 404)
+
   const fields = ['title', 'supplier_id', 'asset_maintenance_type', 'start_date', 'completion_date', 'note', 'cost', 'is_warranty'] as const
   const sets: string[] = []
   const vals: unknown[] = []
   for (const f of fields) {
     if (b[f] !== undefined) {
       sets.push(`${f} = ?`)
-      vals.push(f === 'is_warranty' ? (b[f] ? 1 : 0) : b[f])
+      vals.push(f === 'is_warranty' ? (b[f] ? 1 : 0) : f === 'note' ? String(b[f]).trim() : b[f])
     }
   }
   if (!sets.length) return fail(res, 'No fields')
   vals.push(now(), req.params.id)
   await run(`UPDATE maintenances SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`, vals)
+
+  const type = String(b.asset_maintenance_type ?? existing.asset_maintenance_type)
+  const title = String(b.title ?? existing.title)
+  const reason = String(b.note !== undefined ? b.note : existing.note || '').trim()
+  await logAction({
+    userId: req.user?.id,
+    actionType: 'maintenance_update',
+    itemType: 'asset',
+    itemId: Number(existing.asset_id),
+    note: `${type}: ${title} — ${reason}`,
+    meta: { maintenance_id: Number(req.params.id), asset_maintenance_type: type, title },
+  })
+  notifyWorkflow({
+    category: 'maintenance',
+    event: 'maintenance.updated',
+    subject: `Maintenance updated: ${title}`,
+    title: 'Maintenance updated',
+    intro: 'A maintenance record was updated.',
+    fields: [
+      { label: 'Asset id', value: String(existing.asset_id) },
+      { label: 'Title', value: title },
+      { label: 'Type', value: type },
+      { label: 'Reason', value: reason },
+      { label: 'Updated by', value: actorLabel(req.user) },
+    ],
+    ctaPath: `/hardware/${existing.asset_id}`,
+    itemType: 'maintenance',
+    itemId: Number(req.params.id),
+  })
   return okMessage(res, 'Maintenance updated')
 })
 
 maintenancesRouter.post('/:id/complete', async (req, res) => {
+  const row = await get<{ asset_id: number; title: string }>(
+    `SELECT asset_id, title FROM maintenances WHERE id = ? AND deleted_at IS NULL`,
+    [req.params.id],
+  )
   await run(`UPDATE maintenances SET completion_date = ?, updated_at = ? WHERE id = ?`, [
     req.body?.completion_date || now().slice(0, 10), now(), req.params.id,
   ])
+  if (row) {
+    notifyWorkflow({
+      category: 'maintenance',
+      event: 'maintenance.completed',
+      subject: `Maintenance completed: ${row.title}`,
+      title: 'Maintenance completed',
+      intro: 'A maintenance record was marked complete.',
+      fields: [
+        { label: 'Asset id', value: String(row.asset_id) },
+        { label: 'Title', value: String(row.title) },
+        { label: 'Completed by', value: actorLabel(req.user) },
+      ],
+      ctaPath: `/hardware/${row.asset_id}`,
+      itemType: 'maintenance',
+      itemId: Number(req.params.id),
+    })
+  }
   return okMessage(res, 'Maintenance completed')
 })
 
@@ -477,6 +587,29 @@ export const settingsRouter = Router()
 settingsRouter.get('/', async (_req, res) => {
   const row = await get(`SELECT * FROM settings WHERE id = 1`)
   return okItem(res, row)
+})
+
+settingsRouter.get('/notifications', async (_req, res) => {
+  const { notificationAdminSnapshot } = await import('../services/notificationConfig.js')
+  return okItem(res, await notificationAdminSnapshot())
+})
+
+settingsRouter.put('/notifications', async (req, res) => {
+  const { saveNotificationConfig, notificationAdminSnapshot } = await import('../services/notificationConfig.js')
+  const b = req.body || {}
+  await saveNotificationConfig({
+    email_notifications: b.email_notifications,
+    extra_ops_emails: b.extra_ops_emails,
+    eol_to_it_asset_manager: b.eol_to_it_asset_manager,
+    workflow_to_ops_roles: b.workflow_to_ops_roles,
+  })
+  if (b.alert_email !== undefined) {
+    await run(`UPDATE settings SET alert_email = ?, updated_at = ? WHERE id = 1`, [
+      b.alert_email ? String(b.alert_email).trim() : null,
+      now(),
+    ])
+  }
+  return okMessage(res, 'Notification settings saved', await notificationAdminSnapshot())
 })
 
 settingsRouter.put('/', async (req, res) => {

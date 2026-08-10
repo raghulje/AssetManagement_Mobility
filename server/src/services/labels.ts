@@ -1,22 +1,25 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import PDFDocument from 'pdfkit'
-import bwipjs from 'bwip-js'
 import { get, all } from '../db/index.js'
 import { ensureAssetQr, markLabelPrinted } from './assetQr.js'
 import { storageRoot, recordUpload } from './uploads.js'
 import { now } from '../db/index.js'
 
+/** Compact sticker with boxed safe zone. Slightly wider so long company names fit. */
+const LABEL_W = 148
+const LABEL_H = 65
+/** Empty ring outside the border — printers often clip this zone. */
+const OUTER = 5
+/** Gap between border stroke and content. */
+const INNER = 5
+/** Extra left inset (left edge clips most often). */
+const LEFT_EXTRA = 4
+
 type AssetLabel = {
   id: number
   asset_tag: string
-  name: string | null
-  serial: string | null
-  model_name?: string | null
-  model_number?: string | null
   company_name?: string | null
-  location_name?: string | null
-  status_name?: string | null
 }
 
 async function loadAssets(idsOrTags: (string | number)[]) {
@@ -24,14 +27,9 @@ async function loadAssets(idsOrTags: (string | number)[]) {
   const tags = idsOrTags.map(String)
   const placeholders = tags.map(() => '?').join(',')
   const rows = await all<AssetLabel>(`
-    SELECT a.id, a.asset_tag, a.name, a.serial,
-      m.name as model_name, m.model_number,
-      c.name as company_name, l.name as location_name, s.name as status_name
+    SELECT a.id, a.asset_tag, c.name as company_name
     FROM assets a
-    LEFT JOIN models m ON m.id = a.model_id
     LEFT JOIN companies c ON c.id = a.company_id
-    LEFT JOIN locations l ON l.id = COALESCE(a.location_id, a.rtd_location_id)
-    LEFT JOIN status_labels s ON s.id = a.status_id
     WHERE a.deleted_at IS NULL AND (a.asset_tag IN (${placeholders}) OR CAST(a.id AS CHAR) IN (${placeholders}))
   `, [...tags, ...tags])
   const map = new Map<number, AssetLabel>()
@@ -39,17 +37,70 @@ async function loadAssets(idsOrTags: (string | number)[]) {
   return [...map.values()]
 }
 
-async function barcodePng(text: string): Promise<Buffer> {
-  return bwipjs.toBuffer({
-    bcid: 'code128',
-    text,
-    scale: 2,
-    height: 12,
-    includetext: false,
+/** Draw one line that never wraps (shrink font, then truncate). */
+function drawFitLine(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  x: number,
+  y: number,
+  maxW: number,
+  opts: { font: string; size: number; minSize?: number; color?: string },
+) {
+  const raw = String(text || '').trim()
+  if (!raw) return
+  const minSize = opts.minSize ?? 5
+  let size = opts.size
+  doc.font(opts.font).fillColor(opts.color || '#000')
+  while (size > minSize) {
+    doc.fontSize(size)
+    if (doc.widthOfString(raw) <= maxW) break
+    size -= 0.5
+  }
+  doc.fontSize(size)
+  let out = raw
+  if (doc.widthOfString(out) > maxW) {
+    while (out.length > 1 && doc.widthOfString(`${out}…`) > maxW) {
+      out = out.slice(0, -1)
+    }
+    out = `${out}…`
+  }
+  doc.text(out, x, y, { width: maxW, height: size + 2, lineBreak: false, ellipsis: true })
+}
+
+/** Company name: wrap up to maxLines so full name is visible. */
+function drawWrappedText(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  x: number,
+  y: number,
+  maxW: number,
+  maxH: number,
+  opts: { font: string; size: number; minSize?: number; color?: string; maxLines?: number },
+) {
+  const raw = String(text || '').trim()
+  if (!raw) return
+  const maxLines = opts.maxLines ?? 3
+  const minSize = opts.minSize ?? 4.5
+  let size = opts.size
+  doc.font(opts.font).fillColor(opts.color || '#111')
+
+  const fits = (s: number) => {
+    doc.fontSize(s)
+    const h = doc.heightOfString(raw, { width: maxW, lineGap: 0 })
+    return h <= Math.min(maxH, s * 1.2 * maxLines + 1)
+  }
+
+  while (size > minSize && !fits(size)) size -= 0.5
+  doc.fontSize(size)
+  doc.text(raw, x, y, {
+    width: maxW,
+    height: Math.min(maxH, size * 1.25 * maxLines + 2),
+    lineGap: 0.5,
+    ellipsis: true,
   })
 }
 
-/** Generate multi-label PDF; QR encodes permanent public asset URL (no assignee on label). */
+/** Compact QR + asset tag + company only. */
 export async function generateLabelsPdf(
   assetTagsOrIds: (string | number)[],
   opts?: { userId?: number; persist?: boolean },
@@ -57,7 +108,8 @@ export async function generateLabelsPdf(
   const assets = await loadAssets(assetTagsOrIds)
   if (!assets.length) throw new Error('No assets found for labels')
 
-  const doc = new PDFDocument({ size: [288, 144], margin: 12 }) // 4" x 2" label
+  const pageSize: [number, number] = [LABEL_W, LABEL_H]
+  const doc = new PDFDocument({ size: pageSize, margin: 0 })
   const chunks: Buffer[] = []
   doc.on('data', (c) => chunks.push(c))
 
@@ -69,33 +121,60 @@ export async function generateLabelsPdf(
 
   for (let i = 0; i < assets.length; i++) {
     const a = assets[i]
-    if (i > 0) doc.addPage({ size: [288, 144], margin: 12 })
+    if (i > 0) doc.addPage({ size: pageSize, margin: 0 })
 
     const qr = await ensureAssetQr(a.id, { refreshImage: true })
     qrMeta.push({ asset_tag: a.asset_tag, public_url: qr.public_url, qr_token: qr.qr_token })
 
-    doc.fontSize(9).fillColor('#333').text('Refex IT Asset', { align: 'left' })
-    doc.moveDown(0.2)
-    doc.fontSize(14).fillColor('#000').font('Helvetica-Bold').text(a.asset_tag)
-    doc.font('Helvetica').fontSize(9).fillColor('#444')
-    // Stable identity fields only — never print assigned user (reassignable)
-    if (a.name) doc.text(String(a.name))
-    if (a.model_name) doc.text(`${a.model_name}${a.model_number ? ` (${a.model_number})` : ''}`)
-    if (a.serial) doc.text(`S/N: ${a.serial}`)
-    if (a.company_name) doc.text(`Co: ${a.company_name}`)
-    if (a.location_name) doc.text(`Loc: ${a.location_name}`)
+    // Full boxed border — cut/print outside this box; content stays inside
+    const boxX = OUTER
+    const boxY = OUTER
+    const boxW = LABEL_W - OUTER * 2
+    const boxH = LABEL_H - OUTER * 2
+    doc.save()
+    doc.lineWidth(0.75).strokeColor('#000')
+      .rect(boxX, boxY, boxW, boxH)
+      .stroke()
+    doc.restore()
 
-    try {
-      const bar = await barcodePng(a.asset_tag)
-      doc.image(bar, 12, 100, { width: 150, height: 28 })
-    } catch { /* ignore barcode errors */ }
+    const contentLeft = boxX + INNER + LEFT_EXTRA
+    const contentRight = boxX + boxW - INNER
+    const contentTop = boxY + INNER
+    const contentBottom = boxY + boxH - INNER
+    const contentH = contentBottom - contentTop
+
+    // Slightly smaller QR → wider text column for full company names
+    const qrSize = Math.min(32, contentH)
+    const qrX = contentLeft
+    const qrY = contentTop + (contentH - qrSize) / 2
+    const gap = 4
+    const textX = qrX + qrSize + gap
+    const textW = Math.max(40, contentRight - textX)
+    const tagH = 10
+    let textY = contentTop + 4
 
     try {
       const pngPath = path.join(storageRoot, qr.qr_image_path)
       if (fs.existsSync(pngPath)) {
-        doc.image(pngPath, 200, 58, { width: 64, height: 64 })
+        doc.image(pngPath, qrX, qrY, { width: qrSize, height: qrSize })
       }
     } catch { /* ignore */ }
+
+    drawFitLine(doc, a.asset_tag, textX, textY, textW, {
+      font: 'Helvetica-Bold',
+      size: 6.5,
+      minSize: 4.5,
+    })
+    textY += tagH
+
+    const companyMaxH = contentBottom - textY
+    drawWrappedText(doc, a.company_name ? String(a.company_name) : '—', textX, textY, textW, companyMaxH, {
+      font: 'Helvetica',
+      size: 5.5,
+      minSize: 4.5,
+      color: '#111',
+      maxLines: 3,
+    })
 
     await markLabelPrinted(a.id)
   }

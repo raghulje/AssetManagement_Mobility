@@ -5,16 +5,18 @@ import { AppSelect } from '../components/ui'
 import { api } from '../api/client'
 import { formatINR } from '../utils/money'
 import { downloadAuthedCsv, downloadCsv } from '../utils/csv'
+import { formatAppDateTime } from '../lib/datetime'
 
 const reportCards = [
-  { to: '/reports/activity', icon: 'fas fa-history', title: 'Activity Report', desc: 'Audit trail with filters for action, item type, and date range.' },
+  { to: '/reports/activity', icon: 'fas fa-history', title: 'Activity Report', desc: 'Activity trail with filters for action, item type, and date range.' },
   { to: '/reports/custom', icon: 'fas fa-file-alt', title: 'Custom Asset Report', desc: 'Column picker, assignment filters, date ranges, CSV export.' },
-  { to: '/reports/audit', icon: 'fas fa-clipboard-check', title: 'Audit Report', desc: 'Assets due for or past audit.' },
+  // { to: '/reports/audit', icon: 'fas fa-clipboard-check', title: 'Audit Report', desc: 'Assets due for or past audit.' }, // Audit feature — restore when needed
   { to: '/reports/depreciation', icon: 'fas fa-chart-line', title: 'Depreciation Report', desc: 'Book value and depreciation schedule.' },
   { to: '/reports/licenses', icon: 'fas fa-save', title: 'License Report', desc: 'License utilization across software products.' },
   { to: '/reports/maintenances', icon: 'fas fa-wrench', title: 'Maintenance Report', desc: 'Repair and maintenance history.' },
   { to: '/reports/unaccepted', icon: 'fas fa-exclamation-triangle', title: 'Unaccepted Assets', desc: 'Assets awaiting user acceptance.' },
   { to: '/reports/accessories', icon: 'fas fa-keyboard', title: 'Accessory Report', desc: 'Accessory assignments and stock levels.' },
+  { to: '/hardware/agent-activity', icon: 'fas fa-satellite-dish', title: 'Agent activity', desc: 'ITAgent sync attempts — updated, created, unmatched, failed.' },
 ]
 
 function ReportShell({
@@ -103,7 +105,7 @@ export function ReportsHub() {
   }, [])
 
   const kpis = [
-    { label: 'Audit Due', value: hub.audit_due, icon: 'fas fa-clipboard-check', tone: 'warning' },
+    // { label: 'Audit Due', value: hub.audit_due, icon: 'fas fa-clipboard-check', tone: 'warning' }, // Audit feature — restore when needed
     { label: 'EOL Due', value: hub.eol_due, icon: 'fas fa-hourglass-end', tone: 'danger' },
     { label: 'Due for Unassign', value: hub.checkin_due, icon: 'fas fa-undo', tone: 'info' },
     { label: 'Licenses Exhausted', value: hub.licenses_exhausted, icon: 'fas fa-save', tone: 'success' },
@@ -159,14 +161,20 @@ export function ActivityReport() {
 
   useEffect(() => { load() }, [])
 
+  const mappedRows: Record<string, unknown>[] = rows.map((a) => ({
+    ...a,
+    action_date: formatAppDateTime(a.action_date),
+    action_type: String(a.action_type) === 'checkout' ? 'assign' : String(a.action_type) === 'checkin' ? 'unassign' : a.action_type,
+  }))
+
   const exportCsv = () => {
     downloadCsv(
       'activity-report.csv',
       ['Date', 'Admin', 'Action', 'Item', 'Target', 'Notes'],
-      rows.map((a) => [
+      mappedRows.map((a) => [
         String(a.action_date ?? ''),
         String(a.admin ?? ''),
-        String(a.action_type) === 'checkout' ? 'assign' : String(a.action_type) === 'checkin' ? 'unassign' : String(a.action_type ?? ''),
+        String(a.action_type ?? ''),
         String(a.item_name ?? ''),
         String(a.target_name ?? ''),
         String(a.note ?? ''),
@@ -189,7 +197,11 @@ export function ActivityReport() {
                 { value: 'checkin', label: 'unassign' },
                 { value: 'create', label: 'create' },
                 { value: 'update', label: 'update' },
-                { value: 'audit', label: 'audit' },
+                // { value: 'audit', label: 'audit' }, // Audit feature — restore when needed
+                { value: 'agent_update', label: 'agent_update' },
+                { value: 'agent_create', label: 'agent_create' },
+                { value: 'maintenance', label: 'maintenance' },
+                { value: 'maintenance_update', label: 'maintenance_update' },
                 { value: 'accepted', label: 'accepted' },
                 { value: 'import', label: 'import' },
                 { value: 'uploaded', label: 'uploaded' },
@@ -216,15 +228,12 @@ export function ActivityReport() {
       )}
       onExport={exportCsv}
       loading={loading}
-      empty={!loading && rows.length === 0}
-      rowCount={rows.length}
+      empty={!loading && mappedRows.length === 0}
+      rowCount={mappedRows.length}
     >
       <DenseTable
         columns={[['action_date', 'Date'], ['admin', 'Admin'], ['action_type', 'Action'], ['item_name', 'Item'], ['target_name', 'Target'], ['note', 'Notes']]}
-        rows={rows.map((a) => ({
-          ...a,
-          action_type: String(a.action_type) === 'checkout' ? 'assign' : String(a.action_type) === 'checkin' ? 'unassign' : a.action_type,
-        }))}
+        rows={mappedRows}
       />
     </ReportShell>
   )
@@ -236,7 +245,9 @@ const CUSTOM_FIELDS = [
   ['assigned_to', 'Assigned To'], ['username', 'Username'], ['email', 'Email'],
   ['location', 'Location'], ['company', 'Company'], ['supplier', 'Supplier'],
   ['purchase_cost', 'Purchase Cost'], ['purchase_date', 'Purchase Date'],
-  ['expected_checkin', 'Expected Return'], ['next_audit_date', 'Next Audit'], ['notes', 'Notes'],
+  ['expected_checkin', 'Expected Return'],
+  // ['next_audit_date', 'Next Audit'], // Audit feature — restore when needed
+  ['notes', 'Notes'],
 ] as const
 
 const fieldLabel = (key: string) => CUSTOM_FIELDS.find(([k]) => k === key)?.[1] || key
@@ -364,6 +375,7 @@ function SimpleApiReport({
   )
 }
 
+/** Audit feature — restore route `/reports/audit` in App.tsx when needed. */
 export function AuditReport() {
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [loading, setLoading] = useState(true)

@@ -62,7 +62,13 @@ export default function PublicAsset() {
       })
       .catch((e: Error) => {
         setAsset(null)
-        setError(e.message || 'Asset not found')
+        const msg = e.message || 'Asset not found'
+        // Typical when a production build still points API at localhost on a phone
+        setError(
+          /failed to fetch|networkerror|load failed/i.test(msg)
+            ? `${msg}. Open this page on the same Wi‑Fi as the server (${window.location.origin}) and ensure the API is reachable at ${getApiBase()}.`
+            : msg,
+        )
       })
       .finally(() => setLoading(false))
   }, [token])
@@ -124,8 +130,10 @@ export default function PublicAsset() {
           <Field label="EOL Date" value={asset.asset_eol_date} />
           <Field label="Last Checkout" value={asset.last_checkout} />
           <Field label="Last Checkin" value={asset.last_checkin} />
+          {/* Audit feature — restore when needed
           <Field label="Last Audit" value={asset.last_audit_date} />
           <Field label="Next Audit" value={asset.next_audit_date} />
+          */}
           <Field label="Label Printed" value={asset.label_printed_at} />
           <Field label="Print Count" value={asset.label_print_count} />
           <Field label="Agent Hostname" value={asset.agent_hostname} />

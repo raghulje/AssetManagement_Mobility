@@ -73,13 +73,22 @@ export const hardwareApi = {
   checkin: (id: number | string, body: unknown) => api(`/hardware/${id}/checkin`, { method: 'POST', json: body }),
   replace: (id: number | string, body: { new_asset_id: number; reason: string }) =>
     api(`/hardware/${id}/replace`, { method: 'POST', json: body }),
+  // Audit feature — UI routes commented out; keep API helper for later
   audit: (id: number | string, body: unknown) => api(`/hardware/${id}/audit`, { method: 'POST', json: body }),
   history: (id: number | string) => api<ApiList<Record<string, unknown>>>(`/hardware/${id}/history`),
+  maintenances: (id: number | string) =>
+    api<ApiList<Record<string, unknown>>>(`/maintenances?asset_id=${encodeURIComponent(String(id))}`),
   agentStatus: (id: number | string) => api<Record<string, unknown>>(`/hardware/${id}/agent`),
   agentScan: (id: number | string, body: { command?: 'scan' | 'rerun' } = {}) =>
     api(`/hardware/${id}/agent/scan`, { method: 'POST', json: body }),
   agentSnapshots: (id: number | string, limit = 20) =>
     api<ApiList<Record<string, unknown>>>(`/hardware/${id}/agent/snapshots?limit=${limit}`),
+  agentSyncLogs: (params: { limit?: number; search?: string } = {}) => {
+    const q = new URLSearchParams()
+    if (params.limit) q.set('limit', String(params.limit))
+    if (params.search) q.set('search', params.search)
+    return api<ApiList<Record<string, unknown>>>(`/hardware/agent-sync-logs?${q}`)
+  },
 }
 
 export const dashboardApi = {
@@ -113,6 +122,22 @@ export const usersApi = {
   remove: (id: number | string) =>
     api<{ status: string; messages: string[] }>(`/users/${id}`, { method: 'DELETE' }),
   assets: (id: number | string) => api<ApiList<Record<string, unknown>>>(`/users/${id}/assets`),
+}
+
+export const groupsApi = {
+  catalog: () => api<{ modules: string[]; module_actions: Record<string, string[]>; keys: Array<{ key: string; module: string; action: string; label: string }> }>('/groups/catalog'),
+  list: () => api<ApiList<Record<string, unknown>>>('/groups'),
+  get: (id: number | string) => api<Record<string, unknown>>(`/groups/${id}`),
+  create: (body: unknown) =>
+    api<{ status: string; messages: string[]; payload: Record<string, unknown> }>('/groups', { method: 'POST', json: body }),
+  update: (id: number | string, body: unknown) =>
+    api<{ status: string; messages: string[]; payload: Record<string, unknown> }>(`/groups/${id}`, { method: 'PUT', json: body }),
+  remove: (id: number | string) =>
+    api<{ status: string; messages: string[] }>(`/groups/${id}`, { method: 'DELETE' }),
+  setMembers: (id: number | string, user_ids: number[]) =>
+    api(`/groups/${id}/members`, { method: 'PUT', json: { user_ids } }),
+  setUserRoles: (userId: number | string, group_ids: number[]) =>
+    api(`/groups/users/${userId}/roles`, { method: 'PUT', json: { group_ids } }),
 }
 
 export const mastersApi = {

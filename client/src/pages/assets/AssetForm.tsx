@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import AppLayout from '../../layout/AppLayout'
 import { DateField, Field, FileInput, PageForm } from '../../components/ui'
 import { MasterSelect, masterPayloadId } from '../../components/MasterSelect'
@@ -8,7 +8,7 @@ import AssetAttachments, {
   type PendingAttachment,
 } from '../../components/AssetAttachments'
 import { hardwareApi, mastersApi, type SelectOption } from '../../api/client'
-import { getApiBase, getStorageBase } from '../../api/baseUrl'
+import { assetImageSrc, getApiBase } from '../../api/baseUrl'
 import { employeesApi } from '../../api/employees'
 import { useToast } from '../../components/Toast'
 
@@ -63,8 +63,17 @@ function dateVal(v: unknown): string {
 export default function AssetForm() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
   const toast = useToast()
   const isEdit = Boolean(id)
+  const fromEmployeeId = params.get('from') === 'employee' ? params.get('employee_id') : null
+  const returnQs = useMemo(() => {
+    if (!fromEmployeeId) return ''
+    return `?from=employee&employee_id=${encodeURIComponent(fromEmployeeId)}`
+  }, [fromEmployeeId])
+  const assetReturnPath = id
+    ? (fromEmployeeId ? `/employees/${fromEmployeeId}` : `/hardware/${id}${returnQs}`)
+    : '/hardware'
   const [tab, setTab] = useState<'details' | 'attachments'>('details')
   const [form, setForm] = useState<FormState>(empty)
   const [error, setError] = useState('')
@@ -73,6 +82,9 @@ export default function AssetForm() {
   const [empSearch, setEmpSearch] = useState('')
   const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([])
   const [imagePath, setImagePath] = useState<string | null>(null)
+  const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const [pendingImage, setPendingImage] = useState<File | null>(null)
+  const [pendingImagePreview, setPendingImagePreview] = useState<string | null>(null)
   const [imageBusy, setImageBusy] = useState(false)
   const [imageMsg, setImageMsg] = useState('')
 
@@ -148,36 +160,60 @@ export default function AssetForm() {
           assign_employee_id: '',
         })
         setImagePath(a.image ? String(a.image) : null)
+        setImageUrl(a.image_url ? String(a.image_url) : null)
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
   }, [id])
 
-  const uploadImage = async (file: File) => {
-    if (!id) return
+  useEffect(() => {
+    if (!pendingImage) {
+      setPendingImagePreview(null)
+      return
+    }
+    const url = URL.createObjectURL(pendingImage)
+    setPendingImagePreview(url)
+    return () => URL.revokeObjectURL(url)
+  }, [pendingImage])
+
+  const uploadImage = async (file: File, assetId: string | number = id || '') => {
+    if (!assetId) return
     setImageBusy(true)
     setImageMsg('')
     try {
       const fd = new FormData()
       fd.append('file', file)
       const t = localStorage.getItem('refex_token')
-      const res = await fetch(`${getApiBase()}/hardware/${id}/files?kind=image`, {
+      const res = await fetch(`${getApiBase()}/hardware/${assetId}/files?kind=image`, {
         method: 'POST',
         headers: t ? { Authorization: `Bearer ${t}` } : {},
         body: fd,
       })
       const data = await res.json()
       if (!res.ok) throw new Error((data.messages || []).join(', ') || 'Upload failed')
-      const a = await hardwareApi.get(id)
+      const a = await hardwareApi.get(assetId)
       setImagePath(a.image ? String(a.image) : null)
+      setImageUrl(a.image_url ? String(a.image_url) : (data?.payload?.url ? String(data.payload.url) : null))
+      setPendingImage(null)
       setImageMsg('Image uploaded')
       toast.success('Image uploaded')
     } catch (e) {
       setImageMsg(e instanceof Error ? e.message : 'Upload failed')
       toast.error(e instanceof Error ? e.message : 'Upload failed')
+      throw e
     } finally {
       setImageBusy(false)
     }
+  }
+
+  const onPickImage = (f: File | null) => {
+    if (!f) return
+    if (isEdit && id) {
+      void uploadImage(f)
+      return
+    }
+    setPendingImage(f)
+    setImageMsg(`${f.name} queued — will upload when you create the asset`)
   }
 
   const submit = async () => {
@@ -210,7 +246,7 @@ export default function AssetForm() {
       if (isEdit && id) {
         await hardwareApi.update(id, body)
         toast.success('Asset updated')
-        navigate(`/hardware/${id}`)
+        navigate(fromEmployeeId ? `/employees/${fromEmployeeId}` : `/hardware/${id}${returnQs}`)
         return
       }
 
@@ -228,6 +264,13 @@ export default function AssetForm() {
       if (newId && pendingFiles.length) {
         for (const p of pendingFiles) {
           await uploadAssetFile(newId, p.file, p.kind)
+        }
+      }
+      if (newId && pendingImage) {
+        try {
+          await uploadImage(pendingImage, newId)
+        } catch {
+          toast.error('Asset created, but image upload failed — use Edit to retry')
         }
       }
       toast.success(form.assign_employee_id ? 'Asset created and assigned' : 'Asset created')
@@ -275,7 +318,7 @@ export default function AssetForm() {
 
       {tab === 'details' && (
         <PageForm
-          cancelTo={isEdit ? `/hardware/${id}` : '/hardware'}
+          cancelTo={isEdit ? assetReturnPath : '/hardware'}
           onSubmit={() => { void submit() }}
           submitLabel={busy ? 'Saving…' : isEdit ? 'Update' : 'Create'}
           submitDisabled={busy}
@@ -464,26 +507,27 @@ export default function AssetForm() {
             />
           </Field>
 
-          {isEdit ? (
-            <Field label="Asset image">
-              {imagePath ? (
+          <Field label="Asset image">
+            {(() => {
+              const src = assetImageSrc(imageUrl || imagePath) || pendingImagePreview
+              return src ? (
                 <img
-                  src={`${getStorageBase()}/storage/${imagePath.replace(/^public\//, '')}`}
+                  src={src}
                   alt=""
                   style={{ display: 'block', maxWidth: '100%', maxHeight: 200, marginBottom: 10 }}
                 />
               ) : (
                 <p className="help-block" style={{ marginTop: 0 }}>No image yet</p>
-              )}
-              <FileInput
-                accept="image/*"
-                disabled={imageBusy}
-                label="Upload image"
-                onChange={(f) => { if (f) void uploadImage(f) }}
-              />
-              {imageMsg ? <span className="help-block">{imageMsg}</span> : null}
-            </Field>
-          ) : null}
+              )
+            })()}
+            <FileInput
+              accept="image/*"
+              disabled={imageBusy}
+              label={isEdit ? 'Upload image' : 'Choose image'}
+              onChange={(f) => onPickImage(f)}
+            />
+            {imageMsg ? <span className="help-block">{imageMsg}</span> : null}
+          </Field>
         </PageForm>
       )}
 

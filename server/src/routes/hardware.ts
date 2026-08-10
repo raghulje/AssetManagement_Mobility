@@ -3,6 +3,7 @@ import { all, get, run, now, limitSql } from '../db/index.js'
 import { fail, okItem, okList, okMessage } from '../utils/response.js'
 import { transformAsset } from '../services/transformers.js'
 import { logAction } from '../services/actionLog.js'
+import { actorLabel, notifyWorkflow, resolveAssigneeEmail } from '../services/notify.js'
 
 const router = Router()
 
@@ -292,6 +293,34 @@ router.get('/eol/due', async (_req, res) => {
   return okList(res, rows)
 })
 
+/** Global ITAgent sync activity (session auth) — must be before /:id */
+router.get('/agent-sync-logs', async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 100, 500)
+  const q = String(req.query.search || '').trim()
+  let sql = `
+    SELECT l.*, a.asset_tag as linked_asset_tag
+    FROM agent_sync_logs l
+    LEFT JOIN assets a ON a.id = l.asset_id
+    WHERE 1=1
+  `
+  const params: unknown[] = []
+  if (q) {
+    sql += ` AND (
+      l.hostname LIKE ? OR l.serial_number LIKE ? OR l.asset_tag LIKE ?
+      OR a.asset_tag LIKE ? OR l.message LIKE ? OR l.action LIKE ?
+    )`
+    const like = `%${q}%`
+    params.push(like, like, like, like, like, like)
+  }
+  sql += ` ORDER BY l.id DESC LIMIT ${limit}`
+  try {
+    const rows = await all(sql, params)
+    return okList(res, rows)
+  } catch (e) {
+    return fail(res, e instanceof Error ? e.message : 'Failed to load agent sync logs', 500)
+  }
+})
+
 router.get('/:id', async (req, res) => {
   const asset = await transformAsset(Number(req.params.id))
   if (!asset) return fail(res, 'Asset not found', 404)
@@ -387,6 +416,21 @@ router.post('/', async (req, res) => {
   ])
   const id = Number(info.insertId)
   await logAction({ userId: req.user?.id, actionType: 'create', itemType: 'asset', itemId: id })
+  notifyWorkflow({
+    category: 'crud',
+    event: 'asset.created',
+    subject: `Asset created: ${b.asset_tag}`,
+    title: 'New asset created',
+    intro: 'A new asset was added to the inventory.',
+    fields: [
+      { label: 'Asset tag', value: String(b.asset_tag) },
+      { label: 'Serial', value: String(b.serial || '—') },
+      { label: 'Created by', value: actorLabel(req.user) },
+    ],
+    ctaPath: `/hardware/${id}`,
+    itemType: 'asset',
+    itemId: id,
+  })
   return okMessage(res, 'Asset created successfully', await transformAsset(id), 201)
 })
 
@@ -420,9 +464,24 @@ async function updateAsset(req: import('express').Request, res: import('express'
 
 router.delete('/:id', async (req, res) => {
   const id = Number(req.params.id)
-  if (!(await transformAsset(id))) return fail(res, 'Asset not found', 404)
+  const existing = await transformAsset(id)
+  if (!existing) return fail(res, 'Asset not found', 404)
   await run(`UPDATE assets SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now(), now(), id])
   await logAction({ userId: req.user?.id, actionType: 'delete', itemType: 'asset', itemId: id })
+  notifyWorkflow({
+    category: 'crud',
+    event: 'asset.deleted',
+    subject: `Asset deleted: ${existing.asset_tag}`,
+    title: 'Asset deleted',
+    intro: 'An asset was removed from active inventory.',
+    fields: [
+      { label: 'Asset tag', value: String(existing.asset_tag || id) },
+      { label: 'Deleted by', value: actorLabel(req.user) },
+    ],
+    ctaPath: '/hardware',
+    itemType: 'asset',
+    itemId: id,
+  })
   return okMessage(res, 'Asset deleted successfully')
 })
 
@@ -493,6 +552,31 @@ router.post('/:id/checkout', async (req, res) => {
     }
   }
 
+  const assigneeEmail = await resolveAssigneeEmail(checkoutToType, assignedTo)
+  const targetName = checkoutToType === 'employee'
+    ? (await get<{ n: string }>(`SELECT CONCAT(first_name,' ',last_name,' (',employee_code,')') as n FROM employees WHERE id = ?`, [assignedTo]))?.n
+    : checkoutToType === 'user'
+      ? (await get<{ n: string }>(`SELECT CONCAT(first_name,' ',last_name) as n FROM users WHERE id = ?`, [assignedTo]))?.n
+      : String(assignedTo)
+  notifyWorkflow({
+    category: 'custody',
+    event: 'asset.assigned',
+    subject: `Asset assigned: ${asset.asset_tag}`,
+    title: 'Asset assigned',
+    intro: 'An asset has been assigned to a user/employee.',
+    fields: [
+      { label: 'Asset tag', value: String(asset.asset_tag || id) },
+      { label: 'Assigned to', value: String(targetName || assignedTo) },
+      { label: 'Reason', value: reason || '—' },
+      { label: 'Assigned by', value: actorLabel(req.user) },
+    ],
+    ctaPath: `/hardware/${id}`,
+    itemType: 'asset',
+    itemId: id,
+    assigneeEmail,
+    assigneeOnlyExtraNote: 'An IT asset has been assigned to you. Please take care of it and report issues promptly.',
+  })
+
   return okMessage(res, 'Asset assigned successfully', await transformAsset(id))
 })
 
@@ -533,6 +617,26 @@ router.post('/:id/checkin', async (req, res) => {
     targetId: prevTarget,
     locationId: locationId ? Number(locationId) : null,
     note: reason,
+  })
+
+  const prevEmail = await resolveAssigneeEmail(prevType, prevTarget)
+  notifyWorkflow({
+    category: 'custody',
+    event: 'asset.unassigned',
+    subject: `Asset unassigned: ${asset.asset_tag}`,
+    title: 'Asset unassigned',
+    intro: 'An asset has been returned to stock (unassigned).',
+    fields: [
+      { label: 'Asset tag', value: String(asset.asset_tag || id) },
+      { label: 'Previous assignee id', value: String(prevTarget) },
+      { label: 'Reason', value: reason },
+      { label: 'Unassigned by', value: actorLabel(req.user) },
+    ],
+    ctaPath: `/hardware/${id}`,
+    itemType: 'asset',
+    itemId: id,
+    assigneeEmail: prevEmail,
+    assigneeOnlyExtraNote: 'An IT asset previously assigned to you has been unassigned / returned.',
   })
 
   return okMessage(res, 'Asset unassigned successfully', await transformAsset(id))
@@ -613,6 +717,27 @@ router.post('/:id/replace', async (req, res) => {
       JSON.stringify({ old_asset_id: oldId }),
       ts, ts, ts,
     ])
+  })
+
+  const empEmail = await resolveAssigneeEmail('employee', employeeId)
+  notifyWorkflow({
+    category: 'custody',
+    event: 'asset.replaced',
+    subject: `Asset replaced for employee #${employeeId}`,
+    title: 'Asset replaced',
+    intro: 'An assigned asset was replaced with another asset for the same employee.',
+    fields: [
+      { label: 'Previous asset', value: String(oldAsset.asset_tag || oldId) },
+      { label: 'New asset', value: String(newAsset.asset_tag || newId) },
+      { label: 'Employee id', value: String(employeeId) },
+      { label: 'Reason', value: reason },
+      { label: 'Replaced by', value: actorLabel(req.user) },
+    ],
+    ctaPath: `/hardware/${newId}`,
+    itemType: 'asset',
+    itemId: newId,
+    assigneeEmail: empEmail,
+    assigneeOnlyExtraNote: 'Your assigned asset was replaced. Please collect / use the new asset listed below.',
   })
 
   return okMessage(res, 'Asset replaced successfully', {

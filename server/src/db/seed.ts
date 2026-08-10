@@ -40,6 +40,13 @@ export async function seed() {
     await connRun(conn, `INSERT INTO users_groups (user_id, group_id) VALUES (1, 1)`)
   })
 
+  try {
+    const { ensureDefaultRoles } = await import('../services/permissions.js')
+    await ensureDefaultRoles()
+  } catch {
+    // roles filled on boot
+  }
+
   console.log('Seeded Refex bootstrap (admin only, no demo inventory)')
   console.log('Login: admin@refex.com / Welcome@2026')
 }

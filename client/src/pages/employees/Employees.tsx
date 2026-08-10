@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import AppLayout from '../../layout/AppLayout'
 import { AppSelect, Box, DataTable, Field, FileInput, PageForm, StackField } from '../../components/ui'
 import { DetailLayout, DetailPanel } from '../../components/DetailLayout'
@@ -7,11 +7,13 @@ import { ModuleInsights } from '../../components/ModuleInsights'
 import { useToast } from '../../components/Toast'
 import { employeesApi } from '../../api/employees'
 import { dashboardApi, hardwareApi } from '../../api/client'
+import { formatAppDateTime } from '../../lib/datetime'
 
 type Row = Record<string, unknown>
 
 export function EmployeesList() {
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(0)
   const [rows, setRows] = useState<Row[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -19,11 +21,12 @@ export function EmployeesList() {
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState('')
   const [insights, setInsights] = useState({ employees: 0, deployed: 0 })
+  const pageSize = 15
 
   const load = () => {
     setLoading(true)
     employeesApi
-      .list({ search: search || undefined, limit: 100 })
+      .list({ search: search || undefined, limit: pageSize, offset: page * pageSize })
       .then((res) => {
         setRows(res.rows)
         setTotal(res.total)
@@ -69,7 +72,12 @@ export function EmployeesList() {
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search])
+  }, [search, page])
+
+  const onSearch = (value: string) => {
+    setPage(0)
+    setSearch(value)
+  }
 
   const activeCount = rows.filter((r) =>
     String(r.employment_status_description || '') === 'Active' || r.employment_status === '1',
@@ -115,13 +123,18 @@ export function EmployeesList() {
       >
         <DataTable
           search={search}
-          onSearch={setSearch}
+          onSearch={onSearch}
           rows={rows}
           exportName="employees"
           storageKey="employees_columns"
           onRefresh={load}
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPageChange={setPage}
           onBulkDelete={async (ids) => {
             for (const id of ids) await employeesApi.remove(id)
+            load()
           }}
           columns={[
             {
@@ -213,6 +226,13 @@ export function EmployeeDetail() {
   const [stockOpts, setStockOpts] = useState<{ id: number; text: string }[]>([])
   const [busy, setBusy] = useState(false)
 
+  /** Open asset while preserving People module return context. */
+  const assetLink = (assetId: string | number, suffix = '') => {
+    const path = suffix ? `/hardware/${assetId}/${suffix}` : `/hardware/${assetId}`
+    if (!id) return path
+    return `${path}?from=employee&employee_id=${encodeURIComponent(id)}`
+  }
+
   const reload = () => {
     if (!id) return
     setLoading(true)
@@ -289,6 +309,45 @@ export function EmployeeDetail() {
     }
   }
 
+  const custodyHistory = useMemo(
+    () => history.filter((h) => ['checkout', 'checkin', 'replace_in', 'replace_out'].includes(String(h.action_type))),
+    [history],
+  )
+
+  const renderHistoryTable = (rows: Row[], emptyText: string) => (
+    <table className="table table-striped">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Action</th>
+          <th>Asset</th>
+          <th>Admin</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length === 0 && (
+          <tr><td colSpan={5} className="text-muted">{emptyText}</td></tr>
+        )}
+        {rows.map((h) => (
+          <tr key={String(h.id)}>
+            <td style={{ whiteSpace: 'nowrap' }} title={String(h.action_date || '')}>
+              {formatAppDateTime(h.action_date)}
+            </td>
+            <td>{actionLabel(String(h.action_type || ''))}</td>
+            <td>
+              {h.item_type === 'asset' && h.item_id
+                ? <Link to={assetLink(Number(h.item_id))}>{String(h.item_name || `Asset #${h.item_id}`)}</Link>
+                : String(h.item_name || '—')}
+            </td>
+            <td>{String(h.admin || '—')}</td>
+            <td>{String(h.note || '—')}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+
   if (loading) return <AppLayout title="Employee"><p className="text-muted">Loading…</p></AppLayout>
   if (!emp) {
     return (
@@ -325,7 +384,7 @@ export function EmployeeDetail() {
           { id: 'overview', label: 'Overview' },
           { id: 'hrms', label: 'HRMS Profile' },
           { id: 'assets', label: `Assets (${assets.length})` },
-          { id: 'history', label: 'History' },
+          { id: 'history', label: `History (${history.length})` },
         ]}
         activeTab={tab}
         onTabChange={(t) => setTab(t as typeof tab)}
@@ -344,20 +403,31 @@ export function EmployeeDetail() {
                 </div>
               </div>
               <div className="emp-hero-kpis">
-                <div className="emp-kpi">
+                <button type="button" className="emp-kpi emp-kpi-btn" onClick={() => setTab('assets')}>
                   <strong>{assets.length}</strong>
                   <span>Assigned assets</span>
-                </div>
-                <div className="emp-kpi">
-                  <strong>{history.filter((h) => ['checkout', 'checkin', 'replace_in', 'replace_out'].includes(String(h.action_type))).length}</strong>
+                </button>
+                <button type="button" className="emp-kpi emp-kpi-btn" onClick={() => setTab('history')}>
+                  <strong>{custodyHistory.length}</strong>
                   <span>Custody events</span>
-                </div>
+                </button>
                 <div className="emp-kpi">
-                  <strong className="emp-kpi-sm">{emp.synced_at ? String(emp.synced_at).slice(0, 16) : '—'}</strong>
+                  <strong className="emp-kpi-sm">{emp.synced_at ? formatAppDateTime(emp.synced_at) : '—'}</strong>
                   <span>Last synced</span>
                 </div>
               </div>
             </div>
+
+            <DetailPanel
+              title="Custody log"
+              tools={(
+                <button type="button" className="btn btn-default btn-xs" onClick={() => setTab('history')}>
+                  View full history
+                </button>
+              )}
+            >
+              {renderHistoryTable(custodyHistory.slice(0, 10), 'No assign / unassign events for this employee yet.')}
+            </DetailPanel>
 
             <DetailPanel title="Contact">
               <div className="emp-contact-grid">
@@ -387,7 +457,7 @@ export function EmployeeDetail() {
                 <ul className="emp-asset-summary">
                   {assets.map((a) => (
                     <li key={String(a.id)}>
-                      <Link to={`/hardware/${a.id}`}>{String(a.asset_tag)}</Link>
+                      <Link to={assetLink(Number(a.id))}>{String(a.asset_tag)}</Link>
                       <span>{String(a.name || '')}</span>
                     </li>
                   ))}
@@ -473,13 +543,13 @@ export function EmployeeDetail() {
                   const modelName = typeof model === 'object' && model ? model.name : model
                   return (
                     <tr key={String(a.id)}>
-                      <td><Link to={`/hardware/${a.id}`}>{String(a.asset_tag)}</Link></td>
+                      <td><Link to={assetLink(Number(a.id))}>{String(a.asset_tag)}</Link></td>
                       <td>{String(a.name || '—')}</td>
                       <td>{String(modelName || '—')}</td>
                       <td>{String(status?.name || '—')}</td>
                       <td className="actions">
-                        <Link to={`/hardware/${a.id}`} className="btn btn-xs btn-default">View</Link>
-                        <Link to={`/hardware/${a.id}/checkin`} className="btn btn-xs btn-primary">Unassign</Link>
+                        <Link to={assetLink(Number(a.id))} className="btn btn-xs btn-default">View</Link>
+                        <Link to={assetLink(Number(a.id), 'checkin')} className="btn btn-xs btn-primary">Unassign</Link>
                         <button
                           type="button"
                           className="btn btn-xs btn-theme"
@@ -502,37 +572,14 @@ export function EmployeeDetail() {
         )}
 
         {tab === 'history' && (
-          <DetailPanel title="Employee asset & profile history">
-            <table className="table table-striped">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Action</th>
-                  <th>Item</th>
-                  <th>Admin</th>
-                  <th>Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.length === 0 && (
-                  <tr><td colSpan={5} className="text-muted">No history yet</td></tr>
-                )}
-                {history.map((h) => (
-                  <tr key={String(h.id)}>
-                    <td>{String(h.action_date || '—')}</td>
-                    <td>{actionLabel(String(h.action_type || ''))}</td>
-                    <td>
-                      {h.item_type === 'asset' && h.item_id
-                        ? <Link to={`/hardware/${h.item_id}`}>{String(h.item_name || h.item_id)}</Link>
-                        : String(h.item_name || '—')}
-                    </td>
-                    <td>{String(h.admin || '—')}</td>
-                    <td>{String(h.note || '—')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </DetailPanel>
+          <>
+            <DetailPanel title="Custody events (assign / unassign / replace)">
+              {renderHistoryTable(custodyHistory, 'No custody events yet.')}
+            </DetailPanel>
+            <DetailPanel title="All employee history">
+              {renderHistoryTable(history, 'No history yet.')}
+            </DetailPanel>
+          </>
         )}
       </DetailLayout>
 

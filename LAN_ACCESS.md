@@ -1,39 +1,56 @@
-# LAN / Wi‑Fi access (phone QR testing)
+# LAN / Wi‑Fi access (Biogas_MIS_Vizag style)
 
-Your PC Wi‑Fi IP right now: **10.5.7.96**
+**Recommended:** single URL on port **3001** (server serves built UI).
 
-## Restart both apps
+Your PC Wi‑Fi IP (update when it changes): check with PowerShell below.
 
-Stop the current `npm run dev` processes, then:
+## Production-style LAN (recommended)
 
 ```powershell
-# Terminal 1 — API (listens on all interfaces)
+cd client
+npm run build
+
+cd ..\server
+# Ensure SERVE_CLIENT=true and PUBLIC_APP_URL=http://YOUR_IP:3001 in .env
+npm start
+```
+
+| What | URL |
+|------|-----|
+| App (login) | `http://YOUR_IP:3001` |
+| API health | `http://YOUR_IP:3001/api/v1/status` |
+| Public asset QR | `http://YOUR_IP:3001/asset/{qr_token}` |
+
+Full steps: [DEPLOY.md](DEPLOY.md).
+
+## Split dev (Vite + API)
+
+Only if `SERVE_CLIENT=false`:
+
+```powershell
+# Terminal 1
 cd server
 npm run dev
 
-# Terminal 2 — UI (Vite --host)
+# Terminal 2
 cd client
 npm run dev
 ```
 
-## Open from another device on the same Wi‑Fi
-
 | What | URL |
 |------|-----|
-| App (login) | http://10.5.7.96:5173 |
-| API health | http://10.5.7.96:3001/api/v1/status |
-| Public asset (after Print Label) | http://10.5.7.96:5173/asset/{qr_token} |
+| App | `http://YOUR_IP:5173` |
+| API | `http://YOUR_IP:3001/api/v1/status` |
 
-## QR labels
+## Login note
 
-`PUBLIC_APP_URL` in `server/.env` is set to `http://10.5.7.96:5173`.  
-**Print Label** again so the QR PNG encodes the LAN URL (token stays the same).
+Same Wi‑Fi only opens the login page. Accounts must exist and be listed in `ALLOWED_LOGIN_EMAILS`.
 
-## If the phone cannot connect
+## Firewall / network
 
-1. Same Wi‑Fi (not guest/isolated network)
-2. Windows Firewall: allow Node.js / ports **5173** and **3001** (Private networks)
-3. If your IP changes, update `PUBLIC_APP_URL` and `CLIENT_ORIGIN` in `server/.env`
+1. Same Wi‑Fi (not guest/isolated)
+2. Allow Node / port **3001** (and **5173** if using Vite) on Private networks
+3. If IP changes, update `PUBLIC_APP_URL`, `FRONTEND_URL`, `CLIENT_ORIGIN`
 
 ```powershell
 Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -like '10.*' -or $_.IPAddress -like '192.168.*' }

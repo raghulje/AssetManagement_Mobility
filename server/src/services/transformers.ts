@@ -67,6 +67,11 @@ export async function transformAsset(id: number) {
     assigned_to: a.assigned_to
       ? { id: a.assigned_to, name: a.assigned_name, type: a.assigned_type }
       : null,
+    image: a.image || null,
+    // Prefer /storage/<path under public/> so express.static(storage/public) serves it
+    image_url: a.image
+      ? `/storage/${String(a.image).replace(/\\/g, '/').replace(/^public\//, '')}`
+      : null,
     qr_token: a.qr_token || null,
     qr_url: a.qr_url || null,
     qr_image_path: a.qr_image_path || null,

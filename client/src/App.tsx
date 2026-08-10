@@ -8,9 +8,11 @@ import AssetDetail from './pages/assets/AssetDetail'
 import AssetForm from './pages/assets/AssetForm'
 import { AssetCheckout, AssetCheckin } from './pages/assets/AssetCheckout'
 import {
-  AssetAudit, AuditDue, EolDue, CheckinDue, QuickscanCheckin, BulkCheckout, BulkAudit,
+  // AssetAudit, AuditDue, BulkAudit, // Audit feature — restore when needed
+  EolDue, CheckinDue, QuickscanCheckin, BulkCheckout,
   RequestedAssets, Maintenances, MaintenanceForm, ImportHistory,
 } from './pages/assets/AssetExtras'
+import AgentActivity from './pages/assets/AgentActivity'
 import { LicensesList, LicenseDetail, LicenseForm, LicenseCheckout } from './pages/inventory/Licenses'
 import {
   AccessoriesList, AccessoryDetail, AccessoryForm, AccessoryCheckout,
@@ -35,7 +37,9 @@ import {
   FieldsList, FieldForm,
 } from './pages/settings/MasterData'
 import {
-  ReportsHub, ActivityReport, CustomReport, AuditReport, DepreciationReport,
+  ReportsHub, ActivityReport, CustomReport,
+  // AuditReport, // Audit feature — restore when needed
+  DepreciationReport,
   LicenseReport, MaintenanceReport, UnacceptedReport, AccessoryReport,
 } from './pages/Reports'
 import {
@@ -43,6 +47,8 @@ import {
   AccountPassword, AccountApi, AdminHub, ImportPage, RequestableItems,
   LoginPage, SettingsGeneral,
 } from './pages/Misc'
+import RolesPermissions from './pages/settings/RolesPermissions'
+import NotificationsSettings from './pages/settings/NotificationsSettings'
 import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordReset'
 import PublicAsset from './pages/assets/PublicAsset'
 
@@ -50,6 +56,19 @@ function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
   if (loading) return <div className="suite-page"><p style={{ padding: 40, textAlign: 'center' }}>Loading…</p></div>
   if (!user) return <Navigate to="/login" replace />
+  return children
+}
+
+function RequirePerm({ permission, children }: { permission: string; children: ReactNode }) {
+  const { can, loading } = useAuth()
+  if (loading) return <div className="suite-page"><p style={{ padding: 40, textAlign: 'center' }}>Loading…</p></div>
+  if (!can(permission)) {
+    return (
+      <div className="suite-page">
+        <p style={{ padding: 40, textAlign: 'center' }}>You do not have permission to view this page.</p>
+      </div>
+    )
+  }
   return children
 }
 
@@ -69,19 +88,22 @@ export default function App() {
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/hardware" element={<AssetsList />} />
                 <Route path="/hardware/create" element={<AssetForm />} />
+                {/* Audit feature — restore when needed
                 <Route path="/hardware/audit/due" element={<AuditDue />} />
+                <Route path="/hardware/bulkaudit" element={<BulkAudit />} />
+                <Route path="/hardware/:id/audit" element={<AssetAudit />} />
+                */}
                 <Route path="/hardware/eol/due" element={<EolDue />} />
                 <Route path="/hardware/checkins/due" element={<CheckinDue />} />
                 <Route path="/hardware/quickscancheckin" element={<QuickscanCheckin />} />
                 <Route path="/hardware/bulkcheckout" element={<BulkCheckout />} />
-                <Route path="/hardware/bulkaudit" element={<BulkAudit />} />
                 <Route path="/hardware/requested" element={<RequestedAssets />} />
                 <Route path="/hardware/history" element={<ImportHistory />} />
+                <Route path="/hardware/agent-activity" element={<AgentActivity />} />
                 <Route path="/hardware/:id/edit" element={<AssetForm />} />
                 <Route path="/hardware/:id/clone" element={<AssetForm />} />
                 <Route path="/hardware/:id/checkout" element={<AssetCheckout />} />
                 <Route path="/hardware/:id/checkin" element={<AssetCheckin />} />
-                <Route path="/hardware/:id/audit" element={<AssetAudit />} />
                 <Route path="/hardware/:id" element={<AssetDetail />} />
                 <Route path="/maintenances" element={<Maintenances />} />
                 <Route path="/maintenances/create" element={<MaintenanceForm />} />
@@ -159,7 +181,9 @@ export default function App() {
                 <Route path="/reports" element={<ReportsHub />} />
                 <Route path="/reports/activity" element={<ActivityReport />} />
                 <Route path="/reports/custom" element={<CustomReport />} />
+                {/* Audit feature — restore when needed
                 <Route path="/reports/audit" element={<AuditReport />} />
+                */}
                 <Route path="/reports/depreciation" element={<DepreciationReport />} />
                 <Route path="/reports/licenses" element={<LicenseReport />} />
                 <Route path="/reports/maintenances" element={<MaintenanceReport />} />
@@ -174,7 +198,9 @@ export default function App() {
                 <Route path="/admin" element={<AdminHub />} />
                 <Route path="/import" element={<ImportPage />} />
                 <Route path="/requestable" element={<RequestableItems />} />
-                <Route path="/settings" element={<SettingsGeneral />} />
+                <Route path="/settings" element={<RequirePerm permission="settings.view"><SettingsGeneral /></RequirePerm>} />
+                <Route path="/settings/roles" element={<RequirePerm permission="settings.view"><RolesPermissions /></RequirePerm>} />
+                <Route path="/settings/notifications" element={<RequirePerm permission="settings.view"><NotificationsSettings /></RequirePerm>} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </RequireAuth>

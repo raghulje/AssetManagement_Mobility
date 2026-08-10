@@ -1,4 +1,4 @@
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useEffect, useState, type FormEvent } from 'react'
 import AppLayout from '../../layout/AppLayout'
 import { AppSelect, Box, DateField, Field, PageForm } from '../../components/ui'
@@ -12,6 +12,7 @@ function nestName(v: unknown): string {
   return v != null && v !== '' ? String(v) : '—'
 }
 
+/** Audit feature — routes commented out in App.tsx; restore when needed. */
 export function AssetAudit() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -96,6 +97,7 @@ export function AssetAudit() {
   )
 }
 
+/** Audit feature — routes commented out in App.tsx; restore when needed. */
 export function AuditDue() {
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [loading, setLoading] = useState(true)
@@ -341,6 +343,7 @@ export function BulkCheckout() {
   )
 }
 
+/** Audit feature — routes commented out in App.tsx; restore when needed. */
 export function BulkAudit() {
   const navigate = useNavigate()
   const [tag, setTag] = useState('')
@@ -451,12 +454,38 @@ export function Maintenances() {
   )
 }
 
+const MAINTENANCE_TYPES = [
+  { value: 'Maintenance', label: 'Maintenance' },
+  { value: 'Repair', label: 'Repair' },
+  { value: 'Upgrade', label: 'Upgrade' },
+  { value: 'Software Support', label: 'Software Support' },
+  { value: 'Hardware Support', label: 'Hardware Support' },
+] as const
+
+function reasonHint(type: string) {
+  if (type === 'Repair') return 'Describe the fault / why this repair is needed.'
+  if (type === 'Upgrade') return 'Describe what is being upgraded and why.'
+  if (type === 'Software Support') return 'Describe the software issue or support needed.'
+  if (type === 'Hardware Support') return 'Describe the hardware issue or support needed.'
+  return 'Describe why this maintenance is needed.'
+}
+
+function assetLabel(a: Record<string, unknown>): string {
+  const tag = String(a.asset_tag || a.id || '')
+  const name = a.name ? String(a.name) : ''
+  return name ? `${tag} — ${name}` : tag
+}
+
 export function MaintenanceForm() {
   const { id } = useParams()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const toast = useToast()
   const isEdit = Boolean(id)
-  const [assetId, setAssetId] = useState('')
+  const prefAssetId = searchParams.get('asset_id') || ''
+  const assetLocked = Boolean(prefAssetId) && !isEdit
+  const [assetId, setAssetId] = useState(() => prefAssetId)
+  const [assetDisplay, setAssetDisplay] = useState('')
   const [title, setTitle] = useState('')
   const [type, setType] = useState('Maintenance')
   const [startDate, setStartDate] = useState('')
@@ -469,17 +498,38 @@ export function MaintenanceForm() {
   const [suppliers, setSuppliers] = useState<SelectOption[]>([])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [loading, setLoading] = useState(isEdit)
+  const [loading, setLoading] = useState(isEdit || Boolean(prefAssetId))
 
   useEffect(() => {
     hardwareApi.list({ limit: 500 }).then((r) => {
       setAssets((r.rows || []).map((a) => ({
         id: Number(a.id),
-        text: `${String(a.asset_tag || a.id)}${a.name ? ` — ${String(a.name)}` : ''}`,
+        text: assetLabel(a),
       })))
     }).catch(() => undefined)
     mastersApi.suppliers().then((r) => setSuppliers(r.results || [])).catch(() => undefined)
   }, [])
+
+  // Prefill + lock asset when opened from asset view (?asset_id=)
+  useEffect(() => {
+    if (isEdit || !prefAssetId) return
+    setAssetId(prefAssetId)
+    setLoading(true)
+    hardwareApi.get(prefAssetId)
+      .then((a) => {
+        const label = assetLabel(a)
+        setAssetDisplay(label)
+        setAssets((prev) => {
+          const idNum = Number(a.id)
+          if (prev.some((x) => x.id === idNum)) return prev
+          return [{ id: idNum, text: label }, ...prev]
+        })
+        const tag = String(a.asset_tag || a.id || '')
+        if (tag) setTitle((prev) => prev || `Maintenance — ${tag}`)
+      })
+      .catch(() => setAssetDisplay(`Asset #${prefAssetId}`))
+      .finally(() => setLoading(false))
+  }, [prefAssetId, isEdit])
 
   useEffect(() => {
     if (!id) return
@@ -488,13 +538,19 @@ export function MaintenanceForm() {
       .then((m) => {
         setAssetId(String(m.asset_id || ''))
         setTitle(String(m.title || ''))
-        setType(String(m.asset_maintenance_type || 'Maintenance'))
+        const t = String(m.asset_maintenance_type || 'Maintenance')
+        setType(MAINTENANCE_TYPES.some((x) => x.value === t) ? t : 'Maintenance')
         setStartDate(String(m.start_date || '').slice(0, 10))
         setCompletionDate(String(m.completion_date || '').slice(0, 10))
         setCost(m.cost != null ? String(m.cost) : '')
         setSupplierId(m.supplier_id != null ? String(m.supplier_id) : '')
         setNote(String(m.note || ''))
         setIsWarranty(Boolean(m.is_warranty))
+        if (m.asset_id) {
+          hardwareApi.get(String(m.asset_id))
+            .then((a) => setAssetDisplay(assetLabel(a)))
+            .catch(() => undefined)
+        }
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
@@ -509,6 +565,10 @@ export function MaintenanceForm() {
       setError('Asset is required')
       return
     }
+    if (!note.trim()) {
+      setError('Reason / description is required')
+      return
+    }
     setBusy(true)
     setError('')
     try {
@@ -519,20 +579,22 @@ export function MaintenanceForm() {
         completion_date: completionDate || null,
         cost: cost === '' ? 0 : Number(cost),
         supplier_id: supplierId ? Number(supplierId) : null,
-        note: note || null,
+        note: note.trim(),
         is_warranty: isWarranty ? 1 : 0,
         ...(!isEdit ? { asset_id: Number(assetId) } : {}),
       }
       if (isEdit && id) await api(`/maintenances/${id}`, { method: 'PUT', json: body })
       else await api('/maintenances', { method: 'POST', json: body })
       toast.success(isEdit ? 'Maintenance updated' : 'Maintenance created')
-      navigate('/maintenances')
+      navigate(assetId ? `/hardware/${assetId}` : '/maintenances')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed')
     } finally {
       setBusy(false)
     }
   }
+
+  const cancelTo = assetId ? `/hardware/${assetId}` : '/maintenances'
 
   if (loading) {
     return <AppLayout title="Maintenance"><p className="text-muted">Loading…</p></AppLayout>
@@ -542,42 +604,58 @@ export function MaintenanceForm() {
     <AppLayout title={isEdit ? 'Edit Maintenance' : 'Create Maintenance'}>
       {error ? <div className="callout callout-danger"><p>{error}</p></div> : null}
       <PageForm
-        cancelTo="/maintenances"
+        cancelTo={cancelTo}
         onSubmit={() => { void submit() }}
         submitLabel={busy ? 'Saving…' : 'Save'}
         submitDisabled={busy}
       >
         {!isEdit && (
           <Field label="Asset" required>
-            <AppSelect
-              value={assetId}
-              onChange={setAssetId}
-              required
-              searchable
-              options={[
-                { value: '', label: '—' },
-                ...assets.map((a) => ({ value: String(a.id), label: a.text })),
-              ]}
-            />
+            {assetLocked ? (
+              <>
+                <input className="form-control" value={assetDisplay || `Asset #${assetId}`} readOnly />
+                <input type="hidden" name="asset_id" value={assetId} />
+                <span className="help-block">Prefilled from the asset you opened. Cancel returns to that asset.</span>
+              </>
+            ) : (
+              <AppSelect
+                value={assetId}
+                onChange={setAssetId}
+                required
+                searchable
+                options={[
+                  { value: '', label: '—' },
+                  ...assets.map((a) => ({ value: String(a.id), label: a.text })),
+                ]}
+              />
+            )}
           </Field>
         )}
+        {isEdit && assetDisplay ? (
+          <Field label="Asset">
+            <input className="form-control" value={assetDisplay} readOnly />
+          </Field>
+        ) : null}
         <Field label="Title" required>
           <input className="form-control" value={title} onChange={(e) => setTitle(e.target.value)} required />
         </Field>
-        <Field label="Type">
+        <Field label="Type" required>
           <AppSelect
             value={type}
             onChange={setType}
-            options={[
-              { value: 'Maintenance', label: 'Maintenance' },
-              { value: 'Repair', label: 'Repair' },
-              { value: 'Upgrade', label: 'Upgrade' },
-              { value: 'PAT test', label: 'PAT test' },
-              { value: 'Calibration', label: 'Calibration' },
-              { value: 'Software Support', label: 'Software Support' },
-              { value: 'Hardware Support', label: 'Hardware Support' },
-            ]}
+            options={MAINTENANCE_TYPES.map((t) => ({ value: t.value, label: t.label }))}
           />
+        </Field>
+        <Field label="Reason / description" required>
+          <textarea
+            className="form-control"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={4}
+            required
+            placeholder={reasonHint(type)}
+          />
+          <span className="help-block">{reasonHint(type)} This is saved on the asset maintenance log.</span>
         </Field>
         <Field label="Start Date">
           <DateField value={startDate} onChange={setStartDate} />
@@ -603,9 +681,6 @@ export function MaintenanceForm() {
           <label className="checkbox-inline" style={{ paddingTop: 7 }}>
             <input type="checkbox" checked={isWarranty} onChange={(e) => setIsWarranty(e.target.checked)} /> Under warranty
           </label>
-        </Field>
-        <Field label="Notes">
-          <textarea className="form-control" value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
       </PageForm>
     </AppLayout>

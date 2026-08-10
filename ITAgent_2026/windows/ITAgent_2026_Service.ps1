@@ -1,10 +1,10 @@
-# ITAgent_2026 — long-running Windows agent
+# ITAgent_2026 - long-running Windows agent
 # Registers once, heartbeats, and runs inventory when the server queues a scan
 # (or on a slow periodic schedule).
 
 $ErrorActionPreference = 'Stop'
 
-$apiBase = if ($env:REFEX_API_URL) { $env:REFEX_API_URL.TrimEnd('/') } else { 'http://localhost:3001/api/v1' }
+$apiBase = if ($env:REFEX_API_URL) { $env:REFEX_API_URL.TrimEnd('/') } else { 'http://10.5.7.225:3001/api/v1' }
 $agentKey = $env:REFEX_AGENT_KEY
 $assetTag = $env:REFEX_ASSET_TAG
 $pollMs = if ($env:REFEX_AGENT_POLL_MS) { [int]$env:REFEX_AGENT_POLL_MS } else { 30000 }
@@ -106,7 +106,7 @@ function Register-Agent {
   $headers = @{ 'Content-Type' = 'application/json' }
   if ($agentKey) { $headers['X-Agent-Key'] = $agentKey }
 
-  Write-Host "Registering agent at $apiBase/agent/register …"
+  Write-Host "Registering agent at $apiBase/agent/register ..."
   $res = Invoke-RestMethod -Uri "$apiBase/agent/register" -Method Post -Body ($body | ConvertTo-Json) -Headers $headers
   $payload = $res.payload
   if (-not $payload.agent_uuid -or -not $payload.agent_token) {
@@ -130,9 +130,11 @@ function Sync-Inventory {
   $payload = Collect-Inventory
   if ($CommandId) { $payload.command_id = $CommandId }
   $headers = Get-AgentHeaders $State
-  Write-Host "$(Get-Date -Format o) Inventory sync…"
+  Write-Host "$(Get-Date -Format o) Inventory sync..."
   $res = Invoke-RestMethod -Uri "$apiBase/agent/sync" -Method Post -Body ($payload | ConvertTo-Json -Depth 6) -Headers $headers
-  Write-Host "  Sync OK — matched=$($res.payload.matched) by=$($res.payload.matched_by)"
+  $act = [string]$res.payload.action
+  if (-not $act) { $act = $(if ($res.payload.created) { 'created' } elseif ($res.payload.matched) { 'updated' } else { 'unmatched' }) }
+  Write-Host "  Sync OK - action=$act tag=$($res.payload.asset.asset_tag) matched_by=$($res.payload.matched_by)"
   return $res
 }
 
@@ -149,7 +151,7 @@ function Send-Heartbeat {
   return $res
 }
 
-Write-Host "ITAgent_2026 service → $apiBase  (poll ${pollMs}ms, full sync ${fullSyncMs}ms)"
+Write-Host "ITAgent_2026 service -> $apiBase  (poll ${pollMs}ms, full sync ${fullSyncMs}ms)"
 Write-Host "State file: $stateFile"
 
 $state = Load-State
@@ -190,7 +192,7 @@ while ($true) {
   } catch {
     Write-Host "$(Get-Date -Format o) Loop error: $($_.Exception.Message)"
     # Re-register if credentials rejected
-    if ($_.Exception.Message -match '401|Unauthorized|Invalid agent') {
+    if ($_.Exception.Message -match "401|Unauthorized|Invalid agent") {
       try { $state = Register-Agent } catch { Write-Host "Re-register failed: $($_.Exception.Message)" }
     }
   }

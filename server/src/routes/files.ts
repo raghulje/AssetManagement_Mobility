@@ -72,9 +72,13 @@ router.post('/:objectType/:id/files', (req, res) => {
       await run(`UPDATE users SET avatar = ?, updated_at = ? WHERE id = ?`, [rel, now(), req.params.id])
     }
 
+    const imageUrl = kind === 'image'
+      ? `/storage/${rel.replace(/^public\//, '')}`
+      : null
     return okMessage(res, 'File uploaded', {
       id: uploadId,
-      url: kind === 'image' ? publicUrl(rel) : `/api/v1/files/${uploadId}/download`,
+      url: kind === 'image' ? imageUrl : `/api/v1/files/${uploadId}/download`,
+      disk_path: rel,
       filename: req.file.originalname,
       kind,
     }, 201)

@@ -3,12 +3,14 @@ import { get, run, now } from '../db/index.js'
 import { fail, okItem, okMessage } from '../utils/response.js'
 import { ensureAssetQr } from '../services/assetQr.js'
 import { transformAsset } from '../services/transformers.js'
+import { logAction } from '../services/actionLog.js'
 import {
   authenticateAgent,
   claimPendingCommands,
   completeClaimedScans,
   completeCommand,
   findAssetForAgent,
+  logAgentSync,
   newAgentCredentials,
   readAgentAuth,
 } from '../services/agentControl.js'
@@ -196,15 +198,23 @@ router.post('/commands/:id/ack', async (req, res) => {
 
 /**
  * Inventory sync — HSAgent-compatible payload.
- * With agent credentials: binds agent↔asset, completes claimed scan commands, returns next commands.
+ * Match existing asset (serial → tag → hostname) and UPDATE; only CREATE when none match.
+ * Every attempt is written to agent_sync_logs + action_logs.
  */
 router.post('/sync', async (req, res) => {
+  const ip = clientIp(req)
   const { uuid, token } = readAgentAuth(req)
   let agent = uuid && token ? await authenticateAgent(uuid, token) : null
-  if (!agent && !sharedKeyAuthorized(req)) return fail(res, 'Unauthorized agent', 401)
+  if (!agent && !sharedKeyAuthorized(req)) {
+    await logAgentSync({
+      action: 'failed', status: 'error', message: 'Unauthorized agent',
+      clientIp: ip, errorDetail: 'Missing or invalid agent credentials',
+    })
+    return fail(res, 'Unauthorized agent', 401)
+  }
 
   const b = req.body || {}
-  const serial = String(
+  const serialRaw = String(
     b.Serial_Number || b.serial_number || b.serial || b.serialnumber || '',
   ).trim()
   const hostname = String(
@@ -215,136 +225,217 @@ router.post('/sync', async (req, res) => {
   const createIfMissing = truthy(b.create_if_missing ?? b.createIfMissing ?? true)
   const commandId = b.command_id != null ? Number(b.command_id) : null
 
-  if (!serial && !hostname && !assetTag) {
+  if (!serialRaw && !hostname && !assetTag) {
+    await logAgentSync({
+      action: 'failed', status: 'error',
+      message: 'serial, hostname, or asset_tag is required',
+      clientIp: ip,
+    })
     return fail(res, 'serial, hostname, or asset_tag is required')
   }
 
-  let { asset, matchedBy } = await findAssetForAgent({ serial, hostname, assetTag })
-  // Prefer bound asset from registered agent
-  if (!asset && agent?.asset_id) {
-    asset = await get(`SELECT id, asset_tag, serial FROM assets WHERE id = ? AND deleted_at IS NULL`, [agent.asset_id])
-    if (asset) matchedBy = 'agent_binding'
-  }
+  try {
+    let { asset, matchedBy, usableSerial } = await findAssetForAgent({
+      serial: serialRaw, hostname, assetTag,
+    })
+    const serial = usableSerial || (serialRaw || null)
 
-  let created = false
-  const ts = now()
-  const manufacturer = String(b.System_Manufacturer || b.systemmanufacturer || b.systemManufacturer || '').trim()
-  const systemModel = String(b.System_Model || b.systemmodel || b.systemModel || '').trim()
-  const processor = String(b.Processor || b.processor || '').trim()
-  const osName = String(b.OS_Name || b.osname || b.osName || '').trim()
-
-  if (!asset && createIfMissing) {
-    const status = await get<{ id: number }>(`
-      SELECT id FROM status_labels WHERE type = 'deployable' ORDER BY default_label DESC, id ASC LIMIT 1
-    `)
-    if (!status) return fail(res, 'No deployable status label configured', 500)
-
-    const modelId = await ensureAgentModel(manufacturer, systemModel || hostname || 'Agent Device')
-    let tag = assetTag
-      || (hostname ? hostname.toUpperCase().replace(/[^A-Z0-9_-]+/g, '-').slice(0, 80) : '')
-      || (serial ? `AGENT-${serial.slice(0, 40)}` : `AGENT-${Date.now()}`)
-    const taken = await get(`SELECT id FROM assets WHERE asset_tag = ?`, [tag])
-    if (taken) tag = `${tag}-${String(Date.now()).slice(-4)}`
-
-    const notes = [
-      'Created by ITAgent_2026',
-      osName ? `OS: ${osName}` : '',
-      processor ? `CPU: ${processor}` : '',
-      manufacturer ? `OEM: ${manufacturer}` : '',
-    ].filter(Boolean).join('\n')
-
-    const info = await run(`
-      INSERT INTO assets (
-        asset_tag, name, serial, model_id, status_id, notes,
-        agent_hostname, last_agent_sync_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      tag,
-      systemModel || hostname || tag,
-      serial || null,
-      modelId,
-      status.id,
-      notes,
-      hostname || null,
-      ts,
-      ts,
-      ts,
-    ])
-    const newId = Number(info.insertId)
-    await ensureAssetQr(newId).catch(() => undefined)
-    asset = { id: newId, asset_tag: tag, serial: serial || null }
-    matchedBy = 'created'
-    created = true
-  }
-
-  const payloadJson = JSON.stringify(b)
-
-  const snap = await run(`
-    INSERT INTO asset_agent_snapshots (asset_id, serial_number, hostname, platform, payload, matched_by, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `, [asset?.id || null, serial || null, hostname || null, platform, payloadJson, matchedBy || null, ts])
-
-  if (asset && !created) {
-    const updates: string[] = [
-      'last_agent_sync_at = ?',
-      'agent_hostname = COALESCE(?, agent_hostname)',
-      'updated_at = ?',
-    ]
-    const params: unknown[] = [ts, hostname || null, ts]
-    if (serial && !asset.serial) {
-      updates.push('serial = ?')
-      params.push(serial)
+    // Prefer bound asset from registered agent
+    if (!asset && agent?.asset_id) {
+      asset = await get(`SELECT id, asset_tag, serial FROM assets WHERE id = ? AND deleted_at IS NULL`, [agent.asset_id])
+      if (asset) matchedBy = 'agent_binding'
     }
-    if (systemModel) {
-      updates.push('name = COALESCE(NULLIF(name, \'\'), ?)')
-      params.push(systemModel)
+
+    let created = false
+    let action: 'updated' | 'created' | 'unmatched' = 'unmatched'
+    const ts = now()
+    const manufacturer = String(b.System_Manufacturer || b.systemmanufacturer || b.systemManufacturer || '').trim()
+    const systemModel = String(b.System_Model || b.systemmodel || b.systemModel || '').trim()
+    const processor = String(b.Processor || b.processor || '').trim()
+    const osName = String(b.OS_Name || b.osname || b.osName || '').trim()
+
+    await logAgentSync({
+      action: 'attempt',
+      message: `Sync received from ${hostname || serialRaw || 'unknown'}`,
+      serial: serialRaw || null,
+      hostname: hostname || null,
+      platform,
+      clientIp: ip,
+      summary: { create_if_missing: createIfMissing, manufacturer, systemModel },
+    })
+
+    if (!asset && createIfMissing) {
+      const status = await get<{ id: number }>(`
+        SELECT id FROM status_labels WHERE type = 'deployable' ORDER BY default_label DESC, id ASC LIMIT 1
+      `)
+      if (!status) {
+        await logAgentSync({
+          action: 'failed', status: 'error',
+          message: 'No deployable status label configured',
+          serial: serialRaw, hostname, clientIp: ip,
+        })
+        return fail(res, 'No deployable status label configured', 500)
+      }
+
+      const modelId = await ensureAgentModel(manufacturer, systemModel || hostname || 'Agent Device')
+      let tag = assetTag
+        || (hostname ? hostname.toUpperCase().replace(/[^A-Z0-9_-]+/g, '-').slice(0, 80) : '')
+        || (usableSerial ? `AGENT-${usableSerial.slice(0, 40)}` : `AGENT-${Date.now()}`)
+      const taken = await get(`SELECT id FROM assets WHERE asset_tag = ?`, [tag])
+      if (taken) tag = `${tag}-${String(Date.now()).slice(-4)}`
+
+      const notes = [
+        'Created by ITAgent_2026',
+        osName ? `OS: ${osName}` : '',
+        processor ? `CPU: ${processor}` : '',
+        manufacturer ? `OEM: ${manufacturer}` : '',
+      ].filter(Boolean).join('\n')
+
+      const info = await run(`
+        INSERT INTO assets (
+          asset_tag, name, serial, model_id, status_id, notes,
+          agent_hostname, last_agent_sync_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        tag,
+        systemModel || hostname || tag,
+        usableSerial || null,
+        modelId,
+        status.id,
+        notes,
+        hostname || null,
+        ts,
+        ts,
+        ts,
+      ])
+      const newId = Number(info.insertId)
+      await ensureAssetQr(newId).catch(() => undefined)
+      asset = { id: newId, asset_tag: tag, serial: usableSerial || null }
+      matchedBy = 'created'
+      created = true
+      action = 'created'
     }
-    params.push(asset.id)
-    await run(`UPDATE assets SET ${updates.join(', ')} WHERE id = ?`, params)
-  }
 
-  if (agent) {
-    await run(`
-      UPDATE agents SET
-        asset_id = COALESCE(?, asset_id),
-        hostname = COALESCE(?, hostname),
-        serial_number = COALESCE(?, serial_number),
-        platform = COALESCE(?, platform),
-        last_heartbeat_at = ?,
-        last_inventory_at = ?,
-        last_ip = ?,
-        updated_at = ?
-      WHERE id = ?
-    `, [
-      asset?.id || null, hostname || null, serial || null, platform,
-      ts, ts, clientIp(req), ts, agent.id,
-    ])
+    const payloadJson = JSON.stringify(b)
 
-    const syncResult = {
+    const snap = await run(`
+      INSERT INTO asset_agent_snapshots (asset_id, serial_number, hostname, platform, payload, matched_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, [asset?.id || null, serialRaw || null, hostname || null, platform, payloadJson, matchedBy || null, ts])
+
+    if (asset && !created) {
+      action = 'updated'
+      const updates: string[] = [
+        'last_agent_sync_at = ?',
+        'agent_hostname = ?',
+        'updated_at = ?',
+      ]
+      const params: unknown[] = [ts, hostname || null, ts]
+      // Fill serial only when asset has none and we have a usable serial
+      if (usableSerial && !asset.serial) {
+        updates.push('serial = ?')
+        params.push(usableSerial)
+      }
+      if (systemModel) {
+        updates.push('name = COALESCE(NULLIF(name, \'\'), ?)')
+        params.push(systemModel)
+      }
+      params.push(asset.id)
+      await run(`UPDATE assets SET ${updates.join(', ')} WHERE id = ?`, params)
+    }
+
+    if (agent) {
+      await run(`
+        UPDATE agents SET
+          asset_id = COALESCE(?, asset_id),
+          hostname = COALESCE(?, hostname),
+          serial_number = COALESCE(?, serial_number),
+          platform = COALESCE(?, platform),
+          last_heartbeat_at = ?,
+          last_inventory_at = ?,
+          last_ip = ?,
+          updated_at = ?
+        WHERE id = ?
+      `, [
+        asset?.id || null, hostname || null, usableSerial || serialRaw || null, platform,
+        ts, ts, ip, ts, agent.id,
+      ])
+
+      const syncResult = {
+        snapshot_id: snap.insertId,
+        asset_id: asset?.id || null,
+        matched_by: matchedBy || null,
+        action,
+      }
+      if (commandId) {
+        await completeCommand(commandId, agent.id, syncResult)
+      } else {
+        await completeClaimedScans(agent.id, syncResult)
+      }
+    }
+
+    const message = created
+      ? `Asset created: ${asset?.asset_tag}`
+      : asset
+        ? `Asset updated: ${asset.asset_tag} (matched by ${matchedBy})`
+        : 'Snapshot stored — no matching asset (create_if_missing=false)'
+
+    await logAgentSync({
+      action,
+      status: 'ok',
+      message,
+      assetId: asset?.id || null,
+      assetTag: asset?.asset_tag || null,
+      serial: serialRaw || null,
+      hostname: hostname || null,
+      matchedBy: matchedBy || null,
+      platform,
+      clientIp: ip,
+      snapshotId: Number(snap.insertId),
+      summary: {
+        action,
+        matched_by: matchedBy || null,
+        os: osName || null,
+        model: systemModel || null,
+        manufacturer: manufacturer || null,
+      },
+    })
+
+    await logAction({
+      actionType: created ? 'agent_create' : asset ? 'agent_update' : 'agent_unmatched',
+      itemType: 'asset',
+      itemId: asset?.id || null,
+      note: message,
+      meta: {
+        hostname, serial: serialRaw, matched_by: matchedBy, snapshot_id: snap.insertId, client_ip: ip,
+      },
+    }).catch(() => undefined)
+
+    const detail = asset ? await transformAsset(asset.id) : null
+    const nextCommands = agent ? await claimPendingCommands(agent.id) : []
+
+    return okMessage(res, message, {
       snapshot_id: snap.insertId,
-      asset_id: asset?.id || null,
+      action,
+      matched: Boolean(asset),
+      created,
+      updated: action === 'updated',
       matched_by: matchedBy || null,
-    }
-    if (commandId) {
-      await completeCommand(commandId, agent.id, syncResult)
-    } else {
-      await completeClaimedScans(agent.id, syncResult)
-    }
+      asset: detail || (asset
+        ? { id: asset.id, asset_tag: asset.asset_tag, serial: asset.serial || usableSerial || null }
+        : null),
+      commands: nextCommands,
+    })
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e)
+    await logAgentSync({
+      action: 'failed', status: 'error',
+      message: 'Sync failed',
+      serial: serialRaw, hostname, clientIp: ip,
+      errorDetail: errMsg,
+    })
+    return fail(res, errMsg, 500)
   }
-
-  const detail = asset ? await transformAsset(asset.id) : null
-  const nextCommands = agent ? await claimPendingCommands(agent.id) : []
-
-  return okMessage(res, created ? 'Asset created and synced' : asset ? 'Asset synced' : 'Snapshot stored (no matching asset)', {
-    snapshot_id: snap.insertId,
-    matched: Boolean(asset),
-    created,
-    matched_by: matchedBy || null,
-    asset: detail || (asset
-      ? { id: asset.id, asset_tag: asset.asset_tag, serial: asset.serial || serial || null }
-      : null),
-    commands: nextCommands,
-  })
 })
 
 router.get('/snapshots', async (req, res) => {

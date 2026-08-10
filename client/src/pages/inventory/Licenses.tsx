@@ -2,11 +2,11 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useEffect, useState, type FormEvent } from 'react'
 import AppLayout from '../../layout/AppLayout'
 import { AppSelect, Box, DataTable, DateField, Field, PageForm } from '../../components/ui'
-import { ModuleInsights } from '../../components/ModuleInsights'
+// import { ModuleInsights } from '../../components/ModuleInsights' // restore with insight cards when needed
 import { DetailLayout, DetailPanel } from '../../components/DetailLayout'
 import { MasterSelect, masterPayloadId } from '../../components/MasterSelect'
 import {
-  dashboardApi,
+  // dashboardApi, // restore with insight cards when needed
   hardwareApi,
   licensesApi,
   mastersApi,
@@ -66,7 +66,7 @@ export function LicensesList() {
   const [loading, setLoading] = useState(true)
   const [companyId, setCompanyId] = useState('')
   const [companies, setCompanies] = useState<SelectOption[]>([])
-  const [dash, setDash] = useState<Record<string, number>>({})
+  // const [dash, setDash] = useState<Record<string, number>>({}) // restore with insight cards when needed
 
   const load = () => {
     setLoading(true)
@@ -87,16 +87,17 @@ export function LicensesList() {
     mastersApi.companies().then((c) => setCompanies(c.results || [])).catch(() => undefined)
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
-    dashboardApi
-      .counts({ company_id: companyId || undefined, search: q || undefined })
-      .then((c) => {
-        if (!cancelled) setDash(c as Record<string, number>)
-      })
-      .catch(() => undefined)
-    return () => { cancelled = true }
-  }, [companyId, q])
+  // restore with insight cards when needed
+  // useEffect(() => {
+  //   let cancelled = false
+  //   dashboardApi
+  //     .counts({ company_id: companyId || undefined, search: q || undefined })
+  //     .then((c) => {
+  //       if (!cancelled) setDash(c as Record<string, number>)
+  //     })
+  //     .catch(() => undefined)
+  //   return () => { cancelled = true }
+  // }, [companyId, q])
 
   useEffect(() => {
     const t = setTimeout(load, 250)
@@ -105,6 +106,7 @@ export function LicensesList() {
 
   return (
     <AppLayout title="Licenses" subtitle={loading ? 'Loading…' : `${total} licenses`}>
+      {/* Module insight cards — restore when needed (kept on Dashboard / Assets / People only)
       <ModuleInsights
         title="License insights"
         cards={[
@@ -113,6 +115,7 @@ export function LicensesList() {
           { label: 'Licenses available', value: dash.licenses_available ?? 0, tone: 'default' },
         ]}
       />
+      */}
       <Box
         title="Licenses"
         tools={<Link to="/licenses/create" className="btn btn-primary btn-sm"><i className="fas fa-plus icon-white" /> Create New</Link>}

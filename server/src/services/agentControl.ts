@@ -37,14 +37,34 @@ export function newAgentCredentials() {
   return { agent_uuid, agent_token, token_hash: hashAgentToken(agent_token) }
 }
 
+/** Parse timestamps written by db.now() (UTC wall clock without timezone). */
+function parseDbUtc(ts: string) {
+  const s = String(ts).trim()
+  if (!s) return NaN
+  // Already ISO with offset / Z
+  if (/[zZ]|[+-]\d{2}:\d{2}$/.test(s)) return new Date(s).getTime()
+  // MySQL DATETIME / db.now(): treat as UTC
+  const normalized = s.includes('T') ? s : s.replace(' ', 'T')
+  return new Date(`${normalized}Z`).getTime()
+}
+
 export function agentPresence(lastHeartbeat: string | null | undefined, lastInventory?: string | null) {
   const ts = lastHeartbeat || lastInventory || null
   if (!ts) return { presence: 'never' as const, label: 'No agent', online: false }
-  const age = Date.now() - new Date(ts).getTime()
+  const age = Date.now() - parseDbUtc(String(ts))
   if (Number.isNaN(age)) return { presence: 'never' as const, label: 'No agent', online: false }
   if (age <= ONLINE_MS) return { presence: 'online' as const, label: 'Online', online: true }
   if (age <= STALE_MS) return { presence: 'idle' as const, label: 'Idle', online: false }
   return { presence: 'stale' as const, label: 'Stale', online: false }
+}
+
+/** Reject OEM placeholder serials so we fall through to hostname / tag match. */
+export function isUsableSerial(serial: string) {
+  const t = serial.trim().toLowerCase()
+  if (!t || t.length < 3) return false
+  if (/^(none|n\/a|na|null|unknown|default string|system serial number|0+)$/i.test(t)) return false
+  if (t.includes('to be filled') || t.includes('o.e.m') || t.includes('oem')) return false
+  return true
 }
 
 export async function findAssetForAgent(opts: {
@@ -52,39 +72,102 @@ export async function findAssetForAgent(opts: {
   hostname?: string
   assetTag?: string
 }) {
-  const serial = (opts.serial || '').trim()
+  const serialRaw = (opts.serial || '').trim()
+  const serial = isUsableSerial(serialRaw) ? serialRaw : ''
   const hostname = (opts.hostname || '').trim()
   const assetTag = (opts.assetTag || '').trim()
 
   let asset: { id: number; asset_tag: string; serial: string | null } | undefined
   let matchedBy = ''
 
+  // 1) Serial (case-insensitive) — preferred, never creates a duplicate when found
   if (serial) {
     asset = await get(`
       SELECT id, asset_tag, serial FROM assets
-      WHERE deleted_at IS NULL AND serial = ?
+      WHERE deleted_at IS NULL AND serial IS NOT NULL AND LOWER(TRIM(serial)) = LOWER(?)
       ORDER BY id DESC LIMIT 1
     `, [serial])
     if (asset) matchedBy = 'serial'
   }
+  // 2) Explicit asset tag
   if (!asset && assetTag) {
     asset = await get(`
       SELECT id, asset_tag, serial FROM assets
-      WHERE deleted_at IS NULL AND asset_tag = ?
+      WHERE deleted_at IS NULL AND LOWER(TRIM(asset_tag)) = LOWER(?)
       LIMIT 1
     `, [assetTag])
     if (asset) matchedBy = 'asset_tag'
   }
+  // 3) Hostname ↔ agent_hostname / asset_tag / name
   if (!asset && hostname) {
     asset = await get(`
       SELECT id, asset_tag, serial FROM assets
-      WHERE deleted_at IS NULL AND (agent_hostname = ? OR name = ? OR asset_tag = ?)
-      ORDER BY last_agent_sync_at DESC LIMIT 1
+      WHERE deleted_at IS NULL AND (
+        LOWER(TRIM(COALESCE(agent_hostname,''))) = LOWER(?)
+        OR LOWER(TRIM(asset_tag)) = LOWER(?)
+        OR LOWER(TRIM(COALESCE(name,''))) = LOWER(?)
+      )
+      ORDER BY last_agent_sync_at DESC, id DESC LIMIT 1
     `, [hostname, hostname, hostname])
     if (asset) matchedBy = 'hostname'
   }
+  // 4) Sanitized hostname as asset_tag (how create path names new assets)
+  if (!asset && hostname) {
+    const tagGuess = hostname.toUpperCase().replace(/[^A-Z0-9_-]+/g, '-').slice(0, 80)
+    if (tagGuess) {
+      asset = await get(`
+        SELECT id, asset_tag, serial FROM assets
+        WHERE deleted_at IS NULL AND LOWER(TRIM(asset_tag)) = LOWER(?)
+        LIMIT 1
+      `, [tagGuess])
+      if (asset) matchedBy = 'hostname_tag'
+    }
+  }
 
-  return { asset, matchedBy }
+  return { asset, matchedBy, usableSerial: serial }
+}
+
+export async function logAgentSync(opts: {
+  action: 'updated' | 'created' | 'unmatched' | 'failed' | 'attempt'
+  status?: 'ok' | 'error'
+  message?: string | null
+  assetId?: number | null
+  assetTag?: string | null
+  serial?: string | null
+  hostname?: string | null
+  matchedBy?: string | null
+  platform?: string | null
+  clientIp?: string | null
+  snapshotId?: number | null
+  summary?: Record<string, unknown> | null
+  errorDetail?: string | null
+}) {
+  const ts = now()
+  try {
+    await run(`
+      INSERT INTO agent_sync_logs (
+        action, status, message, asset_id, asset_tag, serial_number, hostname,
+        matched_by, platform, client_ip, snapshot_id, payload_summary, error_detail, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      opts.action,
+      opts.status || (opts.action === 'failed' ? 'error' : 'ok'),
+      opts.message || null,
+      opts.assetId ?? null,
+      opts.assetTag || null,
+      opts.serial || null,
+      opts.hostname || null,
+      opts.matchedBy || null,
+      opts.platform || null,
+      opts.clientIp || null,
+      opts.snapshotId ?? null,
+      opts.summary ? JSON.stringify(opts.summary) : null,
+      opts.errorDetail || null,
+      ts,
+    ])
+  } catch (e) {
+    console.error('agent_sync_logs insert failed', e)
+  }
 }
 
 export async function getAgentByUuid(uuid: string) {
@@ -230,6 +313,13 @@ export async function getAssetAgentStatus(assetId: number) {
       `, [agent.id])
     : []
 
+  const recentSyncs = await all(`
+    SELECT id, action, status, message, serial_number, hostname, matched_by, client_ip, created_at
+    FROM agent_sync_logs
+    WHERE asset_id = ?
+    ORDER BY id DESC LIMIT 20
+  `, [assetId]).catch(() => [])
+
   const presence = agentPresence(agent?.last_heartbeat_at, agent?.last_inventory_at || asset?.last_agent_sync_at)
 
   return {
@@ -254,5 +344,6 @@ export async function getAssetAgentStatus(assetId: number) {
     agent_hostname: asset?.agent_hostname || null,
     pending_commands: Number(pending?.c || 0),
     recent_commands: recent,
+    recent_syncs: recentSyncs,
   }
 }

@@ -3,6 +3,7 @@ import { all, get, run, now, limitSql } from '../db/index.js'
 import { fail, okItem, okList, okMessage } from '../utils/response.js'
 import { transformLicense } from '../services/transformers.js'
 import { logAction } from '../services/actionLog.js'
+import { actorLabel, notifyWorkflow, resolveAssigneeEmail } from '../services/notify.js'
 
 const router = Router()
 
@@ -67,6 +68,21 @@ router.post('/', async (req, res) => {
     await run(`INSERT INTO license_seats (license_id, created_at, updated_at) VALUES ${placeholders}`, vals)
   }
   await logAction({ userId: req.user?.id, actionType: 'create', itemType: 'license', itemId: id })
+  notifyWorkflow({
+    category: 'inventory',
+    event: 'license.created',
+    subject: `License added: ${b.name}`,
+    title: 'License added',
+    intro: 'A new software license was added to the catalog.',
+    fields: [
+      { label: 'License', value: String(b.name) },
+      { label: 'Seats', value: String(seats) },
+      { label: 'Created by', value: actorLabel(req.user) },
+    ],
+    ctaPath: `/licenses/${id}`,
+    itemType: 'license',
+    itemId: id,
+  })
   return okMessage(res, 'License created', await transformLicense(id), 201)
 })
 
@@ -139,7 +155,26 @@ router.post('/:id/checkout', async (req, res) => {
     userId: req.user?.id, actionType: 'checkout', itemType: 'license', itemId: id,
     targetType: assignedTo ? 'user' : 'asset', targetId: Number(assignedTo || assetId), note: b.note || null,
   })
-  return okMessage(res, 'License assigned', await transformLicense(id))
+  const lic = await transformLicense(id)
+  const assigneeEmail = assignedTo ? await resolveAssigneeEmail('user', Number(assignedTo)) : null
+  notifyWorkflow({
+    category: 'custody',
+    event: 'license.assigned',
+    subject: `License assigned: ${lic?.name || id}`,
+    title: 'License assigned',
+    intro: 'A software license seat was assigned.',
+    fields: [
+      { label: 'License', value: String(lic?.name || id) },
+      { label: 'Target', value: assignedTo ? `User #${assignedTo}` : `Asset #${assetId}` },
+      { label: 'Assigned by', value: actorLabel(req.user) },
+    ],
+    ctaPath: `/licenses/${id}`,
+    itemType: 'license',
+    itemId: id,
+    assigneeEmail,
+    assigneeOnlyExtraNote: 'A software license has been assigned to you.',
+  })
+  return okMessage(res, 'License assigned', lic)
 })
 
 router.post('/:id/checkin', async (req, res) => {
@@ -154,9 +189,29 @@ router.post('/:id/checkin', async (req, res) => {
     `, [id])
   }
   if (!seat) return fail(res, 'No assigned license found')
+  const seatRow = await get<{ assigned_to: number | null }>(`SELECT assigned_to FROM license_seats WHERE id = ?`, [seat.id])
+  const prevUser = seatRow?.assigned_to ? Number(seatRow.assigned_to) : null
   await run(`UPDATE license_seats SET assigned_to = NULL, asset_id = NULL, notes = NULL, updated_at = ? WHERE id = ?`, [now(), seat.id])
   await logAction({ userId: req.user?.id, actionType: 'checkin', itemType: 'license', itemId: id })
-  return okMessage(res, 'License unassigned', await transformLicense(id))
+  const lic = await transformLicense(id)
+  const assigneeEmail = prevUser ? await resolveAssigneeEmail('user', prevUser) : null
+  notifyWorkflow({
+    category: 'custody',
+    event: 'license.unassigned',
+    subject: `License unassigned: ${lic?.name || id}`,
+    title: 'License unassigned',
+    intro: 'A software license seat was returned.',
+    fields: [
+      { label: 'License', value: String(lic?.name || id) },
+      { label: 'Unassigned by', value: actorLabel(req.user) },
+    ],
+    ctaPath: `/licenses/${id}`,
+    itemType: 'license',
+    itemId: id,
+    assigneeEmail,
+    assigneeOnlyExtraNote: 'A software license previously assigned to you has been unassigned.',
+  })
+  return okMessage(res, 'License unassigned', lic)
 })
 
 export default router

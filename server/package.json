@@ -6,17 +6,21 @@
   "scripts": {
     "migrate": "tsx src/db/migrate.ts",
     "seed": "tsx src/db/seed.ts",
+    "seed:inventory": "tsx scripts/seed-inventory-demo.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node --import tsx src/index.ts",
-    "build": "tsc --noEmit"
+    "build": "tsc --noEmit",
+    "build:client": "npm --prefix ../client ci && npm --prefix ../client run build"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
     "bwip-js": "^4.11.2",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "csv-parse": "^7.0.2",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
+    "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "multer": "^2.2.0",
@@ -30,6 +34,7 @@
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/bwip-js": "^3.2.3",
+    "@types/compression": "^1.8.1",
     "@types/cors": "^2.8.18",
     "@types/express": "^5.0.2",
     "@types/jsonwebtoken": "^9.0.9",

@@ -45,7 +45,7 @@ function flattenAsset(a: Row): Row {
   }
 }
 
-const LIST_COLUMNS = ['asset_tag', 'name', 'serial', 'model', 'status', 'assigned_to', 'location', 'company', 'actions']
+const LIST_COLUMNS = ['asset_tag', 'serial', 'model', 'status', 'assigned_to', 'location', 'company', 'actions']
 
 export default function AssetsList() {
   const [params] = useSearchParams()
@@ -75,7 +75,7 @@ export default function AssetsList() {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkMsg, setBulkMsg] = useState('')
   const [dash, setDash] = useState<Record<string, number>>({})
-  const pageSize = 100
+  const pageSize = 15
 
   const listFilterParams = useMemo(() => {
     const p: Record<string, string | number | undefined> = {
@@ -156,13 +156,12 @@ export default function AssetsList() {
         <Link to={`/hardware/${r.id}`} className="asset-tag-link">{String(r.asset_tag)}</Link>
       ),
     },
-    { key: 'name', label: 'Name', sortable: true, render: (r) => cell(r.name) },
     { key: 'serial', label: 'Serial', sortable: true, render: (r) => cell(r.serial) },
     { key: 'model', label: 'Model', sortable: true, render: (r) => cell(r.model) },
     {
       key: 'status',
       label: 'Status',
-      sortable: true,
+      sortable: false,
       render: (r) => (
         <StatusBadge
           status={String(r.status || '')}
@@ -329,8 +328,9 @@ export default function AssetsList() {
           { label: 'Total assets', value: dash.assets ?? total, tone: 'teal', to: `/hardware${filterQuery ? `?${filterQuery.slice(1)}` : ''}` },
           { label: 'Assigned', value: dash.deployed ?? 0, tone: 'amber', to: `/hardware?status_type=Assigned${filterQuery}` },
           { label: 'In stock', value: dash.rtd ?? 0, tone: 'default', to: `/hardware?status_type=RTD${filterQuery}` },
-          { label: 'Pending', value: dash.pending ?? 0, tone: 'slate', to: `/hardware?status_type=Pending${filterQuery}` },
-          { label: 'Audit due', value: dash.audit_due ?? 0, tone: 'rose', to: `/hardware/audit/due${filterQuery ? `?${filterQuery.slice(1)}` : ''}` },
+          // Pending — not used at Refex for now; restore when needed
+          // { label: 'Pending', value: dash.pending ?? 0, tone: 'slate', to: `/hardware?status_type=Pending${filterQuery}` },
+          // { label: 'Audit due', value: dash.audit_due ?? 0, tone: 'rose', to: `/hardware/audit/due${filterQuery ? `?${filterQuery.slice(1)}` : ''}` }, // Audit feature — restore when needed
           { label: 'EOL due', value: dash.eol_due ?? 0, tone: 'rose', to: `/hardware/eol/due${filterQuery ? `?${filterQuery.slice(1)}` : ''}` },
         ]}
       />
@@ -446,8 +446,6 @@ export default function AssetsList() {
                         value={statusFilter}
                         options={statusOptions}
                         onChange={setStatusFilter}
-                        sortDir={sort === 'status' ? order : null}
-                        onSort={() => toggleSort('status')}
                         allLabel="All"
                       />
                     ) : c.key === 'assigned_to' ? (
@@ -516,12 +514,35 @@ export default function AssetsList() {
           </table>
         </div>
 
-        <div className="pagination">
-          <button type="button" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>«</button>
-          <span className="text-muted" style={{ padding: '0 10px', alignSelf: 'center' }}>
-            Page {page + 1} / {pageCount} · {total} total
+        <div className="pagination" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 12 }}>
+          <button type="button" disabled={page <= 0} onClick={() => setPage(0)} title="First page">«</button>
+          <button type="button" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>Prev</button>
+          {Array.from({ length: pageCount }, (_, i) => i)
+            .filter((i) => i === 0 || i === pageCount - 1 || Math.abs(i - page) <= 2)
+            .reduce<number[]>((acc, i) => {
+              if (acc.length && i - acc[acc.length - 1] > 1) acc.push(-1)
+              acc.push(i)
+              return acc
+            }, [])
+            .map((i, idx) => (
+              i < 0
+                ? <span key={`gap-${idx}`} className="text-muted" style={{ padding: '0 4px' }}>…</span>
+                : (
+                  <button
+                    key={i}
+                    type="button"
+                    className={i === page ? 'active' : undefined}
+                    onClick={() => setPage(i)}
+                  >
+                    {i + 1}
+                  </button>
+                )
+            ))}
+          <button type="button" disabled={page + 1 >= pageCount} onClick={() => setPage((p) => p + 1)}>Next</button>
+          <button type="button" disabled={page + 1 >= pageCount} onClick={() => setPage(pageCount - 1)} title="Last page">»</button>
+          <span className="text-muted" style={{ padding: '0 8px', alignSelf: 'center' }}>
+            {total === 0 ? '0 items' : `${page * pageSize + 1}–${Math.min(total, (page + 1) * pageSize)} of ${total}`}
           </span>
-          <button type="button" disabled={page + 1 >= pageCount} onClick={() => setPage((p) => p + 1)}>»</button>
         </div>
       </Box>
     </AppLayout>

@@ -40,66 +40,74 @@ const SECTION_TABS: Record<SectionKey, SectionTab[]> = {
       group: 'status',
       isActive: (p, s) => p === '/hardware' && new URLSearchParams(s).get('status_type') === 'RTD',
     },
-    {
-      to: '/hardware?status_type=Pending',
-      label: 'Pending',
-      group: 'status',
-      isActive: (p, s) => p === '/hardware' && new URLSearchParams(s).get('status_type') === 'Pending',
-    },
-    {
-      to: '/hardware?status_type=Deleted',
-      label: 'Deleted',
-      group: 'status',
-      isActive: (p, s) => p === '/hardware' && new URLSearchParams(s).get('status_type') === 'Deleted',
-    },
-    {
-      to: '/hardware/audit/due',
-      label: 'Audit Due',
-      group: 'tools',
-      isActive: (p) => p.startsWith('/hardware/audit/due'),
-    },
-    {
-      to: '/hardware/eol/due',
-      label: 'EOL Due',
-      group: 'tools',
-      isActive: (p) => p.startsWith('/hardware/eol/due'),
-    },
-    {
-      to: '/hardware/checkins/due',
-      label: 'Due for Unassign',
-      group: 'tools',
-      isActive: (p) => p.startsWith('/hardware/checkins/due'),
-    },
-    {
-      to: '/hardware/quickscancheckin',
-      label: 'Quickscan Unassign',
-      group: 'tools',
-      isActive: (p) => p.startsWith('/hardware/quickscancheckin'),
-    },
-    {
-      to: '/hardware/bulkcheckout',
-      label: 'Bulk Assign',
-      group: 'tools',
-      isActive: (p) => p.startsWith('/hardware/bulkcheckout'),
-    },
-    {
-      to: '/maintenances',
-      label: 'Maintenances',
-      group: 'tools',
-      isActive: (p) => p.startsWith('/maintenances'),
-    },
-    {
-      to: '/hardware/bulkaudit',
-      label: 'Bulk Audit',
-      group: 'tools',
-      isActive: (p) => p.startsWith('/hardware/bulkaudit'),
-    },
-    {
-      to: '/hardware/history',
-      label: 'Import History',
-      group: 'tools',
-      isActive: (p) => p.startsWith('/hardware/history'),
-    },
+    // Pending / Deleted — not used at Refex for now; restore when needed
+    // {
+    //   to: '/hardware?status_type=Pending',
+    //   label: 'Pending',
+    //   group: 'status',
+    //   isActive: (p, s) => p === '/hardware' && new URLSearchParams(s).get('status_type') === 'Pending',
+    // },
+    // {
+    //   to: '/hardware?status_type=Deleted',
+    //   label: 'Deleted',
+    //   group: 'status',
+    //   isActive: (p, s) => p === '/hardware' && new URLSearchParams(s).get('status_type') === 'Deleted',
+    // },
+    // Assets tool tabs — restore when needed
+    // {
+    //   to: '/hardware/audit/due',
+    //   label: 'Audit Due',
+    //   group: 'tools',
+    //   isActive: (p) => p.startsWith('/hardware/audit/due'),
+    // },
+    // {
+    //   to: '/hardware/eol/due',
+    //   label: 'EOL Due',
+    //   group: 'tools',
+    //   isActive: (p) => p.startsWith('/hardware/eol/due'),
+    // },
+    // {
+    //   to: '/hardware/checkins/due',
+    //   label: 'Due for Unassign',
+    //   group: 'tools',
+    //   isActive: (p) => p.startsWith('/hardware/checkins/due'),
+    // },
+    // {
+    //   to: '/hardware/quickscancheckin',
+    //   label: 'Quickscan Unassign',
+    //   group: 'tools',
+    //   isActive: (p) => p.startsWith('/hardware/quickscancheckin'),
+    // },
+    // {
+    //   to: '/hardware/bulkcheckout',
+    //   label: 'Bulk Assign',
+    //   group: 'tools',
+    //   isActive: (p) => p.startsWith('/hardware/bulkcheckout'),
+    // },
+    // {
+    //   to: '/maintenances',
+    //   label: 'Maintenances',
+    //   group: 'tools',
+    //   isActive: (p) => p.startsWith('/maintenances'),
+    // },
+    // {
+    //   to: '/hardware/bulkaudit',
+    //   label: 'Bulk Audit',
+    //   group: 'tools',
+    //   isActive: (p) => p.startsWith('/hardware/bulkaudit'),
+    // },
+    // {
+    //   to: '/hardware/agent-activity',
+    //   label: 'Agent activity',
+    //   group: 'tools',
+    //   isActive: (p) => p.startsWith('/hardware/agent-activity'),
+    // },
+    // {
+    //   to: '/hardware/history',
+    //   label: 'Import History',
+    //   group: 'tools',
+    //   isActive: (p) => p.startsWith('/hardware/history'),
+    // },
   ],
   people: [
     { to: '/employees', label: 'Employees', isActive: (p) => p.startsWith('/employees') && !p.startsWith('/employees/import') },
@@ -127,7 +135,9 @@ const SECTION_TABS: Record<SectionKey, SectionTab[]> = {
     { to: '/models', label: 'Asset Models', isActive: (p) => p.startsWith('/models') },
   ],
   settings: [
-    { to: '/settings', label: 'General', isActive: (p) => p === '/settings' || p.startsWith('/settings/') },
+    { to: '/settings', label: 'General', isActive: (p) => p === '/settings' },
+    { to: '/settings/roles', label: 'Roles & permissions', isActive: (p) => p.startsWith('/settings/roles') },
+    { to: '/settings/notifications', label: 'Notifications', isActive: (p) => p.startsWith('/settings/notifications') },
     { to: '/categories', label: 'Categories', isActive: (p) => p.startsWith('/categories') },
     { to: '/statuslabels', label: 'Status Labels', isActive: (p) => p.startsWith('/statuslabels') },
     { to: '/manufacturers', label: 'Manufacturers', isActive: (p) => p.startsWith('/manufacturers') },
@@ -138,7 +148,7 @@ const SECTION_TABS: Record<SectionKey, SectionTab[]> = {
     { to: '/reports', label: 'List All', isActive: (p) => p === '/reports' },
     { to: '/reports/activity', label: 'Activity Report', isActive: (p) => p.startsWith('/reports/activity') },
     { to: '/reports/custom', label: 'Custom Report', isActive: (p) => p.startsWith('/reports/custom') },
-    { to: '/reports/audit', label: 'Audit Report', isActive: (p) => p.startsWith('/reports/audit') },
+    // { to: '/reports/audit', label: 'Audit Report', isActive: (p) => p.startsWith('/reports/audit') }, // Audit feature — restore when needed
     { to: '/reports/depreciation', label: 'Depreciation Report', isActive: (p) => p.startsWith('/reports/depreciation') },
     { to: '/reports/licenses', label: 'License Report', isActive: (p) => p.startsWith('/reports/licenses') },
     { to: '/reports/maintenances', label: 'Asset Maintenance Report', isActive: (p) => p.startsWith('/reports/maintenances') },
@@ -147,7 +157,10 @@ const SECTION_TABS: Record<SectionKey, SectionTab[]> = {
   ],
 }
 
-function resolveSection(pathname: string): SectionKey | null {
+function resolveSection(pathname: string, search = ''): SectionKey | null {
+  // Asset opened from an employee record should stay under People in the sidebar
+  const from = new URLSearchParams(search).get('from')
+  if (from === 'employee' && pathname.startsWith('/hardware')) return 'people'
   if (pathname.startsWith('/hardware') || pathname.startsWith('/maintenances')) return 'assets'
   if (pathname.startsWith('/employees') || pathname.startsWith('/users')) return 'people'
   if (
@@ -178,12 +191,12 @@ function shouldShowSectionTabs(pathname: string): boolean {
 
   const listRoutes = [
     /^\/hardware\/?$/,
-    /^\/hardware\/audit\/due\/?$/,
+    // /^\/hardware\/audit\/due\/?$/, // Audit feature — restore when needed
     /^\/hardware\/eol\/due\/?$/,
     /^\/hardware\/checkins\/due\/?$/,
     /^\/hardware\/quickscancheckin\/?$/,
     /^\/hardware\/bulkcheckout\/?$/,
-    /^\/hardware\/bulkaudit\/?$/,
+    // /^\/hardware\/bulkaudit\/?$/, // Audit feature — restore when needed
     /^\/hardware\/history\/?$/,
     /^\/maintenances\/?$/,
     /^\/employees\/?$/,
@@ -195,6 +208,8 @@ function shouldShowSectionTabs(pathname: string): boolean {
     /^\/suppliers\/?$/,
     /^\/models\/?$/,
     /^\/settings\/?$/,
+    /^\/settings\/roles\/?$/,
+    /^\/settings\/notifications\/?$/,
     /^\/categories\/?$/,
     /^\/statuslabels\/?$/,
     /^\/manufacturers\/?$/,
@@ -252,11 +267,15 @@ export default function AppLayout({ children, title, subtitle }: Props) {
   const [tag, setTag] = useState('')
   const location = useLocation()
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { user, logout, can } = useAuth()
   const displayName = user ? `${user.first_name} ${user.last_name}` : 'Admin User'
   const path = location.pathname + location.search
-  const section = resolveSection(location.pathname)
-  const showSectionTabs = Boolean(section && shouldShowSectionTabs(location.pathname))
+  const section = resolveSection(location.pathname, location.search)
+  const showSectionTabs = Boolean(
+    section
+    && shouldShowSectionTabs(location.pathname)
+    && !(new URLSearchParams(location.search).get('from') === 'employee' && location.pathname.startsWith('/hardware')),
+  )
 
   const searchTag = (e: FormEvent) => {
     e.preventDefault()
@@ -279,40 +298,38 @@ export default function AppLayout({ children, title, subtitle }: Props) {
           </form>
           <div className="navbar-custom-menu">
             <ul className="navbar-nav">
-              <li><NavLink to="/hardware" title="Assets"><i className="fas fa-barcode" /></NavLink></li>
-              <li><NavLink to="/licenses" title="Licenses"><i className="fas fa-save" /></NavLink></li>
-              <li><NavLink to="/accessories" title="Accessories"><i className="fas fa-keyboard" /></NavLink></li>
-              <li><NavLink to="/consumables" title="Consumables"><i className="fas fa-tint" /></NavLink></li>
-              <li><NavLink to="/components" title="Components"><i className="fas fa-hdd" /></NavLink></li>
-              <li><NavLink to="/employees" title="Employees"><i className="fas fa-id-badge" /></NavLink></li>
-              <li><NavLink to="/users" title="App Users"><i className="fas fa-users" /></NavLink></li>
-              <li className={`dropdown ${createOpen ? 'open' : ''}`}>
-                <button type="button" className="nav-icon-btn" onClick={() => setCreateOpen((o) => !o)}>
-                  <i className="fas fa-plus" />
-                </button>
-                <div className="dropdown-menu">
-                  <NavLink to="/hardware/create" onClick={() => setCreateOpen(false)}>Asset</NavLink>
-                  <NavLink to="/licenses/create" onClick={() => setCreateOpen(false)}>License</NavLink>
-                  <NavLink to="/accessories/create" onClick={() => setCreateOpen(false)}>Accessory</NavLink>
-                  <NavLink to="/consumables/create" onClick={() => setCreateOpen(false)}>Consumable</NavLink>
-                  <NavLink to="/components/create" onClick={() => setCreateOpen(false)}>Component</NavLink>
-                  <NavLink to="/employees/create" onClick={() => setCreateOpen(false)}>Employee</NavLink>
-                  <NavLink to="/users/create" onClick={() => setCreateOpen(false)}>App User</NavLink>
-                </div>
-              </li>
-              <li><NavLink to="/admin" title="Admin"><i className="fas fa-cog" /></NavLink></li>
+              {can('assets.view') ? <li><NavLink to="/hardware" title="Assets"><i className="fas fa-barcode" /></NavLink></li> : null}
+              {can('licenses.view') ? <li><NavLink to="/licenses" title="Licenses"><i className="fas fa-save" /></NavLink></li> : null}
+              {can('accessories.view') ? <li><NavLink to="/accessories" title="Accessories"><i className="fas fa-keyboard" /></NavLink></li> : null}
+              {can('consumables.view') ? <li><NavLink to="/consumables" title="Consumables"><i className="fas fa-tint" /></NavLink></li> : null}
+              {can('components.view') ? <li><NavLink to="/components" title="Components"><i className="fas fa-hdd" /></NavLink></li> : null}
+              {can('people.view') ? <li><NavLink to="/employees" title="Employees"><i className="fas fa-id-badge" /></NavLink></li> : null}
+              {can('people.view') ? <li><NavLink to="/users" title="App Users"><i className="fas fa-users" /></NavLink></li> : null}
+              {(can('assets.create') || can('licenses.create') || can('people.create')) ? (
+                <li className={`dropdown ${createOpen ? 'open' : ''}`}>
+                  <button type="button" className="nav-icon-btn" onClick={() => setCreateOpen((o) => !o)}>
+                    <i className="fas fa-plus" />
+                  </button>
+                  <div className="dropdown-menu">
+                    {can('assets.create') ? <NavLink to="/hardware/create" onClick={() => setCreateOpen(false)}>Asset</NavLink> : null}
+                    {can('licenses.create') ? <NavLink to="/licenses/create" onClick={() => setCreateOpen(false)}>License</NavLink> : null}
+                    {can('accessories.create') ? <NavLink to="/accessories/create" onClick={() => setCreateOpen(false)}>Accessory</NavLink> : null}
+                    {can('consumables.create') ? <NavLink to="/consumables/create" onClick={() => setCreateOpen(false)}>Consumable</NavLink> : null}
+                    {can('components.create') ? <NavLink to="/components/create" onClick={() => setCreateOpen(false)}>Component</NavLink> : null}
+                    {can('people.create') ? <NavLink to="/employees/create" onClick={() => setCreateOpen(false)}>Employee</NavLink> : null}
+                    {can('people.create') ? <NavLink to="/users/create" onClick={() => setCreateOpen(false)}>App User</NavLink> : null}
+                  </div>
+                </li>
+              ) : null}
+              {can('settings.view') ? <li><NavLink to="/admin" title="Admin"><i className="fas fa-cog" /></NavLink></li> : null}
               <li className={`dropdown ${userOpen ? 'open' : ''}`}>
-                <button type="button" className="nav-icon-btn" onClick={() => setUserOpen((o) => !o)}>
-                  <i className="fas fa-user" /> {displayName}
+                <button type="button" className="nav-icon-btn nav-user-btn" onClick={() => setUserOpen((o) => !o)}>
+                  <i className="fas fa-user" aria-hidden="true" />
+                  <span className="nav-user-name">{displayName}</span>
                 </button>
                 <div className="dropdown-menu">
-                  <NavLink to="/account/assets" onClick={() => setUserOpen(false)}>View Assigned Assets</NavLink>
-                  <NavLink to="/account/requested" onClick={() => setUserOpen(false)}>Requested Assets</NavLink>
-                  <NavLink to="/account/accept" onClick={() => setUserOpen(false)}>Accept Assets</NavLink>
-                  <div className="divider" />
                   <NavLink to="/account/profile" onClick={() => setUserOpen(false)}>Edit Profile</NavLink>
                   <NavLink to="/account/password" onClick={() => setUserOpen(false)}>Change Password</NavLink>
-                  <NavLink to="/account/api" onClick={() => setUserOpen(false)}>Manage API Keys</NavLink>
                   <div className="divider" />
                   <button type="button" onClick={() => { logout(); navigate('/login') }}>Logout</button>
                 </div>
@@ -328,37 +345,57 @@ export default function AppLayout({ children, title, subtitle }: Props) {
             <NavLink to="/"><i className="fas fa-tachometer-alt fa-fw" /><span>Dashboard</span></NavLink>
           </li>
 
-          <li className={section === 'assets' ? 'active' : ''}>
-            <NavLink to="/hardware"><i className="fas fa-barcode fa-fw" /><span>Assets</span></NavLink>
-          </li>
-          <li className={path.startsWith('/licenses') ? 'active' : ''}>
-            <NavLink to="/licenses"><i className="fas fa-save fa-fw" /><span>Licenses</span></NavLink>
-          </li>
-          <li className={path.startsWith('/accessories') ? 'active' : ''}>
-            <NavLink to="/accessories"><i className="fas fa-keyboard fa-fw" /><span>Accessories</span></NavLink>
-          </li>
-          <li className={path.startsWith('/consumables') ? 'active' : ''}>
-            <NavLink to="/consumables"><i className="fas fa-tint fa-fw" /><span>Consumables</span></NavLink>
-          </li>
-          <li className={path.startsWith('/components') ? 'active' : ''}>
-            <NavLink to="/components"><i className="fas fa-hdd fa-fw" /><span>Components</span></NavLink>
-          </li>
+          {can('assets.view') ? (
+            <li className={section === 'assets' ? 'active' : ''}>
+              <NavLink to="/hardware"><i className="fas fa-barcode fa-fw" /><span>Assets</span></NavLink>
+            </li>
+          ) : null}
+          {can('licenses.view') ? (
+            <li className={path.startsWith('/licenses') ? 'active' : ''}>
+              <NavLink to="/licenses"><i className="fas fa-save fa-fw" /><span>Licenses</span></NavLink>
+            </li>
+          ) : null}
+          {can('accessories.view') ? (
+            <li className={path.startsWith('/accessories') ? 'active' : ''}>
+              <NavLink to="/accessories"><i className="fas fa-keyboard fa-fw" /><span>Accessories</span></NavLink>
+            </li>
+          ) : null}
+          {can('consumables.view') ? (
+            <li className={path.startsWith('/consumables') ? 'active' : ''}>
+              <NavLink to="/consumables"><i className="fas fa-tint fa-fw" /><span>Consumables</span></NavLink>
+            </li>
+          ) : null}
+          {can('components.view') ? (
+            <li className={path.startsWith('/components') ? 'active' : ''}>
+              <NavLink to="/components"><i className="fas fa-hdd fa-fw" /><span>Components</span></NavLink>
+            </li>
+          ) : null}
 
-          <li className={section === 'people' ? 'active' : ''}>
-            <NavLink to="/employees"><i className="fas fa-users fa-fw" /><span>People</span></NavLink>
-          </li>
-          <li className={section === 'masters' ? 'active' : ''}>
-            <NavLink to="/companies"><i className="fas fa-database fa-fw" /><span>Masters</span></NavLink>
-          </li>
-          <li className={path.startsWith('/import') ? 'active' : ''}>
-            <NavLink to="/import"><i className="fas fa-file-import fa-fw" /><span>Import</span></NavLink>
-          </li>
-          <li className={section === 'settings' ? 'active' : ''}>
-            <NavLink to="/settings"><i className="fas fa-cog fa-fw" /><span>Settings</span></NavLink>
-          </li>
-          <li className={section === 'reports' ? 'active' : ''}>
-            <NavLink to="/reports"><i className="fas fa-chart-bar fa-fw" /><span>Reports</span></NavLink>
-          </li>
+          {can('people.view') ? (
+            <li className={section === 'people' ? 'active' : ''}>
+              <NavLink to="/employees"><i className="fas fa-users fa-fw" /><span>People</span></NavLink>
+            </li>
+          ) : null}
+          {can('settings.view') ? (
+            <li className={section === 'masters' ? 'active' : ''}>
+              <NavLink to="/companies"><i className="fas fa-database fa-fw" /><span>Masters</span></NavLink>
+            </li>
+          ) : null}
+          {can('settings.edit') ? (
+            <li className={path.startsWith('/import') ? 'active' : ''}>
+              <NavLink to="/import"><i className="fas fa-file-import fa-fw" /><span>Import</span></NavLink>
+            </li>
+          ) : null}
+          {can('settings.view') ? (
+            <li className={section === 'settings' ? 'active' : ''}>
+              <NavLink to="/settings"><i className="fas fa-cog fa-fw" /><span>Settings</span></NavLink>
+            </li>
+          ) : null}
+          {can('reports.view') ? (
+            <li className={section === 'reports' ? 'active' : ''}>
+              <NavLink to="/reports"><i className="fas fa-chart-bar fa-fw" /><span>Reports</span></NavLink>
+            </li>
+          ) : null}
         </ul>
       </aside>
 

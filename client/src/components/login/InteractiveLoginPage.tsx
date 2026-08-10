@@ -2,7 +2,8 @@ import { Link } from 'react-router-dom'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import {
-  ArrowRight, BarChart3, Boxes, CheckCircle2, ClipboardCheck,
+  ArrowRight, BarChart3, Boxes, CheckCircle2,
+  // ClipboardCheck, // Audit feature — restore when needed
   Eye, EyeOff, LayoutDashboard, Lock, Monitor, Package,
   Rocket, ShieldCheck, Sparkles, User, Zap,
 } from 'lucide-react'
@@ -61,8 +62,11 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
 
   const assets = useCountUp(1200, 1400)
   const deployed = useCountUp(640, 1300)
-  const audited = useCountUp(98, 1500, '%')
-  const due = useCountUp(120, 1200)
+  // Audit feature — restore when needed
+  // const audited = useCountUp(98, 1500, '%')
+  // const due = useCountUp(120, 1200)
+  const inStock = useCountUp(380, 1200)
+  const licenses = useCountUp(210, 1350)
 
   const mood: MascotMood = useMemo(() => {
     if (mascotMood === 'success' || mascotMood === 'fail') return mascotMood
@@ -149,8 +153,9 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
             {[
               { icon: Boxes, title: 'Track', desc: 'Tags, serials & custody', color: 'green' },
               { icon: Package, title: 'Assign', desc: 'Employees & locations', color: 'violet' },
-              { icon: ClipboardCheck, title: 'Audit', desc: 'Due lists & reports', color: 'blue' },
-              { icon: Rocket, title: 'Assign', desc: 'Ready-to-assign assets', color: 'teal' },
+              // { icon: ClipboardCheck, title: 'Audit', desc: 'Due lists & reports', color: 'blue' }, // Audit feature — restore when needed
+              { icon: Rocket, title: 'Inventory', desc: 'Hardware & licenses', color: 'blue' },
+              { icon: Rocket, title: 'Ready', desc: 'Ready-to-assign assets', color: 'teal' },
             ].map((f) => (
               <article key={f.title} className={`em-feature em-feature--${f.color}`}>
                 <div className="em-feature-icon"><f.icon size={18} strokeWidth={2.2} /></div>
@@ -174,8 +179,10 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
                 {[
                   { label: 'Total Assets', value: assets, tone: 'teal' },
                   { label: 'Assigned', value: deployed, tone: 'blue' },
-                  { label: 'Audited', value: audited, tone: 'green' },
-                  { label: 'Due for Audit', value: due, tone: 'orange' },
+                  // { label: 'Audited', value: audited, tone: 'green' }, // Audit feature — restore when needed
+                  // { label: 'Due for Audit', value: due, tone: 'orange' },
+                  { label: 'In Stock', value: inStock, tone: 'green' },
+                  { label: 'Licenses', value: licenses, tone: 'orange' },
                 ].map((s) => (
                   <div key={s.label} className={`em-stat em-stat--${s.tone}`}>
                     <span>{s.label}</span>
@@ -204,7 +211,8 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
                   <header>Recent Activity</header>
                   <ul className="em-timeline">
                     <li>Asset assigned to employee</li>
-                    <li>Audit completed</li>
+                    {/* <li>Audit completed</li> */}{/* Audit feature — restore when needed */}
+                    <li>Agent inventory synced</li>
                     <li>Accessory returned to stock</li>
                     <li>License Pack assigned</li>
                   </ul>

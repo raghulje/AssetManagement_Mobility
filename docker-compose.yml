@@ -1,0 +1,28 @@
+# Biogas_MIS_Vizag style: one Node process, mounts server + client, serves client/out
+# Prereq:
+#   cd client && npm ci && npm run build
+#   SERVE_CLIENT=true in server/.env
+#   docker network create proxy   # once (external network, same as Vizag)
+services:
+  itam:
+    image: node:20
+    container_name: itam-2026
+    working_dir: /app/server
+    volumes:
+      - ./server:/app/server
+      - ./client:/app/client
+    command: npm start
+    env_file:
+      - ./server/.env
+    # Publish for direct LAN access; also on external proxy for Traefik/nginx
+    ports:
+      - "${PORT:-3001}:3001"
+    expose:
+      - "3001"
+    restart: unless-stopped
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true

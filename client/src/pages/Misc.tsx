@@ -371,6 +371,8 @@ export function AccountApi() {
 export function AdminHub() {
   const links = [
     { to: '/settings', label: 'General Settings', icon: 'fas fa-cog' },
+    { to: '/settings/roles', label: 'Roles & permissions', icon: 'fas fa-user-shield-alt' },
+    { to: '/settings/notifications', label: 'Notifications / emails', icon: 'fas fa-envelope' },
     { to: '/companies', label: 'Companies', icon: 'fas fa-building' },
     { to: '/fields', label: 'Custom Fields', icon: 'fas fa-list' },
     { to: '/statuslabels', label: 'Status Labels', icon: 'fas fa-flag' },
@@ -491,7 +493,10 @@ export function SettingsGeneral() {
           </Field>
           <Field label="Alert Email">
             <input className="form-control" type="email" value={alertEmail} onChange={(e) => setAlertEmail(e.target.value)} />
-            <span className="help-block">Receives daily EOL and warranty digest emails (overdue or within 30 days).</span>
+            <span className="help-block">
+              Fallback ops email. For recipients, categories, and IT Asset Manager mapping see{' '}
+              <a href="/settings/notifications">Settings → Notifications</a>.
+            </span>
           </Field>
           <Field label="Full Multiple Companies Support">
             <label className="checkbox"><input type="checkbox" checked={fmcs} onChange={(e) => setFmcs(e.target.checked)} /> Enable FMCS</label>

@@ -1,7 +1,11 @@
 import express from 'express'
 import cors from 'cors'
 import morgan from 'morgan'
+import helmet from 'helmet'
+import compression from 'compression'
+import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { authRequired } from './middleware/auth.js'
 import { fail } from './utils/response.js'
 import authRouter from './routes/auth.js'
@@ -19,20 +23,43 @@ import filesRouter from './routes/files.js'
 import labelsRouter from './routes/labels.js'
 import publicAssetsRouter from './routes/publicAssets.js'
 import agentRouter from './routes/agent.js'
+import { groupsRouter } from './routes/groups.js'
 import { storageRoot } from './services/uploads.js'
+import { moduleGate, requirePerm } from './services/permissions.js'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const clientOutPath = path.resolve(__dirname, '../../client/out')
 
 export function createApp() {
   const app = express()
 
+  // Vizag pattern: Helmet defaults (HSTS + upgrade-insecure-requests) break plain HTTP LAN
+  // (e.g. http://10.x.x.x:3001) by forcing https:// and blank pages.
+  const useHttps = process.env.FORCE_HTTPS === 'true'
+  app.use(helmet({
+    hsts: useHttps ? undefined : false,
+    crossOriginOpenerPolicy: useHttps ? { policy: 'same-origin' } : false,
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        upgradeInsecureRequests: useHttps ? [] : null,
+        'font-src': ["'self'", 'https:', 'data:', 'https://cdnjs.cloudflare.com', 'https://fonts.gstatic.com'],
+        'style-src': ["'self'", 'https:', "'unsafe-inline'", 'https://cdnjs.cloudflare.com', 'https://fonts.googleapis.com'],
+        'img-src': ["'self'", 'data:', 'blob:', 'https:'],
+        'script-src': ["'self'", "'unsafe-inline'"],
+        'connect-src': ["'self'", 'http:', 'https:'],
+      },
+    },
+  }))
+
   app.use(cors({
     origin(origin, cb) {
-      // Allow same-origin tools / mobile browsers with no Origin, localhost, and private LAN
       if (!origin) return cb(null, true)
       if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return cb(null, true)
       if (/^https?:\/\/(10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/i.test(origin)) {
         return cb(null, true)
       }
-      const allowed = String(process.env.CLIENT_ORIGIN || '')
+      const allowed = String(process.env.CLIENT_ORIGIN || process.env.FRONTEND_URL || '')
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean)
@@ -41,8 +68,10 @@ export function createApp() {
     },
     credentials: true,
   }))
-  app.use(express.json({ limit: '20mb' }))
-  app.use(morgan('dev'))
+
+  app.use(compression())
+  app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '20mb' }))
+  app.use(process.env.NODE_ENV === 'production' ? morgan('combined') : morgan('dev'))
 
   // Public static files (images, barcodes)
   app.use('/storage', express.static(path.join(storageRoot, 'public'), {
@@ -55,6 +84,7 @@ export function createApp() {
       status: 'ok',
       product: 'Refex Asset Management',
       version: '1.1.0',
+      serve_client: process.env.SERVE_CLIENT === 'true',
       features: ['imports', 'labels', 'uploads', 'signatures', 'reports', 'public-qr', 'agent-sync', 'agent-remote-scan'],
     })
   })
@@ -67,22 +97,27 @@ export function createApp() {
   const api = express.Router()
   api.use(authRequired)
 
-  api.use('/hardware', hardwareRouter)
-  api.use('/licenses', licensesRouter)
-  api.use('/accessories', accessoriesRouter)
-  api.use('/consumables', consumablesRouter)
-  api.use('/components', componentsRouter)
-  api.use('/kits', kitsRouter)
-  api.use('/users', usersRouter)
-  api.use('/employees', employeesRouter)
-  api.use(mastersRouter)
-  api.use('/reports', reportsRouter)
-  api.use('/maintenances', maintenancesRouter)
+  api.use('/groups', groupsRouter)
+  api.use('/hardware', moduleGate('assets'), hardwareRouter)
+  api.use('/licenses', moduleGate('licenses'), licensesRouter)
+  api.use('/accessories', moduleGate('accessories'), accessoriesRouter)
+  api.use('/consumables', moduleGate('consumables'), consumablesRouter)
+  api.use('/components', moduleGate('components'), componentsRouter)
+  api.use('/kits', moduleGate('assets'), kitsRouter)
+  api.use('/users', moduleGate('people'), usersRouter)
+  api.use('/employees', moduleGate('people'), employeesRouter)
+  // Master selectlists are needed by inventory forms; only mutating masters requires settings.edit
+  api.use((req, res, next) => {
+    if (req.method === 'GET' || req.method === 'HEAD') return next()
+    return requirePerm('settings.edit')(req, res, next)
+  }, mastersRouter)
+  api.use('/reports', moduleGate('reports'), reportsRouter)
+  api.use('/maintenances', moduleGate('maintenance'), maintenancesRouter)
   api.use('/dashboard', dashboardRouter)
-  api.use('/settings', settingsRouter)
+  api.use('/settings', moduleGate('settings'), settingsRouter)
   api.use('/account', accountRouter)
-  api.use('/requests', requestsRouter)
-  api.post('/notifications/eol/run', async (_req, res) => {
+  api.use('/requests', moduleGate('assets'), requestsRouter)
+  api.post('/notifications/eol/run', requirePerm('settings.edit'), async (_req, res) => {
     const { runEolAlertDigest } = await import('./services/eolAlerts.js')
     const { okMessage, fail: failRes } = await import('./utils/response.js')
     try {
@@ -92,11 +127,55 @@ export function createApp() {
       return failRes(res, e instanceof Error ? e.message : 'EOL digest failed', 500)
     }
   })
-  api.use('/imports', importsRouter)
-  api.use('/labels', labelsRouter)
+  api.use('/imports', requirePerm('settings.edit'), importsRouter)
+  api.use('/labels', moduleGate('assets'), labelsRouter)
   api.use(filesRouter)
 
   app.use('/api/v1', api)
+
+  // Biogas_MIS_Vizag pattern: SERVE_CLIENT=true → one process serves UI + API
+  const shouldServeClient = process.env.SERVE_CLIENT === 'true'
+  if (shouldServeClient && fs.existsSync(clientOutPath)) {
+    console.log('Serving production client from:', clientOutPath)
+    app.use(express.static(clientOutPath, {
+      maxAge: '1y',
+      etag: true,
+      lastModified: true,
+      setHeaders(res, filePath) {
+        const ext = path.extname(filePath).toLowerCase()
+        const oneYear = 31536000
+        if (['.js', '.css', '.png', '.jpg', '.jpeg', '.svg', '.webp', '.gif', '.ico', '.woff', '.woff2', '.ttf', '.eot'].includes(ext)) {
+          res.setHeader('Cache-Control', `public, max-age=${oneYear}, immutable`)
+        } else if (ext === '.html') {
+          res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate')
+        }
+      },
+    }))
+
+    app.use((req, res, next) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return next()
+      const p = req.path || ''
+      if (p.startsWith('/api') || p.startsWith('/storage') || p.startsWith('/uploads')) {
+        return next()
+      }
+      return res.sendFile(path.join(clientOutPath, 'index.html'))
+    })
+  } else if (shouldServeClient) {
+    console.warn('SERVE_CLIENT=true but client/out not found — run: cd client && npm run build')
+  } else {
+    app.get('/', (req, res) => {
+      const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http'
+      const host = req.get('host')
+      const baseUrl = `${protocol}://${host}`
+      res.json({
+        message: 'Refex Asset Management API is running',
+        mode: process.env.NODE_ENV || 'development',
+        apiUrl: `${baseUrl}/api/v1`,
+        clientUrl: process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || `${protocol}://${String(host).split(':')[0]}:5173`,
+        note: 'Set SERVE_CLIENT=true and build client/out to serve the UI from this process (Biogas_MIS_Vizag style)',
+      })
+    })
+  }
 
   app.use((_req, res) => fail(res, 'Not found', 404))
   app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

@@ -6,6 +6,7 @@ import { transformUser, transformAsset } from '../services/transformers.js'
 import { logAction } from '../services/actionLog.js'
 import { makeCrudRouter, selectlist } from '../utils/crud.js'
 import { nest } from '../utils/response.js'
+import { getUserGroupIds, setUserGroups, syncUserPermissions } from '../services/permissions.js'
 
 export const usersRouter = Router()
 
@@ -41,7 +42,8 @@ usersRouter.get('/:id', async (req, res) => {
   const id = Number(req.params.id)
   const user = await transformUser(id) || await transformUser(id, { includeDeleted: true })
   if (!user) return fail(res, 'User not found', 404)
-  return okItem(res, user)
+  const group_ids = await getUserGroupIds(id)
+  return okItem(res, { ...user, group_ids })
 })
 
 usersRouter.get('/:id/assets', async (req, res) => {
@@ -58,9 +60,9 @@ usersRouter.post('/', async (req, res) => {
   const exists = await get(`SELECT id FROM users WHERE username = ?`, [b.username])
   if (exists) return fail(res, 'Username already taken')
   const password = bcrypt.hashSync(b.password || 'password', 10)
-  const perms: Record<string, string> = {}
-  if (b.superuser || b.is_superuser) perms.superuser = '1'
-  if (b.admin || b.is_admin) perms.admin = '1'
+  const extras: Record<string, string> = {}
+  if (b.superuser || b.is_superuser) extras.superuser = '1'
+  if (b.admin || b.is_admin) extras.admin = '1'
   const ts = now()
   const info = await run(`
     INSERT INTO users (first_name, last_name, username, email, password, employee_num, company_id, location_id, department_id, jobtitle, phone, activated, permissions, notes, created_at, updated_at)
@@ -68,11 +70,20 @@ usersRouter.post('/', async (req, res) => {
   `, [
     b.first_name, b.last_name, b.username, b.email || null, password, b.employee_num || null,
     b.company_id || null, b.location_id || null, b.department_id || null, b.jobtitle || null, b.phone || null,
-    b.activated === false || b.activated === 0 ? 0 : 1, JSON.stringify(perms), b.notes || null, ts, ts,
+    b.activated === false || b.activated === 0 ? 0 : 1, JSON.stringify(extras), b.notes || null, ts, ts,
   ])
   const id = Number(info.insertId)
+  const groupIds: number[] = Array.isArray(b.group_ids) ? b.group_ids.map(Number) : []
+  if (b.group_id != null) groupIds.push(Number(b.group_id))
+  if (groupIds.length) {
+    await setUserGroups(id, groupIds)
+    if (Object.keys(extras).length) await syncUserPermissions(id, extras)
+  } else if (Object.keys(extras).length) {
+    await syncUserPermissions(id, extras)
+  }
   await logAction({ userId: req.user?.id, actionType: 'create', itemType: 'user', itemId: id })
-  return okMessage(res, 'User created', await transformUser(id), 201)
+  const created = await transformUser(id)
+  return okMessage(res, 'User created', { ...created, group_ids: await getUserGroupIds(id) }, 201)
 })
 
 usersRouter.put('/:id', async (req, res) => {
@@ -96,18 +107,29 @@ usersRouter.put('/:id', async (req, res) => {
     sets.push('password = ?')
     vals.push(bcrypt.hashSync(b.password, 10))
   }
-  if (b.superuser !== undefined || b.admin !== undefined || b.is_superuser !== undefined || b.is_admin !== undefined) {
-    const perms: Record<string, string> = {}
-    if (b.superuser || b.is_superuser) perms.superuser = '1'
-    if (b.admin || b.is_admin) perms.admin = '1'
-    sets.push('permissions = ?')
-    vals.push(JSON.stringify(perms))
+  const extras: Record<string, string> = {}
+  if (b.superuser !== undefined || b.is_superuser !== undefined || b.admin !== undefined || b.is_admin !== undefined) {
+    if (b.superuser || b.is_superuser) extras.superuser = '1'
+    if (b.admin || b.is_admin) extras.admin = '1'
   }
-  if (!sets.length) return fail(res, 'No fields')
-  vals.push(now(), id)
-  await run(`UPDATE users SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`, vals)
+  if (!sets.length && b.group_id === undefined && !Array.isArray(b.group_ids) && !Object.keys(extras).length) {
+    return fail(res, 'No fields')
+  }
+  if (sets.length) {
+    vals.push(now(), id)
+    await run(`UPDATE users SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`, vals)
+  }
+  if (Array.isArray(b.group_ids) || b.group_id != null) {
+    const groupIds: number[] = Array.isArray(b.group_ids) ? b.group_ids.map(Number) : []
+    if (b.group_id != null) groupIds.push(Number(b.group_id))
+    await setUserGroups(id, groupIds)
+  }
+  if (Object.keys(extras).length || Array.isArray(b.group_ids) || b.group_id != null) {
+    await syncUserPermissions(id, extras)
+  }
   await logAction({ userId: req.user?.id, actionType: 'update', itemType: 'user', itemId: id })
-  return okMessage(res, 'User updated', await transformUser(id))
+  const updated = await transformUser(id)
+  return okMessage(res, 'User updated', { ...updated, group_ids: await getUserGroupIds(id) })
 })
 
 usersRouter.delete('/:id', async (req, res) => {

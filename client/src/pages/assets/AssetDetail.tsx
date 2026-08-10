@@ -1,14 +1,15 @@
-import { Link, useParams } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
 import AppLayout from '../../layout/AppLayout'
 import { StatusBadge } from '../../components/ui'
 import { DetailLayout, DetailPanel } from '../../components/DetailLayout'
 import AssetAttachments from '../../components/AssetAttachments'
 import { api, hardwareApi } from '../../api/client'
-import { getStorageBase } from '../../api/baseUrl'
+import { assetImageSrc, getStorageBase } from '../../api/baseUrl'
 import { formatINR } from '../../utils/money'
+import { formatAppDateTime } from '../../lib/datetime'
 
-type TabId = 'details' | 'attachments' | 'history' | 'agent'
+type TabId = 'details' | 'attachments' | 'history' | 'agent' | 'maintenance'
 
 type AgentStatus = {
   registered?: boolean
@@ -34,16 +35,39 @@ type AgentStatus = {
     completed_at?: string | null
     error_message?: string | null
   }>
+  recent_syncs?: Array<{
+    id: number
+    action: string
+    status?: string
+    message?: string | null
+    serial_number?: string | null
+    hostname?: string | null
+    matched_by?: string | null
+    client_ip?: string | null
+    created_at?: string | null
+  }>
 }
 
 export default function AssetDetail() {
   const { id } = useParams()
+  const [params] = useSearchParams()
   const [asset, setAsset] = useState<Record<string, unknown> | null>(null)
   const [tab, setTab] = useState<TabId>('details')
   const [history, setHistory] = useState<Record<string, unknown>[]>([])
+  const [maintenances, setMaintenances] = useState<Record<string, unknown>[]>([])
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null)
   const [agentBusy, setAgentBusy] = useState(false)
   const [msg, setMsg] = useState('')
+
+  /** Keep People context when opened from an employee record. */
+  const fromEmployeeId = params.get('from') === 'employee' ? params.get('employee_id') : null
+  const returnQs = useMemo(() => {
+    if (!fromEmployeeId) return ''
+    const q = new URLSearchParams({ from: 'employee', employee_id: fromEmployeeId })
+    return `?${q.toString()}`
+  }, [fromEmployeeId])
+  const backTo = fromEmployeeId ? `/employees/${fromEmployeeId}` : '/hardware'
+  const backLabel = fromEmployeeId ? 'Back to employee' : 'Back'
 
   const loadAgent = () => {
     if (!id) return
@@ -58,6 +82,9 @@ export default function AssetDetail() {
     hardwareApi.history(id)
       .then((r) => setHistory(r.rows || []))
       .catch(() => setHistory([]))
+    hardwareApi.maintenances(id)
+      .then((r) => setMaintenances(r.rows || []))
+      .catch(() => setMaintenances([]))
     loadAgent()
   }
   useEffect(() => { load() }, [id])
@@ -87,9 +114,23 @@ export default function AssetDetail() {
       const b64 = (res as { payload?: { pdf_base64: string }; pdf_base64?: string }).payload?.pdf_base64
         || (res as { pdf_base64?: string }).pdf_base64
       if (!b64) throw new Error('No PDF returned')
-      const blob = await (await fetch(`data:application/pdf;base64,${b64}`)).blob()
+      // Decode base64 locally — fetch(data:…) often throws "Failed to fetch" in Chromium
+      const binary = atob(b64)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      const blob = new Blob([bytes], { type: 'application/pdf' })
       const url = URL.createObjectURL(blob)
-      window.open(url, '_blank')
+      const opened = window.open(url, '_blank')
+      if (!opened) {
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `print-label-${id}.pdf`
+        a.rel = 'noopener'
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
       setMsg('Print label generated — QR is permanent for this asset')
       load()
     } catch (e) {
@@ -128,6 +169,8 @@ export default function AssetDetail() {
     if (action === 'checkin') return 'Unassigned'
     if (action === 'replace_out') return 'Replaced (out)'
     if (action === 'replace_in') return 'Replaced (in)'
+    if (action === 'maintenance') return 'Maintenance'
+    if (action === 'maintenance_update') return 'Maintenance updated'
     return action
   }
 
@@ -136,7 +179,8 @@ export default function AssetDetail() {
       {msg && <div className="callout callout-info"><p>{msg}</p></div>}
       <DetailLayout
         title={String(a.asset_tag)}
-        backTo="/hardware"
+        backTo={backTo}
+        backLabel={backLabel}
         status={assigned ? 'Assigned' : String(status?.name || '—')}
         meta={[
           { label: 'Name', value: String(a.name || '—') },
@@ -146,13 +190,18 @@ export default function AssetDetail() {
         actions={(
           <>
             {(a.available_actions as { checkout?: boolean })?.checkout && (
-              <Link to={`/hardware/${a.id}/checkout`} className="btn btn-info btn-sm"><i className="fas fa-user-plus" /> Assign</Link>
+              <Link to={`/hardware/${a.id}/checkout${returnQs}`} className="btn btn-info btn-sm"><i className="fas fa-user-plus" /> Assign</Link>
             )}
             {(a.available_actions as { checkin?: boolean })?.checkin && (
-              <Link to={`/hardware/${a.id}/checkin`} className="btn btn-primary btn-sm"><i className="fas fa-user-minus" /> Unassign</Link>
+              <Link to={`/hardware/${a.id}/checkin${returnQs}`} className="btn btn-primary btn-sm"><i className="fas fa-user-minus" /> Unassign</Link>
             )}
-            <Link to={`/hardware/${a.id}/edit`} className="btn btn-warning btn-sm"><i className="fas fa-pencil-alt" /> Edit</Link>
+            <Link to={`/hardware/${a.id}/edit${returnQs}`} className="btn btn-warning btn-sm"><i className="fas fa-pencil-alt" /> Edit</Link>
+            {/* Audit feature — restore when needed
             <Link to={`/hardware/${a.id}/audit`} className="btn btn-default btn-sm"><i className="fas fa-clipboard-check" /> Audit</Link>
+            */}
+            <Link to={`/maintenances/create?asset_id=${a.id}`} className="btn btn-default btn-sm">
+              <i className="fas fa-wrench" /> Add Maintenance
+            </Link>
             <button type="button" className="btn btn-default btn-sm" onClick={() => { void printLabel() }}>
               <i className="fas fa-print" /> Print Label
             </button>
@@ -174,9 +223,10 @@ export default function AssetDetail() {
         )}
         tabs={[
           { id: 'details', label: 'Details' },
+          { id: 'maintenance', label: `Maintenance (${maintenances.length})` },
           { id: 'agent', label: 'Agent' },
           { id: 'attachments', label: 'Attachments' },
-          { id: 'history', label: 'History' },
+          { id: 'history', label: `History (${history.length})` },
         ]}
         activeTab={tab}
         onTabChange={(t) => setTab(t as TabId)}
@@ -238,13 +288,71 @@ export default function AssetDetail() {
               </div>
             </DetailPanel>
             <DetailPanel title="Image">
-              {a.image ? (
-                <img src={`${getStorageBase()}/storage/${String(a.image).replace(/^public\//, '')}`} alt="" style={{ maxWidth: '100%', maxHeight: 240 }} />
-              ) : (
-                <p className="text-muted mb-0">No image — use Edit to upload one.</p>
-              )}
+              {(() => {
+                const src = assetImageSrc(
+                  (a.image_url as string | undefined) || (a.image as string | undefined) || null,
+                )
+                return src ? (
+                  <img src={src} alt="" style={{ maxWidth: '100%', maxHeight: 240 }} />
+                ) : (
+                  <p className="text-muted mb-0">No image — use Edit to upload one.</p>
+                )
+              })()}
             </DetailPanel>
           </>
+        )}
+
+        {tab === 'maintenance' && (
+          <DetailPanel
+            title={`Maintenance log (${maintenances.length})`}
+            tools={(
+              <Link to={`/maintenances/create?asset_id=${a.id}`} className="btn btn-theme btn-xs">
+                <i className="fas fa-plus" /> Add maintenance
+              </Link>
+            )}
+          >
+            <table className="table table-striped table-condensed">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Type</th>
+                  <th>Title</th>
+                  <th>Reason</th>
+                  <th>Cost</th>
+                  <th>Status</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {maintenances.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="text-muted">
+                      No maintenance records for this asset yet.
+                    </td>
+                  </tr>
+                )}
+                {maintenances.map((m) => (
+                  <tr key={String(m.id)}>
+                    <td style={{ whiteSpace: 'nowrap' }} title={String(m.start_date || m.created_at || '')}>
+                      {formatAppDateTime(m.start_date || m.created_at)}
+                    </td>
+                    <td>{String(m.asset_maintenance_type || '—')}</td>
+                    <td>{String(m.title || '—')}</td>
+                    <td title={String(m.note || '')}>{String(m.note || '—')}</td>
+                    <td>{m.cost != null && m.cost !== '' ? formatINR(Number(m.cost)) : '—'}</td>
+                    <td>
+                      {m.completion_date
+                        ? <span className="label label-success">Completed</span>
+                        : <span className="label label-warning">Open</span>}
+                    </td>
+                    <td>
+                      <Link to={`/maintenances/${m.id}/edit`} className="btn btn-xs btn-default">Edit</Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </DetailPanel>
         )}
 
         {tab === 'agent' && (
@@ -309,16 +417,50 @@ export default function AssetDetail() {
                 </tr>
                 <tr>
                   <th>Last heartbeat</th>
-                  <td>{String(agentStatus?.agent?.last_heartbeat_at || '—')}</td>
+                  <td title={String(agentStatus?.agent?.last_heartbeat_at || '')}>
+                    {formatAppDateTime(agentStatus?.agent?.last_heartbeat_at)}
+                  </td>
                 </tr>
                 <tr>
                   <th>Last inventory</th>
-                  <td>{String(agentStatus?.agent?.last_inventory_at || agentStatus?.last_agent_sync_at || a.last_agent_sync_at || '—')}</td>
+                  <td title={String(agentStatus?.agent?.last_inventory_at || agentStatus?.last_agent_sync_at || a.last_agent_sync_at || '')}>
+                    {formatAppDateTime(agentStatus?.agent?.last_inventory_at || agentStatus?.last_agent_sync_at || a.last_agent_sync_at)}
+                  </td>
                 </tr>
               </tbody>
             </table>
 
-            <h5 style={{ marginTop: 8 }}>Recent commands</h5>
+            <h5 style={{ marginTop: 8 }}>
+              Sync history{' '}
+              <Link to="/hardware/agent-activity" className="btn btn-default btn-xs" style={{ marginLeft: 8 }}>All agent activity</Link>
+            </h5>
+            <table className="table table-striped table-condensed">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Action</th>
+                  <th>Message</th>
+                  <th>Matched by</th>
+                  <th>IP</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(agentStatus?.recent_syncs || []).length === 0 && (
+                  <tr><td colSpan={5} className="text-muted">No syncs for this asset yet</td></tr>
+                )}
+                {(agentStatus?.recent_syncs || []).map((s) => (
+                  <tr key={s.id}>
+                    <td style={{ whiteSpace: 'nowrap' }} title={String(s.created_at || '')}>{formatAppDateTime(s.created_at)}</td>
+                    <td>{s.action}</td>
+                    <td>{String(s.message || '—')}</td>
+                    <td>{String(s.matched_by || '—')}</td>
+                    <td>{String(s.client_ip || '—')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <h5 style={{ marginTop: 16 }}>Remote commands</h5>
             <table className="table table-striped table-condensed">
               <thead>
                 <tr>
@@ -339,8 +481,8 @@ export default function AssetDetail() {
                     <td>{c.id}</td>
                     <td>{c.command}</td>
                     <td>{c.status}</td>
-                    <td>{String(c.created_at || '—')}</td>
-                    <td>{String(c.completed_at || '—')}</td>
+                    <td style={{ whiteSpace: 'nowrap' }} title={String(c.created_at || '')}>{formatAppDateTime(c.created_at)}</td>
+                    <td style={{ whiteSpace: 'nowrap' }} title={String(c.completed_at || '')}>{formatAppDateTime(c.completed_at)}</td>
                     <td>{String(c.error_message || '—')}</td>
                   </tr>
                 ))}
@@ -356,37 +498,72 @@ export default function AssetDetail() {
         )}
 
         {tab === 'history' && (
-          <DetailPanel title="Complete asset history">
-            <table className="table table-striped">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Admin</th>
-                  <th>Action</th>
-                  <th>Employee / Target</th>
-                  <th>Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.length === 0 && (
-                  <tr><td colSpan={5} className="text-muted">No history yet</td></tr>
-                )}
-                {history.map((x) => (
-                  <tr key={String(x.id)}>
-                    <td>{String(x.action_date || '—')}</td>
-                    <td>{String(x.admin || '—')}</td>
-                    <td>{actionLabel(String(x.action_type || ''))}</td>
-                    <td>
-                      {x.target_type === 'employee' && x.target_id
-                        ? <Link to={`/employees/${x.target_id}`}>{String(x.target_name || x.target_id)}</Link>
-                        : String(x.target_name || '—')}
-                    </td>
-                    <td>{String(x.note || '—')}</td>
+          <>
+            <DetailPanel title="Custody events (assign / unassign / replace)">
+              <table className="table table-striped">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Admin</th>
+                    <th>Action</th>
+                    <th>Employee / Target</th>
+                    <th>Reason</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </DetailPanel>
+                </thead>
+                <tbody>
+                  {history.filter((x) => ['checkout', 'checkin', 'replace_in', 'replace_out'].includes(String(x.action_type))).length === 0 && (
+                    <tr><td colSpan={5} className="text-muted">No custody events yet</td></tr>
+                  )}
+                  {history
+                    .filter((x) => ['checkout', 'checkin', 'replace_in', 'replace_out'].includes(String(x.action_type)))
+                    .map((x) => (
+                      <tr key={`custody-${String(x.id)}`}>
+                        <td style={{ whiteSpace: 'nowrap' }} title={String(x.action_date || '')}>{formatAppDateTime(x.action_date)}</td>
+                        <td>{String(x.admin || '—')}</td>
+                        <td>{actionLabel(String(x.action_type || ''))}</td>
+                        <td>
+                          {x.target_type === 'employee' && x.target_id
+                            ? <Link to={`/employees/${x.target_id}`}>{String(x.target_name || x.target_id)}</Link>
+                            : String(x.target_name || '—')}
+                        </td>
+                        <td>{String(x.note || '—')}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </DetailPanel>
+            <DetailPanel title="Complete asset history">
+              <table className="table table-striped">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Admin</th>
+                    <th>Action</th>
+                    <th>Employee / Target</th>
+                    <th>Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.length === 0 && (
+                    <tr><td colSpan={5} className="text-muted">No history yet</td></tr>
+                  )}
+                  {history.map((x) => (
+                    <tr key={String(x.id)}>
+                      <td style={{ whiteSpace: 'nowrap' }} title={String(x.action_date || '')}>{formatAppDateTime(x.action_date)}</td>
+                      <td>{String(x.admin || '—')}</td>
+                      <td>{actionLabel(String(x.action_type || ''))}</td>
+                      <td>
+                        {x.target_type === 'employee' && x.target_id
+                          ? <Link to={`/employees/${x.target_id}`}>{String(x.target_name || x.target_id)}</Link>
+                          : String(x.target_name || '—')}
+                      </td>
+                      <td>{String(x.note || '—')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </DetailPanel>
+          </>
         )}
       </DetailLayout>
     </AppLayout>
