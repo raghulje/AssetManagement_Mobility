@@ -165,7 +165,25 @@ export async function transformLicense(id: number) {
       m.name as manufacturer_name, cat.name as category_name,
       e.first_name as requester_first, e.last_name as requester_last,
       e.employee_code as requester_code, e.email as requester_email,
-      (SELECT COUNT(*) FROM license_seats WHERE license_id=l.id AND (assigned_to IS NOT NULL OR asset_id IS NOT NULL)) as used
+      (SELECT COUNT(*) FROM license_seats WHERE license_id=l.id AND (assigned_to IS NOT NULL OR asset_id IS NOT NULL)) as used,
+      (
+        SELECT COUNT(*) FROM license_invoices li
+        WHERE li.license_id = l.id AND li.deleted_at IS NULL
+      ) as invoice_slots,
+      (
+        SELECT COUNT(*) FROM license_invoices li
+        WHERE li.license_id = l.id AND li.deleted_at IS NULL
+          AND (
+            li.invoice_at IS NOT NULL
+            OR li.amount IS NOT NULL
+            OR (li.notes IS NOT NULL AND TRIM(li.notes) <> '')
+            OR EXISTS (
+              SELECT 1 FROM uploads u
+              WHERE u.uploadable_type = 'license_invoice' AND u.uploadable_id = li.id
+                AND u.deleted_at IS NULL
+            )
+          )
+      ) as invoices_recorded
     FROM licenses l
     LEFT JOIN companies c ON c.id = l.company_id
     LEFT JOIN legal_entities le ON le.id = l.legal_entity_id
@@ -177,6 +195,10 @@ export async function transformLicense(id: number) {
   if (!l) return null
   const seats = Number(l.seats)
   const used = Number(l.used)
+  const cycles = Math.max(1, Number(l.subscription_cycles) || 1)
+  const period = String(l.subscription_period || 'none')
+  const expectedFromCycles = period === 'none' ? 0 : cycles
+  const slots = Number(l.invoice_slots || 0)
   const requesterName = l.requested_by_employee_id
     ? `${l.requester_first || ''} ${l.requester_last || ''}`.trim()
       + (l.requester_code ? ` (${l.requester_code})` : '')
@@ -199,10 +221,13 @@ export async function transformLicense(id: number) {
       employee_code: l.requester_code || null,
     }),
     expiration_date: l.expiration_date ? { date: l.expiration_date, formatted: l.expiration_date } : null,
-    subscription_period: l.subscription_period || 'none',
+    subscription_period: period,
     subscription_custom_value: l.subscription_custom_value != null ? Number(l.subscription_custom_value) : null,
     subscription_custom_unit: l.subscription_custom_unit || null,
+    subscription_cycles: cycles,
     is_recurring: Boolean(l.is_recurring),
+    expected_invoice_count: Math.max(expectedFromCycles, slots),
+    invoices_recorded: Number(l.invoices_recorded || 0),
     purchase_cost: l.purchase_cost,
     purchase_date: l.purchase_date ? { date: l.purchase_date, formatted: l.purchase_date } : null,
     notes: l.notes,

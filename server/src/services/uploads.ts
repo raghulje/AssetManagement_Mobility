@@ -16,6 +16,7 @@ const dirs = [
   'private_uploads/assets',
   'private_uploads/users',
   'private_uploads/licenses',
+  'private_uploads/license_invoices',
   'private_uploads/signatures',
   'private_uploads/eula-pdfs',
   'private_uploads/audits',

@@ -15,6 +15,8 @@ const typeMap: Record<string, string> = {
   user: 'user',
   licenses: 'license',
   license: 'license',
+  license_invoices: 'license_invoice',
+  license_invoice: 'license_invoice',
   accessories: 'accessory',
   maintenances: 'maintenance',
   maintenance: 'maintenance',
@@ -47,7 +49,13 @@ router.post('/:objectType/:id/files', (req, res) => {
     ? (type === 'user' ? 'public/avatars' : 'public/assets')
     : kind === 'audit'
       ? 'private_uploads/audits'
-      : `private_uploads/${type === 'asset' ? 'assets' : type === 'user' ? 'users' : type === 'license' ? 'licenses' : 'maintenances'}`
+      : `private_uploads/${
+        type === 'asset' ? 'assets'
+          : type === 'user' ? 'users'
+            : type === 'license' ? 'licenses'
+              : type === 'license_invoice' ? 'license_invoices'
+                : 'maintenances'
+      }`
 
   const upload = makeUploader(subdir, 'file')
   upload(req, res, async (err) => {

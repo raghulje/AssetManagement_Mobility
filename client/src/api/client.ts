@@ -331,6 +331,32 @@ export const licensesApi = {
     api<ApiList<Record<string, unknown>>>(`/licenses?${listParams(params)}`),
   get: (id: number | string) => api<Record<string, unknown>>(`/licenses/${id}`),
   seats: (id: number | string) => api<ApiList<Record<string, unknown>>>(`/licenses/${id}/seats`),
+  invoices: (id: number | string) => api<ApiList<Record<string, unknown>>>(`/licenses/${id}/invoices`),
+  addInvoicePeriod: (id: number | string) =>
+    api<{ status: string; messages: string[]; payload: Record<string, unknown> }>(`/licenses/${id}/invoices`, {
+      method: 'POST',
+      json: {},
+    }),
+  updateInvoice: (invoiceId: number | string, body: unknown) =>
+    api<{ status: string; messages: string[]; payload: Record<string, unknown> }>(`/licenses/invoices/${invoiceId}`, {
+      method: 'PUT',
+      json: body,
+    }),
+  removeInvoice: (invoiceId: number | string) =>
+    api<{ status: string; messages: string[] }>(`/licenses/invoices/${invoiceId}`, { method: 'DELETE' }),
+  uploadInvoiceFile: async (invoiceId: number | string, file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    const t = localStorage.getItem('refex_token')
+    const res = await fetch(`${getApiBase()}/license_invoices/${invoiceId}/files?kind=invoice`, {
+      method: 'POST',
+      headers: t ? { Authorization: `Bearer ${t}` } : {},
+      body: fd,
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error((data.messages || []).join(', ') || 'Upload failed')
+    return data
+  },
   create: (body: unknown) =>
     api<{ status: string; messages: string[]; payload: Record<string, unknown> }>('/licenses', {
       method: 'POST',

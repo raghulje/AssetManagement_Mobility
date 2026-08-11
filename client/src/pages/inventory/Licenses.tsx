@@ -17,6 +17,7 @@ import {
 import { employeesApi } from '../../api/employees'
 import { formatINR } from '../../utils/money'
 import { useToast } from '../../components/Toast'
+import { getApiBase } from '../../api/baseUrl'
 
 /** Mirror server computeSubscriptionEnd for live form preview. */
 function computeSubEnd(
@@ -24,19 +25,31 @@ function computeSubEnd(
   period: string,
   customValue: string,
   customUnit: string,
+  cycles = '1',
 ): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || period === 'none') return ''
-  const d = new Date(`${start}T12:00:00Z`)
+  let d = new Date(`${start}T12:00:00Z`)
   if (Number.isNaN(d.getTime())) return ''
-  if (period === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1)
-  else if (period === 'annual') d.setUTCFullYear(d.getUTCFullYear() + 1)
-  else if (period === 'custom') {
-    const n = Number(customValue)
-    if (!Number.isFinite(n) || n < 1) return ''
-    if (customUnit === 'days') d.setUTCDate(d.getUTCDate() + n)
-    else d.setUTCMonth(d.getUTCMonth() + n)
-  } else return ''
+  const nCycles = Math.max(1, Math.min(120, Number(cycles) || 1))
+  for (let i = 0; i < nCycles; i++) {
+    if (period === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1)
+    else if (period === 'annual') d.setUTCFullYear(d.getUTCFullYear() + 1)
+    else if (period === 'custom') {
+      const n = Number(customValue)
+      if (!Number.isFinite(n) || n < 1) return ''
+      if (customUnit === 'days') d.setUTCDate(d.getUTCDate() + n)
+      else d.setUTCMonth(d.getUTCMonth() + n)
+    } else return ''
+  }
   return d.toISOString().slice(0, 10)
+}
+
+function toDatetimeLocal(v: unknown): string {
+  if (!v) return ''
+  const s = String(v).trim().replace(' ', 'T')
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) return s.slice(0, 16)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return `${s}T00:00`
+  return ''
 }
 
 function nestId(v: unknown): string {
@@ -71,6 +84,7 @@ type FormState = {
   subscription_period: 'none' | 'monthly' | 'annual' | 'custom'
   subscription_custom_value: string
   subscription_custom_unit: 'days' | 'months'
+  subscription_cycles: string
   is_recurring: boolean
   notes: string
 }
@@ -90,6 +104,7 @@ const emptyForm: FormState = {
   subscription_period: 'none',
   subscription_custom_value: '1',
   subscription_custom_unit: 'months',
+  subscription_cycles: '1',
   is_recurring: false,
   notes: '',
 }
@@ -208,17 +223,31 @@ export function LicensesList() {
               label: 'Subscription',
               exportValue: (r) => {
                 const p = String(r.subscription_period || 'none')
+                const c = Number(r.subscription_cycles) || 1
                 let s = p
                 if (p === 'custom') s = `${r.subscription_custom_value || '?'} ${r.subscription_custom_unit || 'mo'}`
+                if (p !== 'none' && c > 1) s += ` × ${c}`
                 if (r.is_recurring) s += ' recurring'
                 return s
               },
               render: (r) => {
                 const p = String(r.subscription_period || 'none')
                 if (p === 'none') return <span className="text-muted">—</span>
-                let s = p === 'monthly' ? 'Monthly' : p === 'annual' ? 'Annual' : `Custom`
+                const c = Number(r.subscription_cycles) || 1
+                let s = p === 'monthly' ? 'Monthly' : p === 'annual' ? 'Annual' : 'Custom'
+                if (c > 1) s += ` × ${c}`
                 if (r.is_recurring) s += ' · ↻'
                 return s
+              },
+            },
+            {
+              key: 'invoices',
+              label: 'Invoices',
+              exportValue: (r) => `${r.invoices_recorded ?? 0}/${r.expected_invoice_count ?? 0}`,
+              render: (r) => {
+                const exp = Number(r.expected_invoice_count || 0)
+                if (!exp) return <span className="text-muted">—</span>
+                return `${r.invoices_recorded ?? 0} / ${exp}`
               },
             },
             {
@@ -257,14 +286,33 @@ export function LicenseDetail() {
   const toast = useToast()
   const [lic, setLic] = useState<Record<string, unknown> | null>(null)
   const [seats, setSeats] = useState<Record<string, unknown>[]>([])
+  const [invoices, setInvoices] = useState<Record<string, unknown>[]>([])
   const [tab, setTab] = useState('details')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [draft, setDraft] = useState<Record<number, {
+    invoice_at: string
+    amount: string
+    notes: string
+  }>>({})
 
   const load = () => {
     if (!id) return
     licensesApi.get(id).then(setLic).catch(() => setLic(null))
     licensesApi.seats(id).then((r) => setSeats(r.rows || [])).catch(() => setSeats([]))
+    licensesApi.invoices(id).then((r) => {
+      const rows = r.rows || []
+      setInvoices(rows)
+      const next: typeof draft = {}
+      for (const row of rows) {
+        next[Number(row.id)] = {
+          invoice_at: toDatetimeLocal(row.invoice_at),
+          amount: row.amount != null ? String(row.amount) : '',
+          notes: String(row.notes || ''),
+        }
+      }
+      setDraft(next)
+    }).catch(() => setInvoices([]))
   }
 
   useEffect(load, [id])
@@ -294,6 +342,67 @@ export function LicenseDetail() {
       load()
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Unassign failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const saveInvoice = async (invoiceId: number) => {
+    const d = draft[invoiceId] || { invoice_at: '', amount: '', notes: '' }
+    setBusy(true)
+    setMsg('')
+    try {
+      await licensesApi.updateInvoice(invoiceId, {
+        invoice_at: d.invoice_at ? d.invoice_at.replace('T', ' ') + ':00' : null,
+        amount: d.amount !== '' ? Number(d.amount) : null,
+        notes: d.notes || null,
+      })
+      toast.success('Invoice saved')
+      load()
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Save invoice failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const addInvoicePeriod = async () => {
+    if (!id) return
+    setBusy(true)
+    try {
+      await licensesApi.addInvoicePeriod(id)
+      toast.success('Invoice period added')
+      load()
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Could not add period')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const removeInvoice = async (invoiceId: number) => {
+    if (!confirm('Remove this invoice period?')) return
+    setBusy(true)
+    try {
+      await licensesApi.removeInvoice(invoiceId)
+      toast.success('Invoice period removed')
+      load()
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Delete failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const uploadInvoice = async (invoiceId: number, file: File | null) => {
+    if (!file) return
+    setBusy(true)
+    try {
+      await licensesApi.uploadInvoiceFile(invoiceId, file)
+      toast.success('Invoice file uploaded')
+      load()
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Upload failed')
     } finally {
       setBusy(false)
     }
@@ -330,6 +439,7 @@ export function LicenseDetail() {
         )}
         tabs={[
           { id: 'details', label: 'Details' },
+          { id: 'invoices', label: `Invoices (${lic.invoices_recorded ?? 0}/${lic.expected_invoice_count ?? 0})` },
           { id: 'seats', label: 'Licenses' },
           { id: 'history', label: 'History' },
         ]}
@@ -347,21 +457,156 @@ export function LicenseDetail() {
             label: 'Subscription',
             value: (() => {
               const p = String(lic.subscription_period || 'none')
+              const c = Number(lic.subscription_cycles) || 1
               let s = 'One-time / none'
-              if (p === 'monthly') s = 'Monthly'
-              else if (p === 'annual') s = 'Annual'
+              if (p === 'monthly') s = c > 1 ? `Monthly × ${c}` : 'Monthly'
+              else if (p === 'annual') s = c > 1 ? `Annual × ${c}` : 'Annual'
               else if (p === 'custom') {
                 s = `Custom (${lic.subscription_custom_value || '?'} ${lic.subscription_custom_unit || 'months'})`
+                if (c > 1) s += ` × ${c}`
               }
               if (lic.is_recurring) s += ' · recurring'
               return s
             })(),
+          },
+          {
+            label: 'Invoices',
+            value: Number(lic.expected_invoice_count || 0)
+              ? `${lic.invoices_recorded ?? 0} / ${lic.expected_invoice_count} recorded`
+              : '—',
           },
           { label: 'Subscription ends', value: dateVal(lic.expiration_date) || '—' },
           { label: 'Purchase Cost', value: formatINR(lic.purchase_cost) },
           { label: 'Notes', value: String(lic.notes || '—'), full: true },
         ] : undefined}
       >
+        {tab === 'invoices' && (
+          <DetailPanel
+            title="Subscription invoices"
+            tools={(
+              <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={() => { void addInvoicePeriod() }}>
+                <i className="fas fa-plus" /> Add invoice period
+              </button>
+            )}
+          >
+            <p className="help-block" style={{ marginTop: 0 }}>
+              Periods are generated from billing frequency × cycles (e.g. Monthly × 12 → 12 invoices).
+              Save a date/time stamp, amount, notes, and optional PDF/image per period.
+            </p>
+            <div className="table-responsive">
+              <table className="table table-striped table-condensed">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Period</th>
+                    <th>Invoice date/time</th>
+                    <th>Amount (INR)</th>
+                    <th>File</th>
+                    <th>Notes</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoices.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="text-muted">
+                        No invoice periods yet. Set subscription period + cycles on Edit, or add a period here.
+                      </td>
+                    </tr>
+                  ) : invoices.map((inv) => {
+                    const invId = Number(inv.id)
+                    const d = draft[invId] || { invoice_at: '', amount: '', notes: '' }
+                    return (
+                      <tr key={invId}>
+                        <td>{String(inv.period_index)}</td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          {String(inv.period_start).slice(0, 10)} → {String(inv.period_end).slice(0, 10)}
+                        </td>
+                        <td>
+                          <input
+                            type="datetime-local"
+                            className="form-control input-sm"
+                            value={d.invoice_at}
+                            onChange={(e) => setDraft((prev) => ({
+                              ...prev,
+                              [invId]: { ...d, invoice_at: e.target.value },
+                            }))}
+                          />
+                        </td>
+                        <td style={{ maxWidth: 110 }}>
+                          <input
+                            type="number"
+                            className="form-control input-sm"
+                            value={d.amount}
+                            onChange={(e) => setDraft((prev) => ({
+                              ...prev,
+                              [invId]: { ...d, amount: e.target.value },
+                            }))}
+                          />
+                        </td>
+                        <td style={{ minWidth: 140 }}>
+                          {inv.file_id ? (
+                            <div>
+                              <a
+                                href={`${getApiBase()}/files/${inv.file_id}/download`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {String(inv.file_name || 'View file')}
+                              </a>
+                            </div>
+                          ) : (
+                            <span className="text-muted">No file</span>
+                          )}
+                          <input
+                            type="file"
+                            accept=".pdf,image/*"
+                            className="form-control input-sm"
+                            style={{ marginTop: 4 }}
+                            disabled={busy}
+                            onChange={(e) => {
+                              const f = e.target.files?.[0] || null
+                              void uploadInvoice(invId, f)
+                              e.target.value = ''
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="form-control input-sm"
+                            value={d.notes}
+                            onChange={(e) => setDraft((prev) => ({
+                              ...prev,
+                              [invId]: { ...d, notes: e.target.value },
+                            }))}
+                          />
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-success"
+                            disabled={busy}
+                            onClick={() => { void saveInvoice(invId) }}
+                          >
+                            Save
+                          </button>{' '}
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-danger"
+                            disabled={busy}
+                            onClick={() => { void removeInvoice(invId) }}
+                          >
+                            <i className="fas fa-trash" />
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </DetailPanel>
+        )}
         {tab === 'seats' && (
           <DetailPanel title="Licenses">
             <table className="table table-striped">
@@ -441,7 +686,7 @@ export function LicenseForm() {
       .catch(() => setEmployees([]))
   }, [empSearch])
 
-  // Auto-fill subscription end from purchase date + period
+  // Auto-fill subscription end from purchase date + period × cycles
   useEffect(() => {
     if (form.subscription_period === 'none') return
     const end = computeSubEnd(
@@ -449,6 +694,7 @@ export function LicenseForm() {
       form.subscription_period,
       form.subscription_custom_value,
       form.subscription_custom_unit,
+      form.subscription_cycles,
     )
     if (end && end !== form.expiration_date) set('expiration_date', end)
   }, [
@@ -456,6 +702,7 @@ export function LicenseForm() {
     form.subscription_period,
     form.subscription_custom_value,
     form.subscription_custom_unit,
+    form.subscription_cycles,
   ])
 
   useEffect(() => {
@@ -481,6 +728,7 @@ export function LicenseForm() {
             ? String(lic.subscription_custom_value)
             : '1',
           subscription_custom_unit: String(lic.subscription_custom_unit || 'months') === 'days' ? 'days' : 'months',
+          subscription_cycles: String(lic.subscription_cycles ?? 1),
           is_recurring: Boolean(lic.is_recurring),
           notes: String(lic.notes || ''),
         })
@@ -520,6 +768,9 @@ export function LicenseForm() {
       subscription_custom_unit: form.subscription_period === 'custom'
         ? form.subscription_custom_unit
         : null,
+      subscription_cycles: form.subscription_period !== 'none'
+        ? Math.max(1, Number(form.subscription_cycles) || 1)
+        : 1,
       is_recurring: form.is_recurring,
       notes: form.notes || null,
     }
@@ -670,15 +921,47 @@ export function LicenseForm() {
           </Field>
         ) : null}
 
+        {form.subscription_period !== 'none' ? (
+          <Field label="Cycles / term count" required>
+            <input
+              type="number"
+              min={1}
+              max={120}
+              className="form-control"
+              style={{ maxWidth: 160 }}
+              value={form.subscription_cycles}
+              onChange={(e) => set('subscription_cycles', e.target.value)}
+            />
+            <p className="help-block">
+              {(() => {
+                const c = Math.max(1, Number(form.subscription_cycles) || 1)
+                const label = form.subscription_period === 'monthly'
+                  ? 'Monthly'
+                  : form.subscription_period === 'annual'
+                    ? 'Annual'
+                    : `Custom (${form.subscription_custom_value || '?'} ${form.subscription_custom_unit})`
+                const end = computeSubEnd(
+                  form.purchase_date,
+                  form.subscription_period,
+                  form.subscription_custom_value,
+                  form.subscription_custom_unit,
+                  form.subscription_cycles,
+                )
+                return `${label} × ${c} → ${c} invoice${c === 1 ? '' : 's'}${end ? ` · ends ${end}` : ''}`
+              })()}
+            </p>
+          </Field>
+        ) : null}
+
         <Field label="Subscription end date">
           <DateField
             value={form.expiration_date}
             onChange={(v) => set('expiration_date', v)}
-            placeholder={form.subscription_period !== 'none' ? 'Auto from start + period' : 'Optional'}
+            placeholder={form.subscription_period !== 'none' ? 'Auto from start + period × cycles' : 'Optional'}
           />
           <p className="help-block">
             {form.subscription_period !== 'none'
-              ? 'Filled from start date + period (you can override).'
+              ? 'Filled from start date + period × cycles (you can override).'
               : 'Optional end / expiry date.'}
           </p>
         </Field>

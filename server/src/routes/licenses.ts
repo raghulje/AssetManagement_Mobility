@@ -5,6 +5,11 @@ import { transformLicense } from '../services/transformers.js'
 import { logAction } from '../services/actionLog.js'
 import { actorLabel, notifyWorkflow, resolveAssigneeEmail } from '../services/notify.js'
 import { computeSubscriptionEnd } from '../services/licenseSubscription.js'
+import {
+  appendInvoicePeriod,
+  listLicenseInvoices,
+  syncLicenseInvoiceSlots,
+} from '../services/licenseInvoices.js'
 
 const router = Router()
 
@@ -20,14 +25,22 @@ function normalizeLicenseBody(b: Record<string, unknown>) {
   const customUnit = customUnitRaw === 'days' ? 'days' : 'months'
   const isRecurring = b.is_recurring === true || b.is_recurring === 1 || b.is_recurring === '1'
   const purchaseDate = b.purchase_date ? String(b.purchase_date).slice(0, 10) : null
+  let cycles = b.subscription_cycles != null && b.subscription_cycles !== ''
+    ? Number(b.subscription_cycles)
+    : 1
+  if (!Number.isFinite(cycles) || cycles < 1) cycles = 1
+  cycles = Math.min(Math.floor(cycles), 120)
+  if (period === 'none') cycles = 1
 
   let expiration = b.expiration_date ? String(b.expiration_date).slice(0, 10) : null
+  // Recompute when period is set unless client sent an explicit override after we already computed
   if (period !== 'none' && purchaseDate) {
     const computed = computeSubscriptionEnd({
       startDate: purchaseDate,
       period,
       customValue,
       customUnit,
+      cycles,
     })
     if (computed) expiration = computed
   }
@@ -39,10 +52,30 @@ function normalizeLicenseBody(b: Record<string, unknown>) {
     subscription_period: period,
     subscription_custom_value: period === 'custom' && customValue && customValue > 0 ? customValue : null,
     subscription_custom_unit: period === 'custom' ? customUnit : null,
+    subscription_cycles: cycles,
     is_recurring: isRecurring ? 1 : 0,
     purchase_date: purchaseDate,
     expiration_date: expiration,
   }
+}
+
+async function syncSlotsFromLicense(licenseId: number) {
+  const lic = await get<{
+    purchase_date: string | null
+    subscription_period: string | null
+    subscription_custom_value: number | null
+    subscription_custom_unit: string | null
+    subscription_cycles: number | null
+  }>(`SELECT purchase_date, subscription_period, subscription_custom_value, subscription_custom_unit, subscription_cycles
+      FROM licenses WHERE id = ? AND deleted_at IS NULL`, [licenseId])
+  if (!lic) return
+  await syncLicenseInvoiceSlots(licenseId, {
+    startDate: lic.purchase_date,
+    period: lic.subscription_period,
+    customValue: lic.subscription_custom_value,
+    customUnit: lic.subscription_custom_unit,
+    cycles: lic.subscription_cycles,
+  })
 }
 
 router.get('/', async (req, res) => {
@@ -67,6 +100,68 @@ router.get('/', async (req, res) => {
   return okList(res, rows, total)
 })
 
+router.put('/invoices/:invoiceId', async (req, res) => {
+  const invoiceId = Number(req.params.invoiceId)
+  const row = await get<{ id: number; license_id: number }>(`
+    SELECT id, license_id FROM license_invoices WHERE id = ? AND deleted_at IS NULL
+  `, [invoiceId])
+  if (!row) return fail(res, 'Invoice period not found', 404)
+
+  const b = req.body || {}
+  const map: Record<string, unknown> = {}
+  if (b.invoice_at !== undefined) {
+    const raw = b.invoice_at == null || b.invoice_at === '' ? null : String(b.invoice_at).trim()
+    map.invoice_at = raw ? raw.replace('T', ' ').slice(0, 19) : null
+  }
+  if (b.amount !== undefined) {
+    map.amount = b.amount === null || b.amount === '' ? null : Number(b.amount)
+  }
+  if (b.notes !== undefined) map.notes = b.notes == null ? null : String(b.notes)
+  if (b.period_start !== undefined && b.period_start) {
+    map.period_start = String(b.period_start).slice(0, 10)
+  }
+  if (b.period_end !== undefined && b.period_end) {
+    map.period_end = String(b.period_end).slice(0, 10)
+  }
+
+  const keys = Object.keys(map)
+  if (!keys.length) return fail(res, 'No fields to update')
+  await run(
+    `UPDATE license_invoices SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`,
+    [...keys.map((k) => map[k]), now(), invoiceId],
+  )
+  await logAction({
+    userId: req.user?.id,
+    actionType: 'update',
+    itemType: 'license',
+    itemId: Number(row.license_id),
+    note: `invoice #${invoiceId}`,
+  })
+  const invoices = await listLicenseInvoices(Number(row.license_id))
+  const updated = invoices.find((r) => r.id === invoiceId)
+  return okMessage(res, 'Invoice updated', updated)
+})
+
+router.delete('/invoices/:invoiceId', async (req, res) => {
+  const invoiceId = Number(req.params.invoiceId)
+  const row = await get<{ id: number; license_id: number }>(`
+    SELECT id, license_id FROM license_invoices WHERE id = ? AND deleted_at IS NULL
+  `, [invoiceId])
+  if (!row) return fail(res, 'Invoice period not found', 404)
+  await run(`UPDATE license_invoices SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now(), now(), invoiceId])
+  await run(`
+    UPDATE uploads SET deleted_at = ? WHERE uploadable_type = 'license_invoice' AND uploadable_id = ? AND deleted_at IS NULL
+  `, [now(), invoiceId])
+  await logAction({
+    userId: req.user?.id,
+    actionType: 'delete',
+    itemType: 'license',
+    itemId: Number(row.license_id),
+    note: `invoice #${invoiceId}`,
+  })
+  return okMessage(res, 'Invoice period deleted')
+})
+
 router.get('/:id', async (req, res) => {
   const lic = await transformLicense(Number(req.params.id))
   if (!lic) return fail(res, 'License not found', 404)
@@ -83,6 +178,28 @@ router.get('/:id/seats', async (req, res) => {
   return okList(res, rows)
 })
 
+router.get('/:id/invoices', async (req, res) => {
+  const id = Number(req.params.id)
+  if (!(await transformLicense(id))) return fail(res, 'License not found', 404)
+  const rows = await listLicenseInvoices(id)
+  return okList(res, rows)
+})
+
+router.post('/:id/invoices', async (req, res) => {
+  const id = Number(req.params.id)
+  if (!(await transformLicense(id))) return fail(res, 'License not found', 404)
+  const row = await appendInvoicePeriod(id, req.user?.id)
+  if (!row) return fail(res, 'Could not add invoice period (set purchase date + subscription period first)')
+  await logAction({
+    userId: req.user?.id,
+    actionType: 'create',
+    itemType: 'license',
+    itemId: id,
+    note: `invoice period #${row.period_index}`,
+  })
+  return okMessage(res, 'Invoice period added', row, 201)
+})
+
 router.post('/', async (req, res) => {
   const b = req.body || {}
   if (!b.name) return fail(res, 'name required')
@@ -96,13 +213,14 @@ router.post('/', async (req, res) => {
     INSERT INTO licenses (
       name, serial, seats, company_id, legal_entity_id, manufacturer_id, category_id,
       requested_by_employee_id, expiration_date, subscription_period, subscription_custom_value,
-      subscription_custom_unit, is_recurring, purchase_cost, purchase_date, notes, created_at, updated_at
+      subscription_custom_unit, is_recurring, subscription_cycles, purchase_cost, purchase_date, notes, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     b.name, b.product_key || b.serial || null, seats, b.company_id || null, b.legal_entity_id || null, b.manufacturer_id || null,
     b.category_id || null, sub.requested_by_employee_id, sub.expiration_date,
     sub.subscription_period, sub.subscription_custom_value, sub.subscription_custom_unit, sub.is_recurring,
+    sub.subscription_cycles,
     b.purchase_cost || null, sub.purchase_date, b.notes || null, ts, ts,
   ])
   const id = Number(info.insertId)
@@ -114,6 +232,7 @@ router.post('/', async (req, res) => {
     for (let i = 0; i < n; i++) vals.push(id, ts, ts)
     await run(`INSERT INTO license_seats (license_id, created_at, updated_at) VALUES ${placeholders}`, vals)
   }
+  await syncSlotsFromLicense(id)
   await logAction({ userId: req.user?.id, actionType: 'create', itemType: 'license', itemId: id })
   notifyWorkflow({
     category: 'inventory',
@@ -145,7 +264,7 @@ router.put('/:id', async (req, res) => {
 
   const subTouched = [
     'subscription_period', 'subscription_custom_value', 'subscription_custom_unit',
-    'is_recurring', 'purchase_date', 'expiration_date', 'requested_by_employee_id',
+    'subscription_cycles', 'is_recurring', 'purchase_date', 'expiration_date', 'requested_by_employee_id',
   ].some((k) => b[k] !== undefined)
   if (subTouched) {
     const existing = await get<Record<string, unknown>>(`SELECT * FROM licenses WHERE id = ?`, [id])
@@ -161,6 +280,9 @@ router.put('/:id', async (req, res) => {
       subscription_custom_unit: b.subscription_custom_unit !== undefined
         ? b.subscription_custom_unit
         : existing?.subscription_custom_unit,
+      subscription_cycles: b.subscription_cycles !== undefined
+        ? b.subscription_cycles
+        : existing?.subscription_cycles,
       is_recurring: b.is_recurring !== undefined ? b.is_recurring : existing?.is_recurring,
       requested_by_employee_id: b.requested_by_employee_id !== undefined
         ? b.requested_by_employee_id
@@ -206,6 +328,7 @@ router.put('/:id', async (req, res) => {
     }
     await run(`UPDATE licenses SET seats = ?, updated_at = ? WHERE id = ?`, [target, ts, id])
   }
+  if (subTouched) await syncSlotsFromLicense(id)
   await logAction({ userId: req.user?.id, actionType: 'update', itemType: 'license', itemId: id })
   return okMessage(res, 'License updated', await transformLicense(id))
 })
