@@ -48,23 +48,6 @@ const fadeUp = {
 
 export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) {
   const reduce = useReducedMotion()
-  const [sso, setSso] = useState<{ enabled: boolean; label: string; login_path: string } | null>(null)
-
-  useEffect(() => {
-    fetch('/api/v1/auth/saml/status')
-      .then((r) => r.json())
-      .then((d) => {
-        const payload = d?.enabled != null ? d : d?.payload
-        if (payload?.enabled) {
-          setSso({
-            enabled: true,
-            label: String(payload.label || 'RefexOne SSO'),
-            login_path: String(payload.login_path || '/api/v1/auth/saml/login'),
-          })
-        }
-      })
-      .catch(() => undefined)
-  }, [])
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -269,7 +252,6 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
             transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1], delay: 0.12 }}
           >
             <div className="em-card-head">
-              <img src="/refex-mark.svg" alt="" className="em-mark" />
               <div>
                 <h2>Welcome back!</h2>
                 <p>Sign in to your asset workspace.</p>
@@ -361,18 +343,6 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
                   </>
                 )}
               </button>
-
-              {sso?.enabled ? (
-                <>
-                  <div className="em-or"><span>or continue with</span></div>
-                  <div className="em-sso">
-                    <a className="em-sso-btn" href={sso.login_path} style={{ textDecoration: 'none' }}>
-                      <ShieldCheck size={16} />
-                      {sso.label}
-                    </a>
-                  </div>
-                </>
-              ) : null}
             </form>
           </motion.div>
         </section>

@@ -480,14 +480,9 @@
 
 .em-card-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   margin-bottom: 8px;
-}
-.em-mark {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
 }
 .em-card-head h2 {
   margin: 0;
@@ -898,19 +893,25 @@
     grid-template-columns: 1fr;
     padding-top: 24px;
   }
-  .em-hero { order: 2; }
-  .em-auth { order: 1; }
+  /* Mobile: login card only — keep mascot illustration, hide marketing hero */
+  .em-hero { display: none; }
+  .em-auth { order: 1; max-width: 440px; margin: 0 auto; width: 100%; }
   .em-preview { transform: none; }
   .em-features { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .em-bot { display: none; }
+  .em-card-head { display: none; }
+  .em-mascots {
+    min-height: 160px;
+    margin: 0 0 18px;
+  }
 }
 
 @media (max-width: 640px) {
   .em-stats,
   .em-preview-grid { grid-template-columns: 1fr 1fr; }
-  .em-sso { grid-template-columns: 1fr; }
   .em-card { padding: 22px 18px 18px; border-radius: 22px; }
   .em-title { font-size: 32px; }
+  .em-mascots { min-height: 148px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
