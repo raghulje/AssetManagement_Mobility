@@ -489,122 +489,126 @@ export function LicenseDetail() {
               </button>
             )}
           >
-            <p className="help-block" style={{ marginTop: 0 }}>
+            <p className="help-block" style={{ marginTop: 0, marginBottom: 16 }}>
               Periods are generated from billing frequency × cycles (e.g. Monthly × 12 → 12 invoices).
               Save a date/time stamp, amount, notes, and optional PDF/image per period.
             </p>
-            <div className="table-responsive">
-              <table className="table table-striped table-condensed">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Period</th>
-                    <th>Invoice date/time</th>
-                    <th>Amount (INR)</th>
-                    <th>File</th>
-                    <th>Notes</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {invoices.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="text-muted">
-                        No invoice periods yet. Set subscription period + cycles on Edit, or add a period here.
-                      </td>
-                    </tr>
-                  ) : invoices.map((inv) => {
-                    const invId = Number(inv.id)
-                    const d = draft[invId] || { invoice_at: '', amount: '', notes: '' }
-                    return (
-                      <tr key={invId}>
-                        <td>{String(inv.period_index)}</td>
-                        <td style={{ whiteSpace: 'nowrap' }}>
-                          {String(inv.period_start).slice(0, 10)} → {String(inv.period_end).slice(0, 10)}
-                        </td>
-                        <td>
-                          <input
-                            type="datetime-local"
-                            className="form-control input-sm"
-                            value={d.invoice_at}
-                            onChange={(e) => setDraft((prev) => ({
-                              ...prev,
-                              [invId]: { ...d, invoice_at: e.target.value },
-                            }))}
-                          />
-                        </td>
-                        <td style={{ maxWidth: 110 }}>
-                          <input
-                            type="number"
-                            className="form-control input-sm"
-                            value={d.amount}
-                            onChange={(e) => setDraft((prev) => ({
-                              ...prev,
-                              [invId]: { ...d, amount: e.target.value },
-                            }))}
-                          />
-                        </td>
-                        <td style={{ minWidth: 140 }}>
-                          {inv.file_id ? (
-                            <div>
-                              <a
-                                href={`${getApiBase()}/files/${inv.file_id}/download`}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                {String(inv.file_name || 'View file')}
-                              </a>
+            {invoices.length === 0 ? (
+              <p className="text-muted mb-0">
+                No invoice periods yet. Set subscription period + cycles on Edit, or add a period here.
+              </p>
+            ) : (
+              <div className="license-invoice-list">
+                {invoices.map((inv) => {
+                  const invId = Number(inv.id)
+                  const d = draft[invId] || { invoice_at: '', amount: '', notes: '' }
+                  const recorded = Boolean(inv.invoice_at || inv.amount != null || inv.file_id || (inv.notes && String(inv.notes).trim()))
+                  return (
+                    <article key={invId} className={`license-invoice-card${recorded ? ' is-recorded' : ''}`}>
+                      <header className="license-invoice-card-head">
+                        <div className="license-invoice-card-title">
+                          <span className="license-invoice-period-badge">#{String(inv.period_index)}</span>
+                          <div>
+                            <strong>Billing period</strong>
+                            <div className="license-invoice-period-range">
+                              {String(inv.period_start).slice(0, 10)} → {String(inv.period_end).slice(0, 10)}
                             </div>
-                          ) : (
-                            <span className="text-muted">No file</span>
-                          )}
-                          <input
-                            type="file"
-                            accept=".pdf,image/*"
-                            className="form-control input-sm"
-                            style={{ marginTop: 4 }}
-                            disabled={busy}
-                            onChange={(e) => {
-                              const f = e.target.files?.[0] || null
-                              void uploadInvoice(invId, f)
-                              e.target.value = ''
-                            }}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="form-control input-sm"
-                            value={d.notes}
-                            onChange={(e) => setDraft((prev) => ({
-                              ...prev,
-                              [invId]: { ...d, notes: e.target.value },
-                            }))}
-                          />
-                        </td>
-                        <td style={{ whiteSpace: 'nowrap' }}>
+                          </div>
+                        </div>
+                        <div className="license-invoice-card-actions">
                           <button
                             type="button"
                             className="btn btn-sm btn-success"
                             disabled={busy}
                             onClick={() => { void saveInvoice(invId) }}
                           >
-                            Save
-                          </button>{' '}
+                            <i className="fas fa-save" /> Save
+                          </button>
                           <button
                             type="button"
                             className="btn btn-sm btn-danger"
                             disabled={busy}
+                            title="Remove period"
                             onClick={() => { void removeInvoice(invId) }}
                           >
                             <i className="fas fa-trash" />
                           </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+                        </div>
+                      </header>
+                      <div className="license-invoice-card-grid">
+                        <label className="license-invoice-field">
+                          <span>Invoice date / time</span>
+                          <input
+                            type="datetime-local"
+                            className="form-control"
+                            value={d.invoice_at}
+                            onChange={(e) => setDraft((prev) => ({
+                              ...prev,
+                              [invId]: { ...d, invoice_at: e.target.value },
+                            }))}
+                          />
+                        </label>
+                        <label className="license-invoice-field">
+                          <span>Amount (INR)</span>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            className="form-control"
+                            placeholder="e.g. 2500"
+                            value={d.amount}
+                            onChange={(e) => setDraft((prev) => ({
+                              ...prev,
+                              [invId]: { ...d, amount: e.target.value },
+                            }))}
+                          />
+                        </label>
+                        <div className="license-invoice-field license-invoice-field-file">
+                          <span>Invoice file</span>
+                          {inv.file_id ? (
+                            <a
+                              className="license-invoice-file-link"
+                              href={`${getApiBase()}/files/${inv.file_id}/download`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              <i className="fas fa-paperclip" /> {String(inv.file_name || 'View file')}
+                            </a>
+                          ) : (
+                            <span className="license-invoice-file-empty">No file attached</span>
+                          )}
+                          <label className="license-invoice-file-btn btn btn-default btn-sm">
+                            <i className="fas fa-upload" /> {inv.file_id ? 'Replace file' : 'Choose file'}
+                            <input
+                              type="file"
+                              accept=".pdf,image/*"
+                              disabled={busy}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0] || null
+                                void uploadInvoice(invId, f)
+                                e.target.value = ''
+                              }}
+                            />
+                          </label>
+                        </div>
+                        <label className="license-invoice-field license-invoice-field-notes">
+                          <span>Notes</span>
+                          <input
+                            className="form-control"
+                            placeholder="Optional note for this period"
+                            value={d.notes}
+                            onChange={(e) => setDraft((prev) => ({
+                              ...prev,
+                              [invId]: { ...d, notes: e.target.value },
+                            }))}
+                          />
+                        </label>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            )}
           </DetailPanel>
         )}
         {tab === 'seats' && (

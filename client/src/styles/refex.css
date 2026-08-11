@@ -2476,6 +2476,157 @@ table.table tr.is-selected td { background: rgba(18, 181, 168, 0.08); }
   font-weight: 750;
   color: #0f172a;
 }
+
+/* License subscription invoice periods — stacked cards (not cramped table) */
+.license-invoice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.license-invoice-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 14px 16px 16px;
+}
+.license-invoice-card.is-recorded {
+  background: #fff;
+  border-color: #cbd5e1;
+}
+.license-invoice-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.license-invoice-card-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+.license-invoice-card-title strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.license-invoice-period-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 8px;
+  background: #e2e8f0;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 750;
+  flex-shrink: 0;
+}
+.license-invoice-card.is-recorded .license-invoice-period-badge {
+  background: rgba(0, 119, 73, 0.12);
+  color: var(--main-theme-color, #007749);
+}
+.license-invoice-period-range {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  font-variant-numeric: tabular-nums;
+}
+.license-invoice-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.license-invoice-card-grid {
+  display: grid;
+  grid-template-columns: minmax(200px, 1.2fr) minmax(140px, 0.8fr) minmax(180px, 1fr);
+  gap: 14px 16px;
+  align-items: start;
+}
+.license-invoice-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+}
+.license-invoice-field > span {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #64748b;
+}
+.license-invoice-field .form-control {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.license-invoice-field-notes {
+  grid-column: 1 / -1;
+}
+.license-invoice-field-file {
+  gap: 8px;
+}
+.license-invoice-file-empty {
+  font-size: 13px;
+  color: #94a3b8;
+}
+.license-invoice-file-link {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--main-theme-color, #007749);
+  word-break: break-all;
+}
+.license-invoice-file-link i {
+  margin-right: 4px;
+}
+.license-invoice-file-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  margin: 0;
+  cursor: pointer;
+  overflow: hidden;
+}
+.license-invoice-file-btn input[type='file'] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+@media (max-width: 900px) {
+  .license-invoice-card-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .license-invoice-field-file {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 560px) {
+  .license-invoice-card-head {
+    flex-direction: column;
+  }
+  .license-invoice-card-grid {
+    grid-template-columns: 1fr;
+  }
+  .license-invoice-field-notes,
+  .license-invoice-field-file {
+    grid-column: auto;
+  }
+}
 .detail-fields {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
