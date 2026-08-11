@@ -408,6 +408,38 @@ export function LicenseDetail() {
     }
   }
 
+  /** File download requires Bearer auth — plain <a href> opens without token. */
+  const previewInvoiceFile = async (fileId: number, fileName?: string) => {
+    setBusy(true)
+    setMsg('')
+    try {
+      const t = localStorage.getItem('refex_token')
+      const res = await fetch(`${getApiBase()}/files/${fileId}/download`, {
+        headers: t ? { Authorization: `Bearer ${t}` } : {},
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error((data.messages || []).join(', ') || 'Could not open file')
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const win = window.open(url, '_blank', 'noopener,noreferrer')
+      if (!win) {
+        // Popup blocked — fall back to download
+        const a = document.createElement('a')
+        a.href = url
+        a.download = fileName || 'invoice'
+        a.click()
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 120_000)
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Preview failed')
+      toast.error(e instanceof Error ? e.message : 'Preview failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (!lic) {
     return (
       <AppLayout title="License">
@@ -566,14 +598,19 @@ export function LicenseDetail() {
                         <div className="license-invoice-field license-invoice-field-file">
                           <span>Invoice file</span>
                           {inv.file_id ? (
-                            <a
+                            <button
+                              type="button"
                               className="license-invoice-file-link"
-                              href={`${getApiBase()}/files/${inv.file_id}/download`}
-                              target="_blank"
-                              rel="noreferrer"
+                              disabled={busy}
+                              onClick={() => {
+                                void previewInvoiceFile(
+                                  Number(inv.file_id),
+                                  String(inv.file_name || 'invoice'),
+                                )
+                              }}
                             >
-                              <i className="fas fa-paperclip" /> {String(inv.file_name || 'View file')}
-                            </a>
+                              <i className="fas fa-eye" /> Preview {String(inv.file_name || 'file')}
+                            </button>
                           ) : (
                             <span className="license-invoice-file-empty">No file attached</span>
                           )}

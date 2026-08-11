@@ -2581,13 +2581,30 @@ table.table tr.is-selected td { background: rgba(18, 181, 168, 0.08); }
   color: #94a3b8;
 }
 .license-invoice-file-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
   font-size: 13px;
   font-weight: 600;
   color: var(--main-theme-color, #007749);
+  text-align: left;
   word-break: break-all;
+  cursor: pointer;
+}
+.license-invoice-file-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.license-invoice-file-link:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 .license-invoice-file-link i {
-  margin-right: 4px;
+  margin-right: 2px;
+  flex-shrink: 0;
 }
 .license-invoice-file-btn {
   position: relative;
