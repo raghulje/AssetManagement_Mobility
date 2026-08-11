@@ -123,9 +123,9 @@ export function DetailPanel({ title, children, tools }: { title?: string; childr
   return (
     <div className="detail-panel">
       {(title || tools) && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: title ? 14 : 0 }}>
+        <div className="detail-panel-head">
           {title ? <h3 className="detail-panel-title" style={{ margin: 0, flex: 1 }}>{title}</h3> : <div style={{ flex: 1 }} />}
-          {tools}
+          {tools ? <div className="detail-panel-tools">{tools}</div> : null}
         </div>
       )}
       {children}

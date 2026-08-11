@@ -429,7 +429,7 @@ export default function AssetsList() {
           </div>
         ) : null}
 
-        <div className="table-responsive">
+        <div className="table-responsive data-table-desktop">
           <table className="table table-hover data-list-table">
             <thead>
               <tr>
@@ -519,6 +519,55 @@ export default function AssetsList() {
               })}
             </tbody>
           </table>
+        </div>
+
+        <div className="data-table-mobile" aria-label="Assets">
+          {rows.length === 0 ? (
+            <p className="text-muted data-card-empty">{loading ? 'Loading…' : 'No matching records found'}</p>
+          ) : rows.map((row, i) => {
+            const id = Number(row.id)
+            const actionCol = visibleColumns.find((c) => c.key === 'actions')
+            const bodyCols = visibleColumns.filter((c) => c.key !== 'actions')
+            const titleCol = bodyCols.find((c) => c.key === 'asset_tag') || bodyCols[0]
+            const metaCols = bodyCols.filter((c) => c !== titleCol)
+            return (
+              <article key={String(row.id ?? i)} className={`data-card${selected.has(id) ? ' is-selected' : ''}`}>
+                <div className="data-card-top">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(id)}
+                    onChange={() => {
+                      setSelected((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(id)) next.delete(id)
+                        else next.add(id)
+                        return next
+                      })
+                    }}
+                    aria-label={`Select ${String(row.asset_tag || id)}`}
+                  />
+                  <div className="data-card-title">
+                    {titleCol?.render ? titleCol.render(row) : cell(row[titleCol?.key || 'asset_tag'])}
+                  </div>
+                </div>
+                {metaCols.length > 0 ? (
+                  <dl className="data-card-fields">
+                    {metaCols.map((c) => (
+                      <div key={c.key} className="data-card-field">
+                        <dt>{c.label}</dt>
+                        <dd>{c.render ? c.render(row) : cell(row[c.key])}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : null}
+                {actionCol ? (
+                  <div className="data-card-actions">
+                    {actionCol.render ? actionCol.render(row) : null}
+                  </div>
+                ) : null}
+              </article>
+            )
+          })}
         </div>
 
         <div className="pagination" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 12 }}>

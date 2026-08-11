@@ -281,59 +281,117 @@ export function DataTable({
 
       {msg ? <p className="help-block" style={{ marginTop: 0 }}>{msg}</p> : null}
 
-      <div className="table-responsive">
-        <table className="table table-striped table-hover">
-          <thead>
-            <tr>
-              {selectable ? (
-                <th style={{ width: 36 }}>
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={toggleAll}
-                    aria-label="Select all"
-                    disabled={!rowIds.length}
-                  />
-                </th>
-              ) : null}
-              {visibleColumns.map((c) => <th key={c.key}>{c.label}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={visibleColumns.length + (selectable ? 1 : 0)} className="text-muted">
-                  No matching records found
-                </td>
-              </tr>
-            )}
-            {rows.map((row, i) => {
-              const id = Number(row.id)
-              const canSelect = Number.isFinite(id) && id > 0
-              return (
-                <tr key={String(row.id ?? i)} className={canSelect && selected.has(id) ? 'is-selected' : undefined}>
-                  {selectable ? (
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={canSelect && selected.has(id)}
-                        disabled={!canSelect}
-                        onChange={() => canSelect && toggleOne(id)}
-                        aria-label={`Select row ${id}`}
-                      />
-                    </td>
-                  ) : null}
-                  {visibleColumns.map((c) => (
-                    <td key={c.key}>
-                      {c.render ? c.render(row) : String(row[c.key] ?? '')}
-                    </td>
-                  ))}
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+      {(() => {
+        const actionCol = visibleColumns.find((c) => c.key === 'actions' || c.label === 'Actions')
+        const bodyCols = visibleColumns.filter((c) => c !== actionCol)
+        const titleCol = bodyCols[0]
+        const metaCols = bodyCols.slice(1)
+
+        return (
+          <>
+            <div className="table-responsive data-table-desktop">
+              <table className="table table-striped table-hover">
+                <thead>
+                  <tr>
+                    {selectable ? (
+                      <th style={{ width: 36 }}>
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          onChange={toggleAll}
+                          aria-label="Select all"
+                          disabled={!rowIds.length}
+                        />
+                      </th>
+                    ) : null}
+                    {visibleColumns.map((c) => <th key={c.key}>{c.label}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.length === 0 && (
+                    <tr>
+                      <td colSpan={visibleColumns.length + (selectable ? 1 : 0)} className="text-muted">
+                        No matching records found
+                      </td>
+                    </tr>
+                  )}
+                  {rows.map((row, i) => {
+                    const id = Number(row.id)
+                    const canSelect = Number.isFinite(id) && id > 0
+                    return (
+                      <tr key={String(row.id ?? i)} className={canSelect && selected.has(id) ? 'is-selected' : undefined}>
+                        {selectable ? (
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={canSelect && selected.has(id)}
+                              disabled={!canSelect}
+                              onChange={() => canSelect && toggleOne(id)}
+                              aria-label={`Select row ${id}`}
+                            />
+                          </td>
+                        ) : null}
+                        {visibleColumns.map((c) => (
+                          <td key={c.key}>
+                            {c.render ? c.render(row) : String(row[c.key] ?? '')}
+                          </td>
+                        ))}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="data-table-mobile" aria-label="Records">
+              {rows.length === 0 ? (
+                <p className="text-muted data-card-empty">No matching records found</p>
+              ) : rows.map((row, i) => {
+                const id = Number(row.id)
+                const canSelect = Number.isFinite(id) && id > 0
+                return (
+                  <article
+                    key={String(row.id ?? i)}
+                    className={`data-card${canSelect && selected.has(id) ? ' is-selected' : ''}`}
+                  >
+                    <div className="data-card-top">
+                      {selectable ? (
+                        <input
+                          type="checkbox"
+                          checked={canSelect && selected.has(id)}
+                          disabled={!canSelect}
+                          onChange={() => canSelect && toggleOne(id)}
+                          aria-label={`Select row ${id}`}
+                        />
+                      ) : null}
+                      <div className="data-card-title">
+                        {titleCol
+                          ? (titleCol.render ? titleCol.render(row) : String(row[titleCol.key] ?? '—'))
+                          : `Row ${i + 1}`}
+                      </div>
+                    </div>
+                    {metaCols.length > 0 ? (
+                      <dl className="data-card-fields">
+                        {metaCols.map((c) => (
+                          <div key={c.key} className="data-card-field">
+                            <dt>{c.label}</dt>
+                            <dd>{c.render ? c.render(row) : String(row[c.key] ?? '—')}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    ) : null}
+                    {actionCol ? (
+                      <div className="data-card-actions">
+                        {actionCol.render ? actionCol.render(row) : String(row[actionCol.key] ?? '')}
+                      </div>
+                    ) : null}
+                  </article>
+                )
+              })}
+            </div>
+          </>
+        )
+      })()}
       {page != null && pageSize != null && total != null && onPageChange ? (
         (() => {
           const pageCount = Math.max(1, Math.ceil(total / pageSize))

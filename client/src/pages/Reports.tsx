@@ -79,22 +79,43 @@ function DenseTable({
 }) {
   const money = moneyKeys || new Set(['purchase_cost', 'book_value', 'cost'])
   return (
-    <div className="table-responsive">
-      <table className="table table-striped table-hover table-condensed report-table">
-        <thead>
-          <tr>{columns.map(([k, label]) => <th key={k}>{label}</th>)}</tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i}>
-              {columns.map(([k]) => (
-                <td key={k}>{money.has(k) ? formatINR(r[k]) : String(r[k] ?? '—')}</td>
+    <>
+      <div className="table-responsive data-table-desktop">
+        <table className="table table-striped table-hover table-condensed report-table">
+          <thead>
+            <tr>{columns.map(([k, label]) => <th key={k}>{label}</th>)}</tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                {columns.map(([k]) => (
+                  <td key={k}>{money.has(k) ? formatINR(r[k]) : String(r[k] ?? '—')}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="data-table-mobile" aria-label="Report rows">
+        {rows.length === 0 ? (
+          <p className="text-muted data-card-empty">No rows</p>
+        ) : rows.map((r, i) => (
+          <article key={i} className="data-card">
+            <div className="data-card-title">
+              {money.has(columns[0][0]) ? formatINR(r[columns[0][0]]) : String(r[columns[0][0]] ?? '—')}
+            </div>
+            <dl className="data-card-fields">
+              {columns.slice(1).map(([k, label]) => (
+                <div key={k} className="data-card-field">
+                  <dt>{label}</dt>
+                  <dd>{money.has(k) ? formatINR(r[k]) : String(r[k] ?? '—')}</dd>
+                </div>
               ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+            </dl>
+          </article>
+        ))}
+      </div>
+    </>
   )
 }
 

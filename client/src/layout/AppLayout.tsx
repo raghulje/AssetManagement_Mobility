@@ -1,7 +1,23 @@
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { siteName } from '../data/mockData'
 import { useAuth } from '../api/AuthContext'
+
+const NARROW_MQ = '(max-width: 991px)'
+
+function useIsNarrow() {
+  const [narrow, setNarrow] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia(NARROW_MQ).matches : false,
+  )
+  useEffect(() => {
+    const mq = window.matchMedia(NARROW_MQ)
+    const onChange = () => setNarrow(mq.matches)
+    onChange()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return narrow
+}
 
 type Props = { children: ReactNode; title: string; subtitle?: string }
 
@@ -261,7 +277,11 @@ function SectionTabs({ section }: { section: SectionKey }) {
 }
 
 export default function AppLayout({ children, title, subtitle }: Props) {
-  const [collapsed, setCollapsed] = useState(false)
+  const isNarrow = useIsNarrow()
+  /** Desktop: false = sidebar visible. Mobile: true = drawer closed. */
+  const [collapsed, setCollapsed] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia(NARROW_MQ).matches : false,
+  )
   const [userOpen, setUserOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [tag, setTag] = useState('')
@@ -276,6 +296,29 @@ export default function AppLayout({ children, title, subtitle }: Props) {
     && shouldShowSectionTabs(location.pathname)
     && !(new URLSearchParams(location.search).get('from') === 'employee' && location.pathname.startsWith('/hardware')),
   )
+  const drawerOpen = isNarrow && !collapsed
+
+  useEffect(() => {
+    if (isNarrow) setCollapsed(true)
+    else setCollapsed(false)
+  }, [isNarrow])
+
+  useEffect(() => {
+    if (isNarrow) setCollapsed(true)
+    setUserOpen(false)
+    setCreateOpen(false)
+  }, [location.pathname, location.search, isNarrow])
+
+  useEffect(() => {
+    if (!drawerOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [drawerOpen])
+
+  const closeDrawer = () => {
+    if (isNarrow) setCollapsed(true)
+  }
 
   const searchTag = (e: FormEvent) => {
     e.preventDefault()
@@ -283,13 +326,27 @@ export default function AppLayout({ children, title, subtitle }: Props) {
   }
 
   return (
-    <div className={`wrapper ${collapsed ? 'sidebar-collapse' : ''} ${!collapsed ? 'sidebar-open' : ''}`}>
+    <div className={`wrapper ${collapsed ? 'sidebar-collapse' : ''} ${!collapsed ? 'sidebar-open' : ''}${isNarrow ? ' is-narrow' : ''}`}>
+      {drawerOpen ? (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          aria-label="Close menu"
+          onClick={closeDrawer}
+        />
+      ) : null}
       <header className="main-header">
-        <NavLink to="/" className="logo" aria-label={siteName}>
+        <NavLink to="/" className="logo" aria-label={siteName} onClick={closeDrawer}>
           <img src="/refexone-logo.png" alt={siteName} />
         </NavLink>
         <nav className="navbar">
-          <button type="button" className="sidebar-toggle" onClick={() => setCollapsed((c) => !c)} aria-label="Toggle sidebar">
+          <button
+            type="button"
+            className="sidebar-toggle"
+            onClick={() => setCollapsed((c) => !c)}
+            aria-label={drawerOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={drawerOpen}
+          >
             <i className="fas fa-bars" />
           </button>
           <form className="header-search" onSubmit={searchTag}>
@@ -339,61 +396,61 @@ export default function AppLayout({ children, title, subtitle }: Props) {
         </nav>
       </header>
 
-      <aside className="main-sidebar">
+      <aside className="main-sidebar" aria-hidden={isNarrow && collapsed}>
         <ul className="sidebar-menu">
           <li className={path === '/' ? 'active' : ''}>
-            <NavLink to="/"><i className="fas fa-tachometer-alt fa-fw" /><span>Dashboard</span></NavLink>
+            <NavLink to="/" onClick={closeDrawer}><i className="fas fa-tachometer-alt fa-fw" /><span>Dashboard</span></NavLink>
           </li>
 
           {can('assets.view') ? (
             <li className={section === 'assets' ? 'active' : ''}>
-              <NavLink to="/hardware"><i className="fas fa-barcode fa-fw" /><span>Assets</span></NavLink>
+              <NavLink to="/hardware" onClick={closeDrawer}><i className="fas fa-barcode fa-fw" /><span>Assets</span></NavLink>
             </li>
           ) : null}
           {can('licenses.view') ? (
             <li className={path.startsWith('/licenses') ? 'active' : ''}>
-              <NavLink to="/licenses"><i className="fas fa-save fa-fw" /><span>Licenses</span></NavLink>
+              <NavLink to="/licenses" onClick={closeDrawer}><i className="fas fa-save fa-fw" /><span>Licenses</span></NavLink>
             </li>
           ) : null}
           {can('accessories.view') ? (
             <li className={path.startsWith('/accessories') ? 'active' : ''}>
-              <NavLink to="/accessories"><i className="fas fa-keyboard fa-fw" /><span>Accessories</span></NavLink>
+              <NavLink to="/accessories" onClick={closeDrawer}><i className="fas fa-keyboard fa-fw" /><span>Accessories</span></NavLink>
             </li>
           ) : null}
           {can('consumables.view') ? (
             <li className={path.startsWith('/consumables') ? 'active' : ''}>
-              <NavLink to="/consumables"><i className="fas fa-tint fa-fw" /><span>Consumables</span></NavLink>
+              <NavLink to="/consumables" onClick={closeDrawer}><i className="fas fa-tint fa-fw" /><span>Consumables</span></NavLink>
             </li>
           ) : null}
           {can('components.view') ? (
             <li className={path.startsWith('/components') ? 'active' : ''}>
-              <NavLink to="/components"><i className="fas fa-hdd fa-fw" /><span>Components</span></NavLink>
+              <NavLink to="/components" onClick={closeDrawer}><i className="fas fa-hdd fa-fw" /><span>Components</span></NavLink>
             </li>
           ) : null}
 
           {can('people.view') ? (
             <li className={section === 'people' ? 'active' : ''}>
-              <NavLink to="/employees"><i className="fas fa-users fa-fw" /><span>People</span></NavLink>
+              <NavLink to="/employees" onClick={closeDrawer}><i className="fas fa-users fa-fw" /><span>People</span></NavLink>
             </li>
           ) : null}
           {can('settings.view') ? (
             <li className={section === 'masters' ? 'active' : ''}>
-              <NavLink to="/companies"><i className="fas fa-database fa-fw" /><span>Masters</span></NavLink>
+              <NavLink to="/companies" onClick={closeDrawer}><i className="fas fa-database fa-fw" /><span>Masters</span></NavLink>
             </li>
           ) : null}
           {can('settings.edit') ? (
             <li className={path.startsWith('/import') ? 'active' : ''}>
-              <NavLink to="/import"><i className="fas fa-file-import fa-fw" /><span>Import</span></NavLink>
+              <NavLink to="/import" onClick={closeDrawer}><i className="fas fa-file-import fa-fw" /><span>Import</span></NavLink>
             </li>
           ) : null}
           {isAdmin ? (
             <li className={section === 'settings' ? 'active' : ''}>
-              <NavLink to="/settings"><i className="fas fa-cog fa-fw" /><span>Settings</span></NavLink>
+              <NavLink to="/settings" onClick={closeDrawer}><i className="fas fa-cog fa-fw" /><span>Settings</span></NavLink>
             </li>
           ) : null}
           {isAdmin ? (
             <li className={section === 'reports' ? 'active' : ''}>
-              <NavLink to="/reports"><i className="fas fa-chart-bar fa-fw" /><span>Reports</span></NavLink>
+              <NavLink to="/reports" onClick={closeDrawer}><i className="fas fa-chart-bar fa-fw" /><span>Reports</span></NavLink>
             </li>
           ) : null}
         </ul>
