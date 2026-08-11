@@ -138,6 +138,20 @@ export function createApp() {
       return failRes(res, e instanceof Error ? e.message : 'EOL digest failed', 500)
     }
   })
+  api.post('/notifications/licenses/run', requirePerm('settings.edit'), async (_req, res) => {
+    const { runLicenseRenewalDigest } = await import('./services/licenseAlerts.js')
+    const { okMessage, fail: failRes } = await import('./utils/response.js')
+    try {
+      const result = await runLicenseRenewalDigest()
+      return okMessage(
+        res,
+        result.sent ? 'License renewal digest sent' : (result.skippedReason || 'Skipped'),
+        result,
+      )
+    } catch (e) {
+      return failRes(res, e instanceof Error ? e.message : 'License renewal digest failed', 500)
+    }
+  })
   api.use('/imports', requirePerm('settings.edit'), importsRouter)
   api.use('/labels', moduleGate('assets'), labelsRouter)
   api.use('/geo', geoRouter)

@@ -30,6 +30,7 @@ const emptyCfg = {
     inventory: true,
     crud: true,
     eol_warranty: true,
+    license_renewal: true,
   } as Record<string, boolean>,
   extra_ops_emails: '',
   eol_to_it_asset_manager: true,
@@ -43,6 +44,7 @@ export default function NotificationsSettings() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [digestBusy, setDigestBusy] = useState(false)
+  const [licDigestBusy, setLicDigestBusy] = useState(false)
   const [error, setError] = useState('')
   const [okMsg, setOkMsg] = useState('')
   const [smtpHint, setSmtpHint] = useState('')
@@ -227,6 +229,33 @@ export default function NotificationsSettings() {
                 }}
               >
                 {digestBusy ? 'Running…' : 'Run EOL/warranty alerts now'}
+              </button>
+              {' '}
+              <button
+                type="button"
+                className="btn btn-default"
+                disabled={licDigestBusy || !smtpOk}
+                onClick={() => {
+                  setLicDigestBusy(true)
+                  setError('')
+                  setOkMsg('')
+                  api<{ messages?: string[]; payload?: { skippedReason?: string; sent?: boolean; emailedTo?: string } }>(
+                    '/notifications/licenses/run',
+                    { method: 'POST' },
+                  )
+                    .then((res) => {
+                      const p = res.payload
+                      setOkMsg(
+                        p?.sent
+                          ? `License renewal alerts sent${p.emailedTo ? ` → ${p.emailedTo}` : ''}`
+                          : (p?.skippedReason || 'Skipped'),
+                      )
+                    })
+                    .catch((err: Error) => setError(err.message))
+                    .finally(() => setLicDigestBusy(false))
+                }}
+              >
+                {licDigestBusy ? 'Running…' : 'Run license renewal alerts now'}
               </button>
             </form>
           </Box>

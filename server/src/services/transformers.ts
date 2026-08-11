@@ -163,17 +163,24 @@ export async function transformLicense(id: number) {
     SELECT l.*, c.name as company_name, c.code as company_code,
       le.code as legal_entity_code,
       m.name as manufacturer_name, cat.name as category_name,
+      e.first_name as requester_first, e.last_name as requester_last,
+      e.employee_code as requester_code, e.email as requester_email,
       (SELECT COUNT(*) FROM license_seats WHERE license_id=l.id AND (assigned_to IS NOT NULL OR asset_id IS NOT NULL)) as used
     FROM licenses l
     LEFT JOIN companies c ON c.id = l.company_id
     LEFT JOIN legal_entities le ON le.id = l.legal_entity_id
     LEFT JOIN manufacturers m ON m.id = l.manufacturer_id
     LEFT JOIN categories cat ON cat.id = l.category_id
+    LEFT JOIN employees e ON e.id = l.requested_by_employee_id AND e.deleted_at IS NULL
     WHERE l.id = ? AND l.deleted_at IS NULL
   `, [id])
   if (!l) return null
   const seats = Number(l.seats)
   const used = Number(l.used)
+  const requesterName = l.requested_by_employee_id
+    ? `${l.requester_first || ''} ${l.requester_last || ''}`.trim()
+      + (l.requester_code ? ` (${l.requester_code})` : '')
+    : null
   return {
     id: l.id,
     name: l.name,
@@ -187,9 +194,17 @@ export async function transformLicense(id: number) {
     }),
     manufacturer: nest(l.manufacturer_id as number, l.manufacturer_name as string),
     category: nest(l.category_id as number, l.category_name as string),
+    requested_by_employee: nest(l.requested_by_employee_id as number, requesterName, {
+      email: l.requester_email || null,
+      employee_code: l.requester_code || null,
+    }),
     expiration_date: l.expiration_date ? { date: l.expiration_date, formatted: l.expiration_date } : null,
+    subscription_period: l.subscription_period || 'none',
+    subscription_custom_value: l.subscription_custom_value != null ? Number(l.subscription_custom_value) : null,
+    subscription_custom_unit: l.subscription_custom_unit || null,
+    is_recurring: Boolean(l.is_recurring),
     purchase_cost: l.purchase_cost,
-    purchase_date: l.purchase_date,
+    purchase_date: l.purchase_date ? { date: l.purchase_date, formatted: l.purchase_date } : null,
     notes: l.notes,
     available_actions: { checkout: seats - used > 0, checkin: used > 0, update: true, delete: true },
   }

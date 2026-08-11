@@ -2,13 +2,19 @@ import { all, get, run, now } from '../db/index.js'
 import { mailConfigured } from './mail.js'
 import { listOpsRecipientEmails, listRoleRecipientEmails } from './permissions.js'
 
-export type EmailCategoryKey = 'custody' | 'maintenance' | 'inventory' | 'crud' | 'eol_warranty'
+export type EmailCategoryKey =
+  | 'custody'
+  | 'maintenance'
+  | 'inventory'
+  | 'crud'
+  | 'eol_warranty'
+  | 'license_renewal'
 
 export type NotificationConfig = {
   email_notifications: Record<EmailCategoryKey, boolean>
   /** Extra addresses (comma/newline) always BCC'd on ops digests */
   extra_ops_emails: string
-  /** Also email IT Asset Manager role members for EOL/warranty (default true) */
+  /** Also email IT Asset Manager role members for EOL/warranty / license renewals (default true) */
   eol_to_it_asset_manager: boolean
   /** Also email all notify.ops / admin / superuser for workflow events (default true) */
   workflow_to_ops_roles: boolean
@@ -21,6 +27,7 @@ const DEFAULT_CONFIG: NotificationConfig = {
     inventory: true,
     crud: true,
     eol_warranty: true,
+    license_renewal: true,
   },
   extra_ops_emails: '',
   eol_to_it_asset_manager: true,
@@ -167,6 +174,7 @@ export async function notificationAdminSnapshot() {
       { key: 'inventory', label: 'License / accessory / consumable / component added' },
       { key: 'crud', label: 'Asset created / deleted' },
       { key: 'eol_warranty', label: 'EOL & warranty prior reminders (30d / 7d / 1d)' },
+      { key: 'license_renewal', label: 'Recurring license renewals (7d / last 3 days → IT Asset Manager)' },
     ],
   }
 }

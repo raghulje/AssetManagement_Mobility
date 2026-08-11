@@ -14,8 +14,30 @@ import {
   usersApi,
   type SelectOption,
 } from '../../api/client'
+import { employeesApi } from '../../api/employees'
 import { formatINR } from '../../utils/money'
 import { useToast } from '../../components/Toast'
+
+/** Mirror server computeSubscriptionEnd for live form preview. */
+function computeSubEnd(
+  start: string,
+  period: string,
+  customValue: string,
+  customUnit: string,
+): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || period === 'none') return ''
+  const d = new Date(`${start}T12:00:00Z`)
+  if (Number.isNaN(d.getTime())) return ''
+  if (period === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1)
+  else if (period === 'annual') d.setUTCFullYear(d.getUTCFullYear() + 1)
+  else if (period === 'custom') {
+    const n = Number(customValue)
+    if (!Number.isFinite(n) || n < 1) return ''
+    if (customUnit === 'days') d.setUTCDate(d.getUTCDate() + n)
+    else d.setUTCMonth(d.getUTCMonth() + n)
+  } else return ''
+  return d.toISOString().slice(0, 10)
+}
 
 function nestId(v: unknown): string {
   if (v == null || v === '') return ''
@@ -42,9 +64,14 @@ type FormState = {
   company_id: string
   legal_entity_id: string
   category_id: string
+  requested_by_employee_id: string
   expiration_date: string
   purchase_date: string
   purchase_cost: string
+  subscription_period: 'none' | 'monthly' | 'annual' | 'custom'
+  subscription_custom_value: string
+  subscription_custom_unit: 'days' | 'months'
+  is_recurring: boolean
   notes: string
 }
 
@@ -56,9 +83,14 @@ const emptyForm: FormState = {
   company_id: '',
   legal_entity_id: '',
   category_id: '',
+  requested_by_employee_id: '',
   expiration_date: '',
   purchase_date: '',
   purchase_cost: '',
+  subscription_period: 'none',
+  subscription_custom_value: '1',
+  subscription_custom_unit: 'months',
+  is_recurring: false,
   notes: '',
 }
 
@@ -165,6 +197,30 @@ export function LicensesList() {
             },
             { key: 'manufacturer', label: 'Manufacturer', exportValue: (r) => nestName(r.manufacturer), render: (r) => nestName(r.manufacturer) },
             { key: 'company', label: 'Company', exportValue: (r) => nestName(r.company), render: (r) => nestName(r.company) },
+            {
+              key: 'requested_by',
+              label: 'Requested by',
+              exportValue: (r) => nestName(r.requested_by_employee),
+              render: (r) => nestName(r.requested_by_employee),
+            },
+            {
+              key: 'subscription',
+              label: 'Subscription',
+              exportValue: (r) => {
+                const p = String(r.subscription_period || 'none')
+                let s = p
+                if (p === 'custom') s = `${r.subscription_custom_value || '?'} ${r.subscription_custom_unit || 'mo'}`
+                if (r.is_recurring) s += ' recurring'
+                return s
+              },
+              render: (r) => {
+                const p = String(r.subscription_period || 'none')
+                if (p === 'none') return <span className="text-muted">—</span>
+                let s = p === 'monthly' ? 'Monthly' : p === 'annual' ? 'Annual' : `Custom`
+                if (r.is_recurring) s += ' · ↻'
+                return s
+              },
+            },
             {
               key: 'expiration_date',
               label: 'Expiration',
@@ -286,7 +342,22 @@ export function LicenseDetail() {
           { label: 'Available', value: String(lic.remaining ?? lic.free_seats_count ?? 0) },
           { label: 'Manufacturer', value: nestName(lic.manufacturer) },
           { label: 'Company', value: nestName(lic.company) },
-          { label: 'Expiration', value: dateVal(lic.expiration_date) || '—' },
+          { label: 'Requested by', value: nestName(lic.requested_by_employee) },
+          {
+            label: 'Subscription',
+            value: (() => {
+              const p = String(lic.subscription_period || 'none')
+              let s = 'One-time / none'
+              if (p === 'monthly') s = 'Monthly'
+              else if (p === 'annual') s = 'Annual'
+              else if (p === 'custom') {
+                s = `Custom (${lic.subscription_custom_value || '?'} ${lic.subscription_custom_unit || 'months'})`
+              }
+              if (lic.is_recurring) s += ' · recurring'
+              return s
+            })(),
+          },
+          { label: 'Subscription ends', value: dateVal(lic.expiration_date) || '—' },
           { label: 'Purchase Cost', value: formatINR(lic.purchase_cost) },
           { label: 'Notes', value: String(lic.notes || '—'), full: true },
         ] : undefined}
@@ -341,6 +412,8 @@ export function LicenseForm() {
   const [companies, setCompanies] = useState<SelectOption[]>([])
   const [manufacturers, setManufacturers] = useState<SelectOption[]>([])
   const [categories, setCategories] = useState<SelectOption[]>([])
+  const [employees, setEmployees] = useState<SelectOption[]>([])
+  const [empSearch, setEmpSearch] = useState('')
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((f) => ({ ...f, [key]: value }))
@@ -362,10 +435,35 @@ export function LicenseForm() {
   }, [isEdit])
 
   useEffect(() => {
+    employeesApi
+      .selectlist(empSearch || undefined)
+      .then((r) => setEmployees(r.results || []))
+      .catch(() => setEmployees([]))
+  }, [empSearch])
+
+  // Auto-fill subscription end from purchase date + period
+  useEffect(() => {
+    if (form.subscription_period === 'none') return
+    const end = computeSubEnd(
+      form.purchase_date,
+      form.subscription_period,
+      form.subscription_custom_value,
+      form.subscription_custom_unit,
+    )
+    if (end && end !== form.expiration_date) set('expiration_date', end)
+  }, [
+    form.purchase_date,
+    form.subscription_period,
+    form.subscription_custom_value,
+    form.subscription_custom_unit,
+  ])
+
+  useEffect(() => {
     if (!isEdit || !id) return
     licensesApi
       .get(id)
       .then((lic) => {
+        const period = String(lic.subscription_period || 'none') as FormState['subscription_period']
         setForm({
           name: String(lic.name || ''),
           product_key: String(lic.product_key || ''),
@@ -374,11 +472,20 @@ export function LicenseForm() {
           company_id: nestId(lic.company),
           legal_entity_id: nestId(lic.legal_entity),
           category_id: nestId(lic.category),
+          requested_by_employee_id: nestId(lic.requested_by_employee),
           expiration_date: dateVal(lic.expiration_date),
           purchase_date: dateVal(lic.purchase_date),
           purchase_cost: lic.purchase_cost != null ? String(lic.purchase_cost) : '',
+          subscription_period: (['none', 'monthly', 'annual', 'custom'].includes(period) ? period : 'none'),
+          subscription_custom_value: lic.subscription_custom_value != null
+            ? String(lic.subscription_custom_value)
+            : '1',
+          subscription_custom_unit: String(lic.subscription_custom_unit || 'months') === 'days' ? 'days' : 'months',
+          is_recurring: Boolean(lic.is_recurring),
           notes: String(lic.notes || ''),
         })
+        const reqName = nestName(lic.requested_by_employee)
+        if (reqName && reqName !== '—') setEmpSearch(reqName)
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false))
@@ -387,6 +494,11 @@ export function LicenseForm() {
   const submit = async () => {
     setBusy(true)
     setError('')
+    if (form.subscription_period === 'custom' && !(Number(form.subscription_custom_value) > 0)) {
+      setError('Enter a custom duration (days or months)')
+      setBusy(false)
+      return
+    }
     const body = {
       name: form.name.trim(),
       product_key: form.product_key || null,
@@ -395,9 +507,20 @@ export function LicenseForm() {
       company_id: form.company_id ? Number(form.company_id) : null,
       legal_entity_id: form.legal_entity_id ? Number(form.legal_entity_id) : null,
       category_id: form.category_id ? Number(form.category_id) : null,
+      requested_by_employee_id: form.requested_by_employee_id
+        ? Number(form.requested_by_employee_id)
+        : null,
       expiration_date: form.expiration_date || null,
       purchase_date: form.purchase_date || null,
       purchase_cost: form.purchase_cost ? Number(form.purchase_cost) : null,
+      subscription_period: form.subscription_period,
+      subscription_custom_value: form.subscription_period === 'custom'
+        ? Number(form.subscription_custom_value)
+        : null,
+      subscription_custom_unit: form.subscription_period === 'custom'
+        ? form.subscription_custom_unit
+        : null,
+      is_recurring: form.is_recurring,
       notes: form.notes || null,
     }
     try {
@@ -481,12 +604,96 @@ export function LicenseForm() {
           }}
         />
 
-        <Field label="Expiration Date">
-          <DateField value={form.expiration_date} onChange={(v) => set('expiration_date', v)} />
+        <Field label="Requested by (employee)">
+          <input
+            className="form-control"
+            style={{ marginBottom: 8 }}
+            placeholder="Search employees…"
+            value={empSearch}
+            onChange={(e) => setEmpSearch(e.target.value)}
+          />
+          <select
+            className="form-control"
+            value={form.requested_by_employee_id}
+            onChange={(e) => set('requested_by_employee_id', e.target.value)}
+          >
+            <option value="">— Select requester —</option>
+            {employees.map((o) => (
+              <option key={o.id} value={o.id}>{o.text}</option>
+            ))}
+          </select>
+          <p className="help-block">HRMS employee who requested this license (e.g. for Cursor Pro)</p>
         </Field>
-        <Field label="Purchase Date">
+
+        <Field label="Purchase / start date">
           <DateField value={form.purchase_date} onChange={(v) => set('purchase_date', v)} />
         </Field>
+
+        <Field label="Subscription period">
+          <select
+            className="form-control"
+            value={form.subscription_period}
+            onChange={(e) => {
+              const v = e.target.value as FormState['subscription_period']
+              set('subscription_period', v)
+              if (v !== 'none' && !form.is_recurring) set('is_recurring', true)
+            }}
+          >
+            <option value="none">One-time / no period</option>
+            <option value="monthly">Monthly (1 month)</option>
+            <option value="annual">Annual (1 year)</option>
+            <option value="custom">Custom days or months</option>
+          </select>
+        </Field>
+
+        {form.subscription_period === 'custom' ? (
+          <Field label="Custom duration" required>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                type="number"
+                min={1}
+                className="form-control"
+                style={{ maxWidth: 120 }}
+                value={form.subscription_custom_value}
+                onChange={(e) => set('subscription_custom_value', e.target.value)}
+              />
+              <select
+                className="form-control"
+                style={{ maxWidth: 160 }}
+                value={form.subscription_custom_unit}
+                onChange={(e) => set('subscription_custom_unit', e.target.value as 'days' | 'months')}
+              >
+                <option value="months">Months</option>
+                <option value="days">Days</option>
+              </select>
+            </div>
+          </Field>
+        ) : null}
+
+        <Field label="Subscription end date">
+          <DateField
+            value={form.expiration_date}
+            onChange={(v) => set('expiration_date', v)}
+            placeholder={form.subscription_period !== 'none' ? 'Auto from start + period' : 'Optional'}
+          />
+          <p className="help-block">
+            {form.subscription_period !== 'none'
+              ? 'Filled from start date + period (you can override).'
+              : 'Optional end / expiry date.'}
+          </p>
+        </Field>
+
+        <Field label="Recurring subscription">
+          <label className="checkbox" style={{ fontWeight: 500 }}>
+            <input
+              type="checkbox"
+              checked={form.is_recurring}
+              onChange={(e) => set('is_recurring', e.target.checked)}
+            />{' '}
+            Send renewal alerts to IT Asset Manager (1 week before, then last 3 days)
+          </label>
+        </Field>
+
         <Field label="Purchase Cost (INR)">
           <input type="number" className="form-control" value={form.purchase_cost} onChange={(e) => set('purchase_cost', e.target.value)} placeholder="e.g. 125000" />
         </Field>

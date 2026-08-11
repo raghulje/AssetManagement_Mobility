@@ -4,8 +4,46 @@ import { fail, okItem, okList, okMessage } from '../utils/response.js'
 import { transformLicense } from '../services/transformers.js'
 import { logAction } from '../services/actionLog.js'
 import { actorLabel, notifyWorkflow, resolveAssigneeEmail } from '../services/notify.js'
+import { computeSubscriptionEnd } from '../services/licenseSubscription.js'
 
 const router = Router()
+
+function normalizeLicenseBody(b: Record<string, unknown>) {
+  const periodRaw = String(b.subscription_period || 'none').toLowerCase()
+  const period = (['none', 'monthly', 'annual', 'custom'].includes(periodRaw)
+    ? periodRaw
+    : 'none') as 'none' | 'monthly' | 'annual' | 'custom'
+  const customValue = b.subscription_custom_value != null && b.subscription_custom_value !== ''
+    ? Number(b.subscription_custom_value)
+    : null
+  const customUnitRaw = String(b.subscription_custom_unit || 'months').toLowerCase()
+  const customUnit = customUnitRaw === 'days' ? 'days' : 'months'
+  const isRecurring = b.is_recurring === true || b.is_recurring === 1 || b.is_recurring === '1'
+  const purchaseDate = b.purchase_date ? String(b.purchase_date).slice(0, 10) : null
+
+  let expiration = b.expiration_date ? String(b.expiration_date).slice(0, 10) : null
+  if (period !== 'none' && purchaseDate) {
+    const computed = computeSubscriptionEnd({
+      startDate: purchaseDate,
+      period,
+      customValue,
+      customUnit,
+    })
+    if (computed) expiration = computed
+  }
+
+  return {
+    requested_by_employee_id: b.requested_by_employee_id
+      ? Number(b.requested_by_employee_id)
+      : null,
+    subscription_period: period,
+    subscription_custom_value: period === 'custom' && customValue && customValue > 0 ? customValue : null,
+    subscription_custom_unit: period === 'custom' ? customUnit : null,
+    is_recurring: isRecurring ? 1 : 0,
+    purchase_date: purchaseDate,
+    expiration_date: expiration,
+  }
+}
 
 router.get('/', async (req, res) => {
   const q = String(req.query.search || '').trim()
@@ -49,14 +87,23 @@ router.post('/', async (req, res) => {
   const b = req.body || {}
   if (!b.name) return fail(res, 'name required')
   const seats = Number(b.seats) || 1
+  const sub = normalizeLicenseBody(b)
+  if (sub.subscription_period === 'custom' && !sub.subscription_custom_value) {
+    return fail(res, 'Custom subscription requires a duration value')
+  }
   const ts = now()
   const info = await run(`
-    INSERT INTO licenses (name, serial, seats, company_id, legal_entity_id, manufacturer_id, category_id, expiration_date, purchase_cost, purchase_date, notes, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO licenses (
+      name, serial, seats, company_id, legal_entity_id, manufacturer_id, category_id,
+      requested_by_employee_id, expiration_date, subscription_period, subscription_custom_value,
+      subscription_custom_unit, is_recurring, purchase_cost, purchase_date, notes, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     b.name, b.product_key || b.serial || null, seats, b.company_id || null, b.legal_entity_id || null, b.manufacturer_id || null,
-    b.category_id || null, b.expiration_date || null, b.purchase_cost || null, b.purchase_date || null,
-    b.notes || null, ts, ts,
+    b.category_id || null, sub.requested_by_employee_id, sub.expiration_date,
+    sub.subscription_period, sub.subscription_custom_value, sub.subscription_custom_unit, sub.is_recurring,
+    b.purchase_cost || null, sub.purchase_date, b.notes || null, ts, ts,
   ])
   const id = Number(info.insertId)
   const BATCH = 200
@@ -91,10 +138,41 @@ router.put('/:id', async (req, res) => {
   if (!(await transformLicense(id))) return fail(res, 'License not found', 404)
   const b = req.body || {}
   const map: Record<string, unknown> = {}
-  for (const f of ['name', 'company_id', 'legal_entity_id', 'manufacturer_id', 'category_id', 'expiration_date', 'purchase_cost', 'purchase_date', 'notes'] as const) {
+  for (const f of ['name', 'company_id', 'legal_entity_id', 'manufacturer_id', 'category_id', 'purchase_cost', 'notes'] as const) {
     if (b[f] !== undefined) map[f] = b[f]
   }
   if (b.product_key !== undefined || b.serial !== undefined) map.serial = b.product_key ?? b.serial
+
+  const subTouched = [
+    'subscription_period', 'subscription_custom_value', 'subscription_custom_unit',
+    'is_recurring', 'purchase_date', 'expiration_date', 'requested_by_employee_id',
+  ].some((k) => b[k] !== undefined)
+  if (subTouched) {
+    const existing = await get<Record<string, unknown>>(`SELECT * FROM licenses WHERE id = ?`, [id])
+    const merged = {
+      ...existing,
+      ...b,
+      purchase_date: b.purchase_date !== undefined ? b.purchase_date : existing?.purchase_date,
+      expiration_date: b.expiration_date !== undefined ? b.expiration_date : existing?.expiration_date,
+      subscription_period: b.subscription_period !== undefined ? b.subscription_period : existing?.subscription_period,
+      subscription_custom_value: b.subscription_custom_value !== undefined
+        ? b.subscription_custom_value
+        : existing?.subscription_custom_value,
+      subscription_custom_unit: b.subscription_custom_unit !== undefined
+        ? b.subscription_custom_unit
+        : existing?.subscription_custom_unit,
+      is_recurring: b.is_recurring !== undefined ? b.is_recurring : existing?.is_recurring,
+      requested_by_employee_id: b.requested_by_employee_id !== undefined
+        ? b.requested_by_employee_id
+        : existing?.requested_by_employee_id,
+    }
+    const sub = normalizeLicenseBody(merged)
+    if (sub.subscription_period === 'custom' && !sub.subscription_custom_value) {
+      return fail(res, 'Custom subscription requires a duration value')
+    }
+    Object.assign(map, sub)
+  }
+
   const keys = Object.keys(map)
   if (keys.length) {
     await run(`UPDATE licenses SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, [
