@@ -5,6 +5,7 @@ import { AppSelect, Box, DataTable, Field, FileInput, PageForm, StackField } fro
 import { DetailLayout, DetailPanel } from '../../components/DetailLayout'
 import { ModuleInsights } from '../../components/ModuleInsights'
 import { useToast } from '../../components/Toast'
+import { useAuth } from '../../api/AuthContext'
 import { employeesApi } from '../../api/employees'
 import { dashboardApi, hardwareApi } from '../../api/client'
 import { formatAppDateTime } from '../../lib/datetime'
@@ -214,6 +215,7 @@ export function EmployeeDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const toast = useToast()
+  const { isAdmin } = useAuth()
   const [emp, setEmp] = useState<Row | null>(null)
   const [assets, setAssets] = useState<Row[]>([])
   const [history, setHistory] = useState<Row[]>([])
@@ -251,6 +253,10 @@ export function EmployeeDetail() {
   }
 
   useEffect(() => { reload() }, [id])
+
+  useEffect(() => {
+    if (!isAdmin && tab === 'hrms') setTab('overview')
+  }, [isAdmin, tab])
 
   useEffect(() => {
     if (!replaceFor) return
@@ -382,7 +388,7 @@ export function EmployeeDetail() {
         )}
         tabs={[
           { id: 'overview', label: 'Overview' },
-          { id: 'hrms', label: 'HRMS Profile' },
+          ...(isAdmin ? [{ id: 'hrms' as const, label: 'HRMS Profile' }] : []),
           { id: 'assets', label: `Assets (${assets.length})` },
           { id: 'history', label: `History (${history.length})` },
         ]}

@@ -22,11 +22,24 @@ function useFloatingStyle(
 ) {
   const [style, setStyle] = useState<CSSProperties>({})
   const [placement, setPlacement] = useState<'down' | 'up'>('down')
+  /** Lock width on open — remeasuring on option-list scroll was shrinking the menu. */
+  const lockedWidthRef = useRef<number | null>(null)
 
   useLayoutEffect(() => {
-    if (!open) return
+    if (!open) {
+      lockedWidthRef.current = null
+      return
+    }
 
-    const update = () => {
+    const measureContentWidth = (menu: HTMLElement) => {
+      let max = menu.scrollWidth
+      menu.querySelectorAll<HTMLElement>('.app-select-option, .app-select-search').forEach((el) => {
+        max = Math.max(max, el.scrollWidth + 28)
+      })
+      return max
+    }
+
+    const update = (remeasureWidth: boolean) => {
       const trigger = triggerRef.current
       if (!trigger) return
       const rect = trigger.getBoundingClientRect()
@@ -40,18 +53,26 @@ function useFloatingStyle(
       const openUp = spaceBelow < estimated && spaceAbove > spaceBelow
 
       const maxW = Math.min(opts?.maxWidth ?? 420, vw - pad * 2)
-      let width = opts?.matchTriggerWidth === false
-        ? Math.max(opts?.minWidth ?? 280, rect.width)
-        : Math.max(rect.width, opts?.minWidth ?? 0)
-      // Grow a bit for long labels (companies) without exceeding viewport
-      if (menuRef.current) {
-        const contentW = menuRef.current.scrollWidth
-        if (contentW > width) width = Math.min(Math.max(width, contentW), maxW)
-      }
-      width = Math.min(Math.max(width, opts?.minWidth ?? 160), maxW)
+      const floor = opts?.minWidth ?? (opts?.matchTriggerWidth === false ? 280 : 160)
 
-      // Align to trigger left; if it would clip the right edge, pin within the viewport
-      // (prefer aligning to the trigger's right edge when near the screen edge)
+      let width: number
+      if (!remeasureWidth && lockedWidthRef.current != null) {
+        width = lockedWidthRef.current
+      } else {
+        width = opts?.matchTriggerWidth === false
+          ? Math.max(floor, rect.width)
+          : Math.max(rect.width, floor)
+        if (menuRef.current) {
+          const contentW = measureContentWidth(menuRef.current)
+          if (contentW > width) width = Math.min(Math.max(width, contentW), maxW)
+        }
+        width = Math.min(Math.max(width, floor), maxW)
+        lockedWidthRef.current = width
+      }
+
+      // Keep a stable width even if the viewport is tight
+      width = Math.min(Math.max(width, floor), maxW)
+
       let left = rect.left
       if (left + width > vw - pad) {
         left = Math.max(pad, Math.min(rect.right - width, vw - pad - width))
@@ -63,7 +84,8 @@ function useFloatingStyle(
         position: 'fixed',
         left,
         width,
-        maxWidth: maxW,
+        minWidth: width,
+        maxWidth: width,
         zIndex: 5600,
         ...(openUp
           ? { bottom: vh - rect.top + gap, top: 'auto' }
@@ -71,17 +93,28 @@ function useFloatingStyle(
       })
     }
 
-    update()
-    // Re-measure after paint once menu has height / content width
-    const t = window.setTimeout(update, 0)
-    const t2 = window.setTimeout(update, 50)
-    window.addEventListener('scroll', update, true)
-    window.addEventListener('resize', update)
+    update(true)
+    const t = window.setTimeout(() => update(true), 0)
+    const t2 = window.setTimeout(() => update(true), 50)
+
+    const onScroll = (e: Event) => {
+      // Scrolling the option list must not remeasure / shrink the menu
+      const target = e.target
+      if (target instanceof Node && menuRef.current?.contains(target)) return
+      update(false)
+    }
+    const onResize = () => {
+      lockedWidthRef.current = null
+      update(true)
+    }
+
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onResize)
     return () => {
       window.clearTimeout(t)
       window.clearTimeout(t2)
-      window.removeEventListener('scroll', update, true)
-      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onResize)
     }
   }, [open, triggerRef, menuRef, opts?.estimatedHeight, opts?.minWidth, opts?.matchTriggerWidth, opts?.maxWidth])
 
@@ -134,9 +167,9 @@ export function AppSelect({
   const [highlight, setHighlight] = useState(0)
   const enableSearch = searchable ?? options.length > 8
   const { style: menuStyle } = useFloatingStyle(open, triggerRef, menuRef, {
-    minWidth: 200,
-    maxWidth: 440,
-    // Prefer trigger width, but grow for long labels and always stay in viewport
+    minWidth: 220,
+    maxWidth: 480,
+    // Prefer trigger width, grow for long labels; width is locked while open
     matchTriggerWidth: true,
     estimatedHeight: 260,
   })

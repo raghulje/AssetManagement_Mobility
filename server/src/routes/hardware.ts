@@ -1,12 +1,18 @@
 import { Router } from 'express'
+import multer from 'multer'
 import { all, get, run, now, limitSql } from '../db/index.js'
 import { fail, okItem, okList, okMessage } from '../utils/response.js'
 import { transformAsset } from '../services/transformers.js'
 import { logAction } from '../services/actionLog.js'
 import { actorLabel, notifyWorkflow, resolveAssigneeEmail } from '../services/notify.js'
 import { allocateAssetTag, nextAssetTag } from '../services/assetTag.js'
+import { extractPoFromFile } from '../services/poExtract.js'
 
 const router = Router()
+const parsePoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
+}).single('file')
 
 function listIds(req: { query: Record<string, unknown> }) {
   const statusType = String(req.query.status_type || req.query.status || '')
@@ -309,6 +315,37 @@ router.get('/next-tag', async (req, res) => {
   }
 })
 
+/** OCR / parse Purchase Order → purchase fields (must be before /:id) */
+router.post('/parse-po', (req, res) => {
+  parsePoUpload(req, res, async (err) => {
+    if (err) return fail(res, err instanceof Error ? err.message : 'Upload failed')
+    const file = req.file
+    if (!file?.buffer?.length) return fail(res, 'PO file is required')
+    try {
+      const extracted = await extractPoFromFile({
+        buffer: file.buffer,
+        mime: file.mimetype,
+        filename: file.originalname,
+      })
+      await logAction({
+        userId: req.user?.id,
+        actionType: 'parse_po',
+        itemType: 'asset',
+        itemId: 0,
+        note: file.originalname,
+        meta: {
+          method: extracted.method,
+          confidence: extracted.confidence,
+          order_number: extracted.order_number,
+        },
+      })
+      return okMessage(res, 'PO parsed', extracted)
+    } catch (e) {
+      return fail(res, e instanceof Error ? e.message : 'PO parse failed', 500)
+    }
+  })
+})
+
 router.get('/agent-sync-logs', async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 100, 500)
   const q = String(req.query.search || '').trim()
@@ -443,17 +480,33 @@ router.post('/', async (req, res) => {
     : null
 
   const ts = now()
+  const mapLat = b.map_latitude != null && b.map_latitude !== '' ? Number(b.map_latitude) : null
+  const mapLng = b.map_longitude != null && b.map_longitude !== '' ? Number(b.map_longitude) : null
+  const mapAddr = b.map_address != null && String(b.map_address).trim()
+    ? String(b.map_address).trim().slice(0, 500)
+    : null
+
+  const receivedCondition = b.received_condition != null && String(b.received_condition).trim()
+    ? String(b.received_condition).trim()
+    : null
+
   const info = await run(`
     INSERT INTO assets (
       asset_tag, old_asset_tag, name, serial, model_id, status_id, company_id, legal_entity_id, department_id, supplier_id,
-      location_id, rtd_location_id, purchase_date, purchase_cost, order_number,
-      warranty_months, asset_eol_date, notes, requestable, byod, next_audit_date, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      location_id, rtd_location_id, map_latitude, map_longitude, map_address,
+      purchase_date, purchase_cost, order_number,
+      warranty_months, asset_eol_date, notes, received_condition, requestable, byod, next_audit_date, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     assetTag, oldTag, b.name || null, b.serial || null, b.model_id, b.status_id,
     b.company_id || null, b.legal_entity_id || null, b.department_id || null, b.supplier_id || null, b.location_id || b.rtd_location_id || null,
-    b.rtd_location_id || null, b.purchase_date || null, b.purchase_cost || null,
+    b.rtd_location_id || null,
+    Number.isFinite(mapLat as number) ? mapLat : null,
+    Number.isFinite(mapLng as number) ? mapLng : null,
+    mapAddr,
+    b.purchase_date || null, b.purchase_cost || null,
     b.order_number || null, b.warranty_months || null, b.asset_eol_date || null, b.notes || null,
+    receivedCondition,
     b.requestable ? 1 : 0, b.byod ? 1 : 0, b.next_audit_date || null, ts, ts,
   ])
   const id = Number(info.insertId)
@@ -487,8 +540,9 @@ async function updateAsset(req: import('express').Request, res: import('express'
   // asset_tag is system-generated and never editable after create
   const fields = [
     'name', 'serial', 'model_id', 'status_id', 'company_id', 'legal_entity_id', 'department_id', 'supplier_id',
-    'location_id', 'rtd_location_id', 'purchase_date', 'purchase_cost',
-    'order_number', 'warranty_months', 'asset_eol_date', 'notes', 'requestable', 'byod',
+    'location_id', 'rtd_location_id', 'map_latitude', 'map_longitude', 'map_address',
+    'purchase_date', 'purchase_cost',
+    'order_number', 'warranty_months', 'asset_eol_date', 'notes', 'received_condition', 'requestable', 'byod',
     'old_asset_tag', 'expected_checkin', 'next_audit_date',
   ] as const
   const sets: string[] = []
@@ -496,7 +550,18 @@ async function updateAsset(req: import('express').Request, res: import('express'
   for (const f of fields) {
     if (b[f] !== undefined) {
       sets.push(`${f} = ?`)
-      vals.push(typeof b[f] === 'boolean' ? (b[f] ? 1 : 0) : b[f])
+      let v: unknown = b[f]
+      if (typeof v === 'boolean') v = v ? 1 : 0
+      if ((f === 'map_latitude' || f === 'map_longitude') && (v === '' || v === null)) v = null
+      else if ((f === 'map_latitude' || f === 'map_longitude') && v != null) {
+        const n = Number(v)
+        v = Number.isFinite(n) ? n : null
+      }
+      if (f === 'map_address' && v != null) {
+        const s = String(v).trim()
+        v = s ? s.slice(0, 500) : null
+      }
+      vals.push(v)
     }
   }
   if (!sets.length) return fail(res, 'No valid fields')

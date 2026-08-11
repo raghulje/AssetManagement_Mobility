@@ -13,6 +13,13 @@ export const ATTACHMENT_SLOTS: { kind: AttachmentKind; label: string; hint: stri
 
 export type PendingAttachment = { kind: AttachmentKind; file: File; key: string }
 
+/** Required on create — every Attachments tab slot. */
+export const REQUIRED_CREATE_ATTACHMENT_KINDS: AttachmentKind[] = ['invoice', 'po', 'other']
+
+export function hasRequiredCreateAttachments(pending: PendingAttachment[]): boolean {
+  return REQUIRED_CREATE_ATTACHMENT_KINDS.every((k) => pending.some((p) => p.kind === k))
+}
+
 type Props = {
   /** When set, uploads go to the server immediately */
   assetId?: string | number | null
@@ -23,6 +30,12 @@ type Props = {
   stagingMode?: boolean
   /** View-only: list/download attachments, no upload or delete */
   readOnly?: boolean
+  /** Create flow: mark Invoice / PO as required */
+  requireCreateDocs?: boolean
+  /** Called after OCR/parse of a PO file */
+  onPoExtracted?: (fields: PoParseResult) => void | Promise<void>
+  /** Hide slots managed elsewhere (e.g. PO on Details tab) */
+  hideKinds?: AttachmentKind[]
 }
 
 function kindLabel(k: string) {
@@ -30,10 +43,15 @@ function kindLabel(k: string) {
   if (k === 'invoice') return 'Invoice'
   if (k === 'label') return 'Print Label'
   if (k === 'other') return 'Other'
+  if (k === 'received') return 'Received condition'
   return k
 }
 
-export async function uploadAssetFile(assetId: string | number, file: File, kind: AttachmentKind) {
+export async function uploadAssetFile(
+  assetId: string | number,
+  file: File,
+  kind: AttachmentKind | 'image' | 'received',
+) {
   const fd = new FormData()
   fd.append('file', file)
   const t = localStorage.getItem('refex_token')
@@ -47,15 +65,49 @@ export async function uploadAssetFile(assetId: string | number, file: File, kind
   return data
 }
 
+export type PoParseResult = {
+  order_number: string | null
+  purchase_date: string | null
+  purchase_cost: number | null
+  warranty_months: number | null
+  supplier_name: string | null
+  supplier_id: number | null
+  create_suggested: boolean
+  confidence: 'high' | 'medium' | 'low'
+  method: string
+  warnings?: string[]
+  raw_preview?: string
+}
+
+export async function parsePoFile(file: File): Promise<PoParseResult> {
+  const fd = new FormData()
+  fd.append('file', file)
+  const t = localStorage.getItem('refex_token')
+  const res = await fetch(`${getApiBase()}/hardware/parse-po`, {
+    method: 'POST',
+    headers: t ? { Authorization: `Bearer ${t}` } : {},
+    body: fd,
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error((data.messages || []).join(', ') || 'PO parse failed')
+  }
+  return (data.payload || data) as PoParseResult
+}
+
 export default function AssetAttachments({
   assetId,
   pending = [],
   onPendingChange,
   stagingMode = false,
   readOnly = false,
+  requireCreateDocs = false,
+  onPoExtracted,
+  hideKinds = [],
 }: Props) {
   const [files, setFiles] = useState<Record<string, unknown>[]>([])
   const [uploading, setUploading] = useState('')
+  const [ocrBusy, setOcrBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
 
@@ -76,7 +128,10 @@ export default function AssetAttachments({
 
   const filesFor = (kind: string) => files.filter((f) => String(f.kind) === kind)
   const pendingFor = (kind: string) => pending.filter((p) => p.kind === kind)
-  const docFiles = files.filter((f) => String(f.kind) !== 'image')
+  const docFiles = files.filter((f) => {
+    const k = String(f.kind)
+    return k !== 'image' && k !== 'received'
+  })
 
   const uploadNow = async (file: File, kind: AttachmentKind) => {
     if (!assetId) return
@@ -124,6 +179,39 @@ export default function AssetAttachments({
     else void uploadNow(file, kind)
   }
 
+  const runPoOcr = async () => {
+    if (!onPoExtracted) return
+    setOcrBusy(true)
+    setMsg('')
+    setError('')
+    try {
+      const staged = pendingFor('po')[0]
+      let file: File | null = staged?.file || null
+      if (!file && !stagingMode) {
+        const row = filesFor('po')[0]
+        if (!row?.id) throw new Error('Attach a PO file first')
+        const t = localStorage.getItem('refex_token')
+        const res = await fetch(`${getApiBase()}/files/${row.id}/download`, {
+          headers: t ? { Authorization: `Bearer ${t}` } : {},
+        })
+        if (!res.ok) throw new Error('Could not download PO for OCR')
+        const blob = await res.blob()
+        const name = String(row.original_filename || row.filename || 'po.pdf')
+        file = new File([blob], name, { type: blob.type || 'application/pdf' })
+      }
+      if (!file) throw new Error('Attach a PO file first')
+      const parsed = await parsePoFile(file)
+      setMsg(`PO parsed (${parsed.confidence} confidence via ${parsed.method}) — check Details fields`)
+      await onPoExtracted(parsed)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'PO OCR failed')
+    } finally {
+      setOcrBusy(false)
+    }
+  }
+
+  const hasPo = pendingFor('po').length > 0 || (!stagingMode && filesFor('po').length > 0)
+
   return (
     <div className="asset-attachments">
       {msg && <div className="callout callout-info"><p>{msg}</p></div>}
@@ -133,23 +221,38 @@ export default function AssetAttachments({
         <p className="help-block" style={{ marginTop: 0, marginBottom: 14 }}>
           {readOnly
             ? 'Documents attached to this asset. Use Edit to upload or remove files.'
-            : stagingMode
-              ? 'Select Invoice, PO, or other documents now — they upload after you create the asset.'
-              : 'Upload Invoice, PO, or other documents for this asset.'}
+            : hideKinds.includes('po') && stagingMode && requireCreateDocs
+              ? 'Invoice and Other documents are required here. Attach the Purchase Order on the Details tab (above purchase fields).'
+              : stagingMode && requireCreateDocs
+                ? 'Invoice, Purchase Order, and Other documents are all required before you can create the asset.'
+                : hideKinds.includes('po')
+                  ? 'Upload Invoice and other documents here. Purchase Order is on the Details tab.'
+                  : stagingMode
+                    ? 'Select Invoice, PO, or other documents now — they upload after you create the asset.'
+                    : 'Upload Invoice, PO, or other documents for this asset.'}
         </p>
 
         <div className="attachment-grid">
-          {ATTACHMENT_SLOTS.map((slot) => {
+          {ATTACHMENT_SLOTS.filter((slot) => !hideKinds.includes(slot.kind)).map((slot) => {
             const rows = filesFor(slot.kind)
             const staged = pendingFor(slot.kind)
             const busy = uploading === slot.kind
             const hasFiles = rows.length > 0 || staged.length > 0
+            const required =
+              requireCreateDocs && stagingMode && REQUIRED_CREATE_ATTACHMENT_KINDS.includes(slot.kind)
+            const missingRequired = required && staged.length === 0
 
             return (
-              <div className="attachment-slot" key={slot.kind}>
+              <div className={`attachment-slot${missingRequired ? ' is-required-missing' : ''}`} key={slot.kind}>
                 <div>
-                  <h4 className="attachment-slot-title">{slot.label}</h4>
-                  <p className="attachment-slot-hint">{slot.hint}</p>
+                  <h4 className="attachment-slot-title">
+                    {slot.label}
+                    {required ? <span className="text-danger" title="Required"> *</span> : null}
+                  </h4>
+                  <p className="attachment-slot-hint">
+                    {slot.hint}
+                    {missingRequired ? ' — required' : ''}
+                  </p>
                 </div>
 
                 {!readOnly ? (
@@ -221,6 +324,18 @@ export default function AssetAttachments({
 
                 {readOnly && !hasFiles ? (
                   <p className="attachment-empty">No files</p>
+                ) : null}
+
+                {!readOnly && slot.kind === 'po' && hasPo && onPoExtracted ? (
+                  <button
+                    type="button"
+                    className="btn btn-info btn-sm"
+                    disabled={ocrBusy || Boolean(uploading)}
+                    onClick={() => { void runPoOcr() }}
+                  >
+                    <i className={`fas ${ocrBusy ? 'fa-spinner fa-spin' : 'fa-magic'}`} />{' '}
+                    {ocrBusy ? 'Reading PO…' : 'Fill form from PO'}
+                  </button>
                 ) : null}
               </div>
             )

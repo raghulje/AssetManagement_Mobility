@@ -25,6 +25,7 @@ import publicAssetsRouter from './routes/publicAssets.js'
 import agentRouter from './routes/agent.js'
 import samlRouter from './routes/saml.js'
 import { groupsRouter } from './routes/groups.js'
+import { geoRouter } from './routes/geo.js'
 import { storageRoot } from './services/uploads.js'
 import { moduleGate, requirePerm } from './services/permissions.js'
 
@@ -110,11 +111,17 @@ export function createApp() {
   api.use('/kits', moduleGate('assets'), kitsRouter)
   api.use('/users', moduleGate('people'), usersRouter)
   api.use('/employees', moduleGate('people'), employeesRouter)
-  // Master selectlists are needed by inventory forms; only mutating masters requires settings.edit
-  api.use((req, res, next) => {
+  // Masters: GET selectlists open to authenticated users; mutating masters needs settings.edit.
+  // Path-scoped so POST /labels, /hardware, etc. are not blocked by settings.edit.
+  api.use([
+    '/companies', '/legal-entities', '/locations', '/departments',
+    '/manufacturers', '/suppliers', '/categories', '/statuslabels',
+    '/depreciations', '/models', '/fields', '/fieldsets',
+  ], (req, res, next) => {
     if (req.method === 'GET' || req.method === 'HEAD') return next()
     return requirePerm('settings.edit')(req, res, next)
-  }, mastersRouter)
+  })
+  api.use(mastersRouter)
   api.use('/reports', moduleGate('reports'), reportsRouter)
   api.use('/maintenances', moduleGate('maintenance'), maintenancesRouter)
   api.use('/dashboard', dashboardRouter)
@@ -133,6 +140,7 @@ export function createApp() {
   })
   api.use('/imports', requirePerm('settings.edit'), importsRouter)
   api.use('/labels', moduleGate('assets'), labelsRouter)
+  api.use('/geo', geoRouter)
   api.use(filesRouter)
 
   app.use('/api/v1', api)

@@ -267,7 +267,7 @@ export default function AppLayout({ children, title, subtitle }: Props) {
   const [tag, setTag] = useState('')
   const location = useLocation()
   const navigate = useNavigate()
-  const { user, logout, can } = useAuth()
+  const { user, logout, can, isAdmin } = useAuth()
   const displayName = user ? `${user.first_name} ${user.last_name}` : 'Admin User'
   const path = location.pathname + location.search
   const section = resolveSection(location.pathname, location.search)
@@ -321,7 +321,7 @@ export default function AppLayout({ children, title, subtitle }: Props) {
                   </div>
                 </li>
               ) : null}
-              {can('settings.view') ? <li><NavLink to="/admin" title="Admin"><i className="fas fa-cog" /></NavLink></li> : null}
+              {isAdmin ? <li><NavLink to="/admin" title="Admin"><i className="fas fa-cog" /></NavLink></li> : null}
               <li className={`dropdown ${userOpen ? 'open' : ''}`}>
                 <button type="button" className="nav-icon-btn nav-user-btn" onClick={() => setUserOpen((o) => !o)}>
                   <i className="fas fa-user" aria-hidden="true" />
@@ -386,12 +386,12 @@ export default function AppLayout({ children, title, subtitle }: Props) {
               <NavLink to="/import"><i className="fas fa-file-import fa-fw" /><span>Import</span></NavLink>
             </li>
           ) : null}
-          {can('settings.view') ? (
+          {isAdmin ? (
             <li className={section === 'settings' ? 'active' : ''}>
               <NavLink to="/settings"><i className="fas fa-cog fa-fw" /><span>Settings</span></NavLink>
             </li>
           ) : null}
-          {can('reports.view') ? (
+          {isAdmin ? (
             <li className={section === 'reports' ? 'active' : ''}>
               <NavLink to="/reports"><i className="fas fa-chart-bar fa-fw" /><span>Reports</span></NavLink>
             </li>

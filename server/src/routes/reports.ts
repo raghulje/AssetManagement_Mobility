@@ -654,6 +654,54 @@ settingsRouter.get('/saml', async (_req, res) => {
   })
 })
 
+/** Apply pending SQL files from server/src/db/mysql (admin / settings.edit). */
+settingsRouter.post('/run-migrations', async (req, res) => {
+  try {
+    const { runPendingSchemaMigrations } = await import('../services/schemaMigrate.js')
+    const result = await runPendingSchemaMigrations()
+    await logAction({
+      userId: req.user?.id,
+      actionType: 'run_migrations',
+      itemType: 'settings',
+      itemId: 1,
+      note: `Applied ${result.applied.length}; skipped ${result.skipped.length}`,
+      meta: result,
+    })
+    const appliedLabel = result.applied.length
+      ? result.applied.join(', ')
+      : 'none'
+    return okMessage(
+      res,
+      `Schema migrations complete — applied: ${appliedLabel}; skipped ${result.skipped.length} already applied.`,
+      result,
+    )
+  } catch (e) {
+    return fail(res, e instanceof Error ? e.message : 'Schema migration failed', 500)
+  }
+})
+
+/** Move legacy asset_tag → old_asset_tag and assign new CODE-TYPE-#### tags. */
+settingsRouter.post('/migrate-asset-tags', async (req, res) => {
+  try {
+    const { migrateAssetTagsToOld } = await import('../services/assetTag.js')
+    const result = await migrateAssetTagsToOld()
+    await logAction({
+      userId: req.user?.id,
+      actionType: 'migrate_asset_tags',
+      itemType: 'settings',
+      itemId: 1,
+      note: `Migrated ${result.migrated}; failed ${result.failed}`,
+    })
+    return okMessage(
+      res,
+      `Asset tags migrated — ${result.migrated} updated, ${result.failed} failed, ${result.skipped} skipped.`,
+      result,
+    )
+  } catch (e) {
+    return fail(res, e instanceof Error ? e.message : 'Asset tag migration failed', 500)
+  }
+})
+
 /** Clear all asset QR tokens/URLs/images so Print Label remints against current PUBLIC_APP_URL. */
 settingsRouter.post('/reset-qr', async (req, res) => {
   try {

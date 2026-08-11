@@ -15,6 +15,9 @@ type PublicAsset = {
   company?: string | null
   department?: string | null
   location?: string | null
+  map_latitude?: number | null
+  map_longitude?: number | null
+  map_address?: string | null
   supplier?: string | null
   purchase_date?: string | null
   purchase_cost?: number | string | null
@@ -124,8 +127,17 @@ export default function PublicAsset() {
           <Field label="Company" value={asset.company} />
           <Field label="Department" value={asset.department} />
           <Field label="Location" value={asset.location} />
+          {asset.map_latitude != null && asset.map_longitude != null ? (
+            <Field
+              label="Map pin"
+              value={[
+                asset.map_address,
+                `Lat ${Number(asset.map_latitude).toFixed(6)}, Lng ${Number(asset.map_longitude).toFixed(6)}`,
+              ].filter(Boolean).join(' · ')}
+            />
+          ) : null}
           <Field label="Supplier" value={asset.supplier} />
-          <Field label="Order / PO" value={asset.order_number} />
+          <Field label="Purchase Order Number" value={asset.order_number} />
           <Field label="Purchase Date" value={asset.purchase_date} />
           <Field label="Purchase Cost" value={asset.purchase_cost} />
           <Field label="Warranty (months)" value={asset.warranty_months} />

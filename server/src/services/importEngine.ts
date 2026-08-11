@@ -18,7 +18,7 @@ export const IMPORT_FIELDS: Record<string, { key: string; label: string; require
     { key: 'supplier', label: 'Supplier', aliases: ['vendor'] },
     { key: 'purchase_date', label: 'Purchase Date', aliases: ['purchasedate'] },
     { key: 'purchase_cost', label: 'Purchase Cost', aliases: ['cost', 'purchasecost'] },
-    { key: 'order_number', label: 'Order Number', aliases: ['po', 'ponumber', 'ordernumber'] },
+    { key: 'order_number', label: 'Purchase Order Number', aliases: ['po', 'ponumber', 'ordernumber', 'purchaseordernumber'] },
     { key: 'notes', label: 'Notes' },
     { key: 'assigned_to', label: 'Assign to Username', aliases: ['assigned', 'username', 'assignee'] },
   ],

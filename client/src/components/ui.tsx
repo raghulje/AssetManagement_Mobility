@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { downloadCsv } from '../utils/csv'
 import { useToast } from './Toast'
@@ -467,9 +467,17 @@ type FileInputProps = {
 }
 
 export function FileInput({ accept, disabled, fileName, onChange, label = 'Choose file' }: FileInputProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const clear = () => {
+    if (inputRef.current) inputRef.current.value = ''
+    onChange(null)
+  }
+
   return (
     <div className="file-field">
       <input
+        ref={inputRef}
         type="file"
         accept={accept}
         disabled={disabled}
@@ -478,7 +486,20 @@ export function FileInput({ accept, disabled, fileName, onChange, label = 'Choos
           onChange(e.target.files?.[0] || null)
         }}
       />
-      {fileName ? <span className="file-field-name">{fileName}</span> : null}
+      {fileName ? (
+        <div className="file-field-selected">
+          <span className="file-field-name" title={fileName}>{fileName}</span>
+          <button
+            type="button"
+            className="btn btn-default btn-xs"
+            disabled={disabled}
+            onClick={clear}
+            aria-label="Remove selected file"
+          >
+            <i className="fas fa-times" /> Remove
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }

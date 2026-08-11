@@ -94,11 +94,15 @@ export async function transformAsset(id: number) {
     purchase_date: a.purchase_date ? { date: a.purchase_date, formatted: a.purchase_date } : null,
     purchase_cost: a.purchase_cost,
     order_number: a.order_number,
+    map_latitude: a.map_latitude != null ? Number(a.map_latitude) : null,
+    map_longitude: a.map_longitude != null ? Number(a.map_longitude) : null,
+    map_address: a.map_address || null,
     warranty_months: a.warranty_months,
     asset_eol_date: a.asset_eol_date
       ? { date: a.asset_eol_date, formatted: a.asset_eol_date }
       : null,
     notes: a.notes,
+    received_condition: a.received_condition || null,
     requestable: Boolean(a.requestable),
     byod: Boolean(a.byod),
     expected_checkin: a.expected_checkin ? { date: a.expected_checkin, formatted: a.expected_checkin } : null,

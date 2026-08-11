@@ -4,6 +4,7 @@ import AppLayout from '../layout/AppLayout'
 import { AppSelect, Box, FileInput, StackField } from '../components/ui'
 import { api } from '../api/client'
 import { getApiBase } from '../api/baseUrl'
+import { downloadAuthedCsv } from '../utils/csv'
 
 type Field = { key: string; label: string; required?: boolean }
 
@@ -103,19 +104,19 @@ export function ImportPage() {
   }
 
   const downloadSample = () => {
-    const t = localStorage.getItem('refex_token')
-    window.open(`${getApiBase()}/imports/sample/${type}?token=${t || ''}`, '_blank')
-    // better: fetch with auth
-    fetch(`${getApiBase()}/imports/sample/${type}`, { headers: { Authorization: `Bearer ${t}` } })
-      .then((r) => r.blob())
-      .then((blob) => {
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `sample-${type}.csv`
-        a.click()
-        URL.revokeObjectURL(url)
-      })
+    setError('')
+    void downloadAuthedCsv(`/imports/sample/${type}`, `sample-${type}.csv`).catch((e: Error) => {
+      setError(e.message || 'Could not download template')
+    })
+  }
+
+  const clearUpload = () => {
+    setFile(null)
+    setImportId(null)
+    setHeaders([])
+    setMappings({})
+    setResult(null)
+    setError('')
   }
 
   const errors = useMemo(() => {
@@ -146,6 +147,11 @@ export function ImportPage() {
             <button type="button" className="btn btn-theme" disabled={busy || !file} onClick={() => { void upload() }}>
               {busy ? 'Uploading…' : 'Upload'}
             </button>
+            {(file || importId) ? (
+              <button type="button" className="btn btn-default" disabled={busy} onClick={clearUpload}>
+                Remove file
+              </button>
+            ) : null}
             <button type="button" className="btn btn-default" onClick={downloadSample}>Download Sample</button>
           </div>
         </div>

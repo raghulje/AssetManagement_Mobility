@@ -15,6 +15,8 @@ type AuthCtx = {
   user: User | null
   loading: boolean
   permissions: Record<string, unknown>
+  /** Admin or Superuser role flag — Settings / Reports / HRMS Profile */
+  isAdmin: boolean
   can: (permission: string) => boolean
   login: (email: string, password: string) => Promise<void>
   loginWithToken: (token: string) => Promise<void>
@@ -48,6 +50,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ? user.permissions
     : {}
 
+  const isAdmin = isTruthy(permissions.superuser) || isTruthy(permissions.admin)
+
   const can = useCallback((permission: string) => {
     if (isTruthy(permissions.superuser) || isTruthy(permissions.admin)) return true
     return isTruthy(permissions[permission])
@@ -57,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     loading,
     permissions,
+    isAdmin,
     can,
     async login(email, password) {
       const res = await authApi.login(email, password)
@@ -76,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const u = await authApi.me()
       setUser(u as User)
     },
-  }), [user, loading, permissions, can])
+  }), [user, loading, permissions, isAdmin, can])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

@@ -435,6 +435,8 @@ export function SettingsGeneral() {
   const [busy, setBusy] = useState(false)
   const [digestBusy, setDigestBusy] = useState(false)
   const [qrBusy, setQrBusy] = useState(false)
+  const [tagMigrateBusy, setTagMigrateBusy] = useState(false)
+  const [schemaMigrateBusy, setSchemaMigrateBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saml, setSaml] = useState<{
     enabled?: boolean
@@ -583,6 +585,85 @@ export function SettingsGeneral() {
             <> · <a href={saml.metadata_url} target="_blank" rel="noreferrer">SP metadata XML</a></>
           ) : null}
         </p>
+      </Box>
+
+      <Box title="Database migrations" type="primary">
+        <p className="help-block" style={{ marginTop: 0 }}>
+          Applies pending SQL files from <code>server/src/db/mysql</code> (e.g. map location columns,
+          received-condition photos). Safe to re-run — already-applied versions are skipped.
+          Deploy/pull the new code first, then click this on production.
+        </p>
+        <button
+          type="button"
+          className="btn btn-theme"
+          disabled={schemaMigrateBusy || !canEdit}
+          onClick={() => {
+            if (!window.confirm(
+              'Run pending database migrations on this server?\n\nThis updates the MySQL schema (new columns/kinds).',
+            )) return
+            setSchemaMigrateBusy(true)
+            setError('')
+            setOkMsg('')
+            api<{
+              messages?: string[]
+              payload?: { applied?: string[]; skipped?: string[]; table_count?: number }
+            }>('/settings/run-migrations', { method: 'POST' })
+              .then((res) => {
+                const msg = Array.isArray(res.messages) ? res.messages.join(' ') : 'Migrations complete'
+                setOkMsg(msg)
+                toast.success(msg)
+              })
+              .catch((err: Error) => {
+                setError(err.message)
+                toast.error(err.message)
+              })
+              .finally(() => setSchemaMigrateBusy(false))
+          }}
+        >
+          {schemaMigrateBusy ? 'Migrating…' : 'Run pending DB migrations'}
+        </button>
+      </Box>
+
+      <Box title="Migrate asset tags" type="warning">
+        <p className="help-block" style={{ marginTop: 0 }}>
+          For every asset that still has an empty <strong>Old Asset Tag</strong>, copies the current{' '}
+          <strong>Asset Tag</strong> into Old Asset Tag, then assigns a new auto tag (
+          <code>COMPANY/ENTITY-TYPE-0001</code>…). Safe to re-run — already-migrated assets (those with
+          Old Asset Tag set) are skipped. Assets missing company/entity or asset type are reported as failed.
+          Reprint labels after migrating if tags are printed.
+        </p>
+        <button
+          type="button"
+          className="btn btn-warning"
+          disabled={tagMigrateBusy || !canEdit}
+          onClick={() => {
+            if (!window.confirm(
+              'Migrate asset tags?\n\nCurrent Asset Tag → Old Asset Tag, then assign new auto tags for assets that do not already have an Old Asset Tag.',
+            )) return
+            setTagMigrateBusy(true)
+            setError('')
+            setOkMsg('')
+            api<{
+              messages?: string[]
+              payload?: { migrated?: number; failed?: number; skipped?: number; errors?: string[] }
+            }>('/settings/migrate-asset-tags', { method: 'POST' })
+              .then((res) => {
+                const msg = Array.isArray(res.messages) ? res.messages.join(' ') : 'Asset tag migration complete'
+                const errs = res.payload?.errors?.length
+                  ? `\n${res.payload.errors.slice(0, 10).join('\n')}`
+                  : ''
+                setOkMsg(msg + errs)
+                toast.success(msg)
+              })
+              .catch((err: Error) => {
+                setError(err.message)
+                toast.error(err.message)
+              })
+              .finally(() => setTagMigrateBusy(false))
+          }}
+        >
+          {tagMigrateBusy ? 'Migrating…' : 'Move Asset Tag → Old Asset Tag'}
+        </button>
       </Box>
 
       <Box title="Asset QR codes" type="warning">

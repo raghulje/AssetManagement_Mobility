@@ -60,13 +60,14 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return children
 }
 
-function RequirePerm({ permission, children }: { permission: string; children: ReactNode }) {
-  const { can, loading } = useAuth()
+/** Settings / Reports — Admin or Superuser only */
+function RequireAdmin({ children }: { children: ReactNode }) {
+  const { isAdmin, loading } = useAuth()
   if (loading) return <div className="suite-page"><p style={{ padding: 40, textAlign: 'center' }}>Loading…</p></div>
-  if (!can(permission)) {
+  if (!isAdmin) {
     return (
       <div className="suite-page">
-        <p style={{ padding: 40, textAlign: 'center' }}>You do not have permission to view this page.</p>
+        <p style={{ padding: 40, textAlign: 'center' }}>Only Admin users can access this page.</p>
       </div>
     )
   }
@@ -180,29 +181,29 @@ export default function App() {
                 <Route path="/fields" element={<FieldsList />} />
                 <Route path="/fields/create" element={<FieldForm />} />
                 <Route path="/fields/:id/edit" element={<FieldForm />} />
-                <Route path="/reports" element={<ReportsHub />} />
-                <Route path="/reports/activity" element={<ActivityReport />} />
-                <Route path="/reports/custom" element={<CustomReport />} />
+                <Route path="/reports" element={<RequireAdmin><ReportsHub /></RequireAdmin>} />
+                <Route path="/reports/activity" element={<RequireAdmin><ActivityReport /></RequireAdmin>} />
+                <Route path="/reports/custom" element={<RequireAdmin><CustomReport /></RequireAdmin>} />
                 {/* Audit feature — restore when needed
-                <Route path="/reports/audit" element={<AuditReport />} />
+                <Route path="/reports/audit" element={<RequireAdmin><AuditReport /></RequireAdmin>} />
                 */}
-                <Route path="/reports/depreciation" element={<DepreciationReport />} />
-                <Route path="/reports/licenses" element={<LicenseReport />} />
-                <Route path="/reports/maintenances" element={<MaintenanceReport />} />
-                <Route path="/reports/unaccepted" element={<UnacceptedReport />} />
-                <Route path="/reports/accessories" element={<AccessoryReport />} />
+                <Route path="/reports/depreciation" element={<RequireAdmin><DepreciationReport /></RequireAdmin>} />
+                <Route path="/reports/licenses" element={<RequireAdmin><LicenseReport /></RequireAdmin>} />
+                <Route path="/reports/maintenances" element={<RequireAdmin><MaintenanceReport /></RequireAdmin>} />
+                <Route path="/reports/unaccepted" element={<RequireAdmin><UnacceptedReport /></RequireAdmin>} />
+                <Route path="/reports/accessories" element={<RequireAdmin><AccessoryReport /></RequireAdmin>} />
                 <Route path="/account/assets" element={<AccountAssets />} />
                 <Route path="/account/requested" element={<AccountRequested />} />
                 <Route path="/account/accept" element={<AccountAccept />} />
                 <Route path="/account/profile" element={<AccountProfile />} />
                 <Route path="/account/password" element={<AccountPassword />} />
                 <Route path="/account/api" element={<AccountApi />} />
-                <Route path="/admin" element={<AdminHub />} />
+                <Route path="/admin" element={<RequireAdmin><AdminHub /></RequireAdmin>} />
                 <Route path="/import" element={<ImportPage />} />
                 <Route path="/requestable" element={<RequestableItems />} />
-                <Route path="/settings" element={<RequirePerm permission="settings.view"><SettingsGeneral /></RequirePerm>} />
-                <Route path="/settings/roles" element={<RequirePerm permission="settings.view"><RolesPermissions /></RequirePerm>} />
-                <Route path="/settings/notifications" element={<RequirePerm permission="settings.view"><NotificationsSettings /></RequirePerm>} />
+                <Route path="/settings" element={<RequireAdmin><SettingsGeneral /></RequireAdmin>} />
+                <Route path="/settings/roles" element={<RequireAdmin><RolesPermissions /></RequireAdmin>} />
+                <Route path="/settings/notifications" element={<RequireAdmin><NotificationsSettings /></RequireAdmin>} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </RequireAuth>

@@ -5,9 +5,16 @@ import { DateField, Field, FileInput, PageForm } from '../../components/ui'
 import { MasterSelect, masterPayloadId } from '../../components/MasterSelect'
 import { CompanyEntityFields } from '../../components/CompanyEntityFields'
 import AssetAttachments, {
+  hasRequiredCreateAttachments,
   uploadAssetFile,
   type PendingAttachment,
+  type PoParseResult,
 } from '../../components/AssetAttachments'
+import PoDetailsAttach from '../../components/PoDetailsAttach'
+import AssetReceivedCondition, {
+  type PendingReceivedImage,
+} from '../../components/AssetReceivedCondition'
+import LocationMapPicker, { type MapLocationValue } from '../../components/LocationMapPicker'
 import { hardwareApi, mastersApi, type SelectOption } from '../../api/client'
 import { assetImageSrc, getApiBase } from '../../api/baseUrl'
 import { employeesApi } from '../../api/employees'
@@ -24,6 +31,9 @@ type FormState = {
   model_id: string
   status_id: string
   rtd_location_id: string
+  map_latitude: string
+  map_longitude: string
+  map_address: string
   supplier_id: string
   purchase_date: string
   purchase_cost: string
@@ -31,6 +41,7 @@ type FormState = {
   warranty_months: string
   asset_eol_date: string
   notes: string
+  received_condition: string
   assign_employee_id: string
 }
 
@@ -45,6 +56,9 @@ const empty: FormState = {
   model_id: '',
   status_id: '',
   rtd_location_id: '',
+  map_latitude: '',
+  map_longitude: '',
+  map_address: '',
   supplier_id: '',
   purchase_date: '',
   purchase_cost: '',
@@ -52,6 +66,7 @@ const empty: FormState = {
   warranty_months: '12',
   asset_eol_date: '',
   notes: '',
+  received_condition: '',
   assign_employee_id: '',
 }
 
@@ -94,6 +109,7 @@ export default function AssetForm() {
   const [pendingImagePreview, setPendingImagePreview] = useState<string | null>(null)
   const [imageBusy, setImageBusy] = useState(false)
   const [imageMsg, setImageMsg] = useState('')
+  const [pendingReceived, setPendingReceived] = useState<PendingReceivedImage[]>([])
 
   const [companies, setCompanies] = useState<SelectOption[]>([])
   const [departments, setDepartments] = useState<SelectOption[]>([])
@@ -186,6 +202,9 @@ export default function AssetForm() {
           model_id: nestId(a.model),
           status_id: nestId(a.status),
           rtd_location_id: nestId(a.rtd_location) || nestId(a.location),
+          map_latitude: a.map_latitude != null && a.map_latitude !== '' ? String(a.map_latitude) : '',
+          map_longitude: a.map_longitude != null && a.map_longitude !== '' ? String(a.map_longitude) : '',
+          map_address: String(a.map_address || ''),
           supplier_id: nestId(a.supplier),
           purchase_date: dateVal(a.purchase_date),
           purchase_cost: a.purchase_cost != null ? String(a.purchase_cost) : '',
@@ -193,6 +212,7 @@ export default function AssetForm() {
           warranty_months: a.warranty_months != null ? String(a.warranty_months) : '12',
           asset_eol_date: dateVal(a.asset_eol_date),
           notes: String(a.notes || ''),
+          received_condition: String(a.received_condition || ''),
           assign_employee_id: '',
         })
         setImagePath(a.image ? String(a.image) : null)
@@ -285,6 +305,82 @@ export default function AssetForm() {
     setImageMsg(`${f.name} queued — will upload when you create the asset`)
   }
 
+  const applyPoExtracted = async (parsed: PoParseResult) => {
+    const targetsFilled = Boolean(
+      form.supplier_id
+      || form.purchase_date
+      || form.purchase_cost
+      || form.order_number
+      || (form.warranty_months && form.warranty_months !== '12'),
+    )
+    if (targetsFilled) {
+      const ok = window.confirm(
+        'Some purchase fields already have values. Replace them with values from the PO?',
+      )
+      if (!ok) return
+    }
+
+    let supplierId = parsed.supplier_id != null ? String(parsed.supplier_id) : ''
+    if (!supplierId && parsed.supplier_name && parsed.create_suggested) {
+      const create = window.confirm(
+        `Supplier “${parsed.supplier_name}” was not found in Masters.\n\nCreate it now and select it?`,
+      )
+      if (create) {
+        try {
+          const res = await mastersApi.createSupplier({ name: parsed.supplier_name })
+          const created = masterPayloadId(res, parsed.supplier_name)
+          supplierId = String(created.id)
+          const list = await mastersApi.suppliers()
+          setSuppliers(list.results || [])
+          if (!list.results?.some((s) => String(s.id) === supplierId)) {
+            setSuppliers((prev) => [...prev, created])
+          }
+          toast.success(`Supplier “${parsed.supplier_name}” created`)
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : 'Could not create supplier')
+        }
+      }
+    } else if (!supplierId && parsed.supplier_name) {
+      toast.error(`Supplier “${parsed.supplier_name}” not matched — add under Masters → Suppliers`)
+    }
+
+    const filled: string[] = []
+    setForm((f) => {
+      const next = { ...f }
+      if (supplierId) {
+        next.supplier_id = supplierId
+        filled.push('Supplier')
+      }
+      if (parsed.purchase_date) {
+        next.purchase_date = parsed.purchase_date
+        filled.push('Purchase Date')
+      }
+      if (parsed.purchase_cost != null) {
+        next.purchase_cost = String(parsed.purchase_cost)
+        filled.push('Purchase Cost')
+      }
+      if (parsed.order_number) {
+        next.order_number = parsed.order_number
+        filled.push('Purchase Order Number')
+      }
+      if (parsed.warranty_months != null) {
+        next.warranty_months = String(parsed.warranty_months)
+        filled.push('Warranty')
+      }
+      return next
+    })
+
+    if (tab !== 'details') setTab('details')
+    if (filled.length) {
+      toast.success(`Filled from PO: ${filled.join(', ')}`)
+    } else {
+      toast.error('Could not read purchase fields from this PO — enter them manually')
+    }
+    if (parsed.warnings?.length) {
+      setError(parsed.warnings.slice(0, 3).join(' · '))
+    }
+  }
+
   const submit = async () => {
     setError('')
     if (!form.category_id || !form.model_id || !form.status_id) {
@@ -295,6 +391,17 @@ export default function AssetForm() {
     if (!isEdit && !form.company_id && !form.legal_entity_id) {
       setError('Company or legal entity is required to generate the asset tag')
       setTab('details')
+      return
+    }
+    if (!isEdit && !hasRequiredCreateAttachments(pendingFiles)) {
+      const missingPo = !pendingFiles.some((p) => p.kind === 'po')
+      if (missingPo) {
+        setError('Purchase Order (PO) is required — attach it above the purchase fields')
+        setTab('details')
+        return
+      }
+      setError('Attachments are required: Invoice and Other documents (PO is on Details)')
+      setTab('attachments')
       return
     }
     setBusy(true)
@@ -309,6 +416,9 @@ export default function AssetForm() {
         department_id: form.department_id ? Number(form.department_id) : null,
         rtd_location_id: form.rtd_location_id ? Number(form.rtd_location_id) : null,
         location_id: form.rtd_location_id ? Number(form.rtd_location_id) : null,
+        map_latitude: form.map_latitude ? Number(form.map_latitude) : null,
+        map_longitude: form.map_longitude ? Number(form.map_longitude) : null,
+        map_address: form.map_address.trim() || null,
         supplier_id: form.supplier_id ? Number(form.supplier_id) : null,
         purchase_date: form.purchase_date || null,
         purchase_cost: form.purchase_cost ? Number(form.purchase_cost) : null,
@@ -316,6 +426,7 @@ export default function AssetForm() {
         warranty_months: form.warranty_months ? Number(form.warranty_months) : null,
         asset_eol_date: form.asset_eol_date || null,
         notes: form.notes || null,
+        received_condition: form.received_condition.trim() || null,
         old_asset_tag: form.old_asset_tag.trim() || null,
       }
 
@@ -347,6 +458,15 @@ export default function AssetForm() {
           await uploadImage(pendingImage, newId)
         } catch {
           toast.error('Asset created, but image upload failed — use Edit to retry')
+        }
+      }
+      if (newId && pendingReceived.length) {
+        try {
+          for (const p of pendingReceived) {
+            await uploadAssetFile(newId, p.file, 'received')
+          }
+        } catch {
+          toast.error('Asset created, but some received-condition photos failed — use Edit to retry')
         }
       }
       toast.success(form.assign_employee_id ? 'Asset created and assigned' : 'Asset created')
@@ -444,6 +564,27 @@ export default function AssetForm() {
               return masterPayloadId(res, name)
             }}
           />
+
+          <Field label="Map location (optional)">
+            <LocationMapPicker
+              value={{
+                latitude: form.map_latitude ? Number(form.map_latitude) : null,
+                longitude: form.map_longitude ? Number(form.map_longitude) : null,
+                address: form.map_address,
+              }}
+              onChange={(next: MapLocationValue) => {
+                setForm((f) => ({
+                  ...f,
+                  map_latitude: next.latitude != null ? String(next.latitude) : '',
+                  map_longitude: next.longitude != null ? String(next.longitude) : '',
+                  map_address: next.address || '',
+                }))
+              }}
+            />
+            <span className="help-block">
+              Pin a precise place with OpenStreetMap — shown only when a pin is set.
+            </span>
+          </Field>
 
           <MasterSelect
             label="Asset type"
@@ -552,6 +693,15 @@ export default function AssetForm() {
             </Field>
           )}
 
+          <PoDetailsAttach
+            pending={pendingFiles}
+            onPendingChange={setPendingFiles}
+            stagingMode={!isEdit}
+            assetId={isEdit ? id : null}
+            required={!isEdit}
+            onPoExtracted={applyPoExtracted}
+          />
+
           <MasterSelect
             label="Supplier / Vendor"
             value={form.supplier_id}
@@ -583,11 +733,12 @@ export default function AssetForm() {
             />
           </Field>
 
-          <Field label="Order Number">
+          <Field label="Purchase Order Number">
             <input
               className="form-control"
               value={form.order_number}
               onChange={(e) => set('order_number', e.target.value)}
+              placeholder="e.g. PO-2026-00123"
             />
           </Field>
 
@@ -638,6 +789,17 @@ export default function AssetForm() {
             />
             {imageMsg ? <span className="help-block">{imageMsg}</span> : null}
           </Field>
+
+          <Field label="Asset received condition">
+            <AssetReceivedCondition
+              assetId={isEdit ? id : null}
+              stagingMode={!isEdit}
+              description={form.received_condition}
+              onDescriptionChange={(v) => set('received_condition', v)}
+              pending={pendingReceived}
+              onPendingChange={setPendingReceived}
+            />
+          </Field>
         </PageForm>
       )}
 
@@ -646,8 +808,10 @@ export default function AssetForm() {
           <AssetAttachments
             assetId={isEdit ? id : null}
             stagingMode={!isEdit}
+            requireCreateDocs={!isEdit}
             pending={pendingFiles}
             onPendingChange={setPendingFiles}
+            hideKinds={['po']}
           />
           <div className="box-footer" style={{ marginTop: 8, padding: '12px 0' }}>
             {isEdit ? (

@@ -1,4 +1,4 @@
-import { get, all } from '../db/index.js'
+import { get, all, run, now } from '../db/index.js'
 
 /** Sanitize segment for tags: letters/digits only, uppercased. */
 export function tagSegment(value: unknown, fallback: string, maxLen = 24): string {
@@ -90,4 +90,74 @@ export async function allocateAssetTag(opts: {
     if (!clash) return asset_tag
   }
   throw new Error('Could not allocate a unique asset tag — try again')
+}
+
+/**
+ * Move current asset_tag → old_asset_tag (when old is empty) and assign a new auto tag
+ * CODE-TYPE-#### from company/entity + asset type.
+ */
+export async function migrateAssetTagsToOld(): Promise<{
+  migrated: number
+  skipped: number
+  failed: number
+  errors: string[]
+}> {
+  const rows = await all<{
+    id: number
+    asset_tag: string | null
+    old_asset_tag: string | null
+    company_id: number | null
+    legal_entity_id: number | null
+    category_id: number | null
+  }>(`
+    SELECT a.id, a.asset_tag, a.old_asset_tag, a.company_id, a.legal_entity_id,
+      m.category_id
+    FROM assets a
+    LEFT JOIN models m ON m.id = a.model_id
+    WHERE a.deleted_at IS NULL
+      AND a.asset_tag IS NOT NULL AND TRIM(a.asset_tag) != ''
+      AND (a.old_asset_tag IS NULL OR TRIM(a.old_asset_tag) = '')
+    ORDER BY a.id ASC
+  `)
+
+  let migrated = 0
+  let skipped = 0
+  let failed = 0
+  const errors: string[] = []
+  const ts = now()
+
+  for (const row of rows) {
+    const legacy = String(row.asset_tag || '').trim()
+    if (!legacy) {
+      skipped += 1
+      continue
+    }
+    if (!row.category_id || (!row.company_id && !row.legal_entity_id)) {
+      failed += 1
+      if (errors.length < 25) {
+        errors.push(`#${row.id} (${legacy}): missing company/entity or asset type`)
+      }
+      continue
+    }
+    try {
+      const newTag = await allocateAssetTag({
+        companyId: row.company_id,
+        legalEntityId: row.legal_entity_id,
+        categoryId: Number(row.category_id),
+      })
+      await run(`
+        UPDATE assets
+        SET old_asset_tag = ?, asset_tag = ?, updated_at = ?
+        WHERE id = ?
+      `, [legacy, newTag, ts, row.id])
+      migrated += 1
+    } catch (e) {
+      failed += 1
+      if (errors.length < 25) {
+        errors.push(`#${row.id} (${legacy}): ${e instanceof Error ? e.message : 'failed'}`)
+      }
+    }
+  }
+
+  return { migrated, skipped, failed, errors }
 }

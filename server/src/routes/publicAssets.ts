@@ -13,6 +13,7 @@ router.get('/assets/:token', async (req, res) => {
   let asset = await get<Record<string, unknown>>(`
     SELECT a.id, a.asset_tag, a.old_asset_tag, a.name, a.serial, a.qr_token, a.qr_url, a.qr_image_path,
       a.purchase_date, a.purchase_cost, a.order_number, a.warranty_months, a.asset_eol_date,
+      a.map_latitude, a.map_longitude, a.map_address,
       a.notes, a.last_checkout, a.last_checkin, a.last_audit_date, a.next_audit_date,
       a.assigned_to, a.assigned_type, a.label_printed_at, a.label_print_count,
       a.last_agent_sync_at, a.agent_hostname,
@@ -51,6 +52,7 @@ router.get('/assets/:token', async (req, res) => {
     asset = await get<Record<string, unknown>>(`
       SELECT a.id, a.asset_tag, a.old_asset_tag, a.name, a.serial, a.qr_token, a.qr_url, a.qr_image_path,
         a.purchase_date, a.purchase_cost, a.order_number, a.warranty_months, a.asset_eol_date,
+        a.map_latitude, a.map_longitude, a.map_address,
         a.notes, a.last_checkout, a.last_checkin, a.last_audit_date, a.next_audit_date,
         a.assigned_to, a.assigned_type, a.label_printed_at, a.label_print_count,
         a.last_agent_sync_at, a.agent_hostname,
@@ -112,6 +114,9 @@ router.get('/assets/:token', async (req, res) => {
     company: asset.company_name,
     department: asset.department_name,
     location: asset.location_name || asset.rtd_location_name,
+    map_latitude: asset.map_latitude != null ? Number(asset.map_latitude) : null,
+    map_longitude: asset.map_longitude != null ? Number(asset.map_longitude) : null,
+    map_address: asset.map_address || null,
     supplier: asset.supplier_name,
     purchase_date: asset.purchase_date,
     purchase_cost: asset.purchase_cost,

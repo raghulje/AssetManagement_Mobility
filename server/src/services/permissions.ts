@@ -75,10 +75,9 @@ export function viewerPerms(): Record<string, string> {
 }
 
 export function itAssetManagerPerms(): Record<string, string> {
-  const out = allModulePerms({ notifyOps: true })
-  delete out['settings.edit']
-  out['settings.view'] = '1'
-  return out
+  // Full module access including settings.edit (print labels, masters, import)
+  // Settings / Reports nav stay Admin-only via client isAdmin flag.
+  return allModulePerms({ notifyOps: true })
 }
 
 export function parsePerms(raw: unknown): Record<string, unknown> {
@@ -169,15 +168,36 @@ export async function ensureDefaultRoles() {
 
   for (const d of defaults) {
     const existing = await get<{ id: number }>(`SELECT id FROM permission_groups WHERE name = ?`, [d.name])
-    const json = JSON.stringify(d.permissions)
-    if (existing) {
-      // Keep Superusers/Admin in sync with catalog; don't wipe custom edits on IT Asset Manager/Viewer if already present — still refresh defaults for consistency
-      await run(`UPDATE permission_groups SET permissions = ?, updated_at = ? WHERE id = ?`, [json, ts, existing.id])
-    } else {
+    // Only seed missing roles — never overwrite admin customizations from Settings → Roles
+    if (!existing) {
       await run(
         `INSERT INTO permission_groups (name, permissions, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-        [d.name, json, ts, ts],
+        [d.name, JSON.stringify(d.permissions), ts, ts],
       )
+    }
+  }
+
+  // One-time grant: ensure IT Asset Manager has settings.edit if role already existed without it
+  const itam = await get<{ id: number; permissions: unknown }>(
+    `SELECT id, permissions FROM permission_groups WHERE name = 'IT Asset Manager' LIMIT 1`,
+  )
+  if (itam) {
+    const p = parsePerms(itam.permissions)
+    if (!isTruthyPerm(p['settings.edit'])) {
+      p['settings.edit'] = '1'
+      p['settings.view'] = '1'
+      await run(`UPDATE permission_groups SET permissions = ?, updated_at = ? WHERE id = ?`, [
+        JSON.stringify(mergePermissions(p)),
+        ts,
+        itam.id,
+      ])
+      const members = await all<{ user_id: number }>(
+        `SELECT user_id FROM users_groups WHERE group_id = ?`,
+        [itam.id],
+      )
+      for (const m of members) {
+        await syncUserPermissions(Number(m.user_id))
+      }
     }
   }
 
@@ -235,8 +255,11 @@ export function moduleGate(module: ModuleKey) {
     } else if (req.method === 'POST') {
       if (/\/(checkout|checkin|replace|checkinbytag)\b/i.test(path) || /\/(checkout|checkin|replace)\b/i.test(req.path)) {
         action = 'checkout'
-      } else if (/\/complete\b/i.test(req.path)) {
+      } else if (/\/(complete|audit)\b/i.test(req.path)) {
         action = 'edit'
+      } else if (/\/labels\b/i.test(path) || /\/labels\b/i.test(req.baseUrl || '')) {
+        // Print label is not "create asset" — allow with view or edit
+        action = 'view'
       } else {
         action = 'create'
       }

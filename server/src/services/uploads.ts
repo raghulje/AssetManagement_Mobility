@@ -59,7 +59,7 @@ export async function recordUpload(opts: {
   mime?: string
   diskPath: string
   size?: number
-  kind?: 'image' | 'file' | 'signature' | 'eula' | 'audit' | 'invoice' | 'po' | 'label' | 'other'
+  kind?: 'image' | 'file' | 'signature' | 'eula' | 'audit' | 'invoice' | 'po' | 'label' | 'other' | 'received'
   userId?: number
 }) {
   const ts = now()

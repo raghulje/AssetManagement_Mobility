@@ -5,7 +5,7 @@ import { StatusBadge } from '../../components/ui'
 import { DetailLayout, DetailPanel } from '../../components/DetailLayout'
 import AssetAttachments from '../../components/AssetAttachments'
 import { api, hardwareApi } from '../../api/client'
-import { assetImageSrc, getStorageBase } from '../../api/baseUrl'
+import { assetImageSrc, getApiBase, getStorageBase } from '../../api/baseUrl'
 import { formatINR } from '../../utils/money'
 import { formatAppDateTime } from '../../lib/datetime'
 
@@ -58,6 +58,7 @@ export default function AssetDetail() {
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null)
   const [agentBusy, setAgentBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const [receivedImages, setReceivedImages] = useState<Record<string, unknown>[]>([])
 
   /** Keep People context when opened from an employee record. */
   const fromEmployeeId = params.get('from') === 'employee' ? params.get('employee_id') : null
@@ -85,6 +86,9 @@ export default function AssetDetail() {
     hardwareApi.maintenances(id)
       .then((r) => setMaintenances(r.rows || []))
       .catch(() => setMaintenances([]))
+    api<{ rows: Record<string, unknown>[] }>(`/hardware/${id}/files`)
+      .then((r) => setReceivedImages((r.rows || []).filter((f) => String(f.kind) === 'received')))
+      .catch(() => setReceivedImages([]))
     loadAgent()
   }
   useEffect(() => { load() }, [id])
@@ -246,11 +250,33 @@ export default function AssetDetail() {
           },
           { label: 'Assigned To', value: assigned?.name || <span className="text-muted">Unassigned</span> },
           { label: 'Location', value: nest(a.location) },
+          ...(a.map_latitude != null && a.map_longitude != null
+            ? [{
+                label: 'Map pin',
+                value: (
+                  <span>
+                    {String(a.map_address || 'Pinned')}
+                    <br />
+                    <span className="text-muted" style={{ fontSize: 12 }}>
+                      Lat {Number(a.map_latitude).toFixed(6)}, Lng {Number(a.map_longitude).toFixed(6)}
+                      {' · '}
+                      <a
+                        href={`https://www.openstreetmap.org/?mlat=${a.map_latitude}&mlon=${a.map_longitude}#map=17/${a.map_latitude}/${a.map_longitude}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open in OSM
+                      </a>
+                    </span>
+                  </span>
+                ),
+              }]
+            : []),
           { label: 'Company', value: nest(a.company) },
           { label: 'Department', value: nest(a.department) },
           { label: 'Manufacturer', value: nest(a.manufacturer) },
           { label: 'Supplier / Vendor', value: nest(a.supplier) },
-          { label: 'Order / PO Number', value: String(a.order_number || '—') },
+          { label: 'Purchase Order Number', value: String(a.order_number || '—') },
           { label: 'Purchase Cost', value: formatINR(a.purchase_cost) },
           { label: 'QR Token', value: a.qr_token ? String(a.qr_token) : <span className="text-muted">Not minted (Print Label once)</span> },
           {
@@ -262,10 +288,48 @@ export default function AssetDetail() {
           { label: 'Label printed', value: a.label_printed_at ? `${String(a.label_printed_at)} (${Number(a.label_print_count || 0)}×)` : 'Never' },
           { label: 'Last agent sync', value: a.last_agent_sync_at ? `${String(a.last_agent_sync_at)}${a.agent_hostname ? ` · ${String(a.agent_hostname)}` : ''}` : '—' },
           { label: 'Notes', value: String(a.notes || '—'), full: true },
+          {
+            label: 'Received condition',
+            value: String(a.received_condition || '—'),
+            full: true,
+          },
         ] : undefined}
       >
         {tab === 'details' && (
           <>
+            {(a.received_condition || receivedImages.length > 0) ? (
+              <DetailPanel title="Asset received condition">
+                {a.received_condition ? (
+                  <p style={{ whiteSpace: 'pre-wrap', marginTop: 0 }}>{String(a.received_condition)}</p>
+                ) : (
+                  <p className="text-muted">No condition description</p>
+                )}
+                {receivedImages.length > 0 ? (
+                  <div className="received-condition-gallery" style={{ marginTop: 12 }}>
+                    {receivedImages.map((f) => {
+                      const url = f.url
+                        ? (assetImageSrc(String(f.url)) || String(f.url))
+                        : `${getApiBase()}/files/${f.id}/download`
+                      return (
+                        <a
+                          key={String(f.id)}
+                          className="received-condition-thumb"
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={String(f.original_filename || f.filename)}
+                        >
+                          <img src={url} alt={String(f.original_filename || f.filename)} />
+                          <span className="received-condition-caption">
+                            {String(f.original_filename || f.filename)}
+                          </span>
+                        </a>
+                      )
+                    })}
+                  </div>
+                ) : null}
+              </DetailPanel>
+            ) : null}
             <DetailPanel title="Print Label / QR">
               <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
                 {a.qr_image_url ? (

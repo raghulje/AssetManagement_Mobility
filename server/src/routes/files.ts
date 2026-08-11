@@ -29,7 +29,8 @@ router.get('/:objectType/:id/files', async (req, res) => {
   `, [type, req.params.id])
   return okList(res, rows.map((r: Record<string, unknown>) => ({
     ...r,
-    url: String(r.kind) === 'image' && String(r.disk_path).startsWith('public/')
+    url: (String(r.kind) === 'image' || String(r.kind) === 'received')
+      && String(r.disk_path).startsWith('public/')
       ? publicUrl(String(r.disk_path))
       : `/api/v1/files/${r.id}/download`,
   })))
@@ -38,11 +39,11 @@ router.get('/:objectType/:id/files', async (req, res) => {
 router.post('/:objectType/:id/files', (req, res) => {
   const type = typeMap[req.params.objectType] || req.params.objectType
   const rawKind = String(req.query.kind || req.body?.kind || 'file').toLowerCase()
-  const allowed = new Set(['image', 'file', 'audit', 'invoice', 'po', 'other', 'signature', 'eula'])
+  const allowed = new Set(['image', 'file', 'audit', 'invoice', 'po', 'other', 'signature', 'eula', 'received'])
   const kind = (allowed.has(rawKind) ? rawKind : 'file') as
-    'image' | 'file' | 'audit' | 'invoice' | 'po' | 'other' | 'signature' | 'eula'
+    'image' | 'file' | 'audit' | 'invoice' | 'po' | 'other' | 'signature' | 'eula' | 'received'
 
-  const subdir = kind === 'image'
+  const subdir = (kind === 'image' || kind === 'received')
     ? (type === 'user' ? 'public/avatars' : 'public/assets')
     : kind === 'audit'
       ? 'private_uploads/audits'
@@ -72,12 +73,12 @@ router.post('/:objectType/:id/files', (req, res) => {
       await run(`UPDATE users SET avatar = ?, updated_at = ? WHERE id = ?`, [rel, now(), req.params.id])
     }
 
-    const imageUrl = kind === 'image'
+    const publicFileUrl = (kind === 'image' || kind === 'received')
       ? `/storage/${rel.replace(/^public\//, '')}`
       : null
     return okMessage(res, 'File uploaded', {
       id: uploadId,
-      url: kind === 'image' ? imageUrl : `/api/v1/files/${uploadId}/download`,
+      url: publicFileUrl || `/api/v1/files/${uploadId}/download`,
       disk_path: rel,
       filename: req.file.originalname,
       kind,

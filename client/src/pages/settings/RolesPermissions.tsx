@@ -34,6 +34,20 @@ const ACTION_LABELS: Record<string, string> = {
 }
 
 const BUILTIN = new Set(['Superusers', 'Admin', 'IT Asset Manager', 'Viewer'])
+const ACTIONS = ['view', 'create', 'edit', 'delete', 'checkout'] as const
+
+function userCountLabel(n: number) {
+  const count = Number(n) || 0
+  return count === 1 ? '1 user' : `${count} users`
+}
+
+function permsEqual(a: Record<string, boolean>, b: Record<string, boolean>) {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  for (const k of keys) {
+    if (Boolean(a[k]) !== Boolean(b[k])) return false
+  }
+  return true
+}
 
 export default function RolesPermissions() {
   const toast = useToast()
@@ -44,15 +58,27 @@ export default function RolesPermissions() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [moduleActions, setModuleActions] = useState<Record<string, string[]>>({})
   const [perms, setPerms] = useState<Record<string, boolean>>({})
+  const [savedPerms, setSavedPerms] = useState<Record<string, boolean>>({})
   const [name, setName] = useState('')
+  const [savedName, setSavedName] = useState('')
   const [members, setMembers] = useState<Array<{ id: number; email: string | null; first_name: string; last_name: string; username: string }>>([])
   const [allUsers, setAllUsers] = useState<Array<{ id: number; label: string }>>([])
   const [memberIds, setMemberIds] = useState<number[]>([])
+  const [savedMemberIds, setSavedMemberIds] = useState<number[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [newRoleName, setNewRoleName] = useState('')
+  const [memberFilter, setMemberFilter] = useState('')
 
   const selected = useMemo(() => roles.find((r) => r.id === selectedId) || null, [roles, selectedId])
+
+  const dirty = useMemo(() => {
+    if (!selectedId) return false
+    const membersChanged =
+      memberIds.length !== savedMemberIds.length
+      || memberIds.some((id) => !savedMemberIds.includes(id))
+    return name.trim() !== savedName.trim() || !permsEqual(perms, savedPerms) || membersChanged
+  }, [selectedId, name, savedName, perms, savedPerms, memberIds, savedMemberIds])
 
   const loadRoles = async () => {
     const [catalog, list] = await Promise.all([
@@ -83,20 +109,26 @@ export default function RolesPermissions() {
 
   useEffect(() => {
     if (!selectedId) return
+    setError('')
     groupsApi.get(selectedId)
       .then((role) => {
-        setName(String(role.name || ''))
+        const roleName = String(role.name || '')
+        setName(roleName)
+        setSavedName(roleName)
         const p = (role.permissions && typeof role.permissions === 'object')
           ? role.permissions as Record<string, unknown>
           : {}
         const map: Record<string, boolean> = {}
         for (const [k, v] of Object.entries(p)) {
-          map[k] = v === '1' || v === 1 || v === true
+          map[k] = v === '1' || v === 1 || v === true || v === 'true'
         }
         setPerms(map)
+        setSavedPerms({ ...map })
         const mem = (role.members as typeof members) || []
         setMembers(mem)
-        setMemberIds(mem.map((m) => Number(m.id)))
+        const ids = mem.map((m) => Number(m.id))
+        setMemberIds(ids)
+        setSavedMemberIds(ids)
       })
       .catch((e: Error) => setError(e.message))
   }, [selectedId])
@@ -104,6 +136,16 @@ export default function RolesPermissions() {
   const toggle = (key: string) => {
     if (!canEdit) return
     setPerms((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const setModuleAll = (mod: string, on: boolean) => {
+    if (!canEdit) return
+    const actions = moduleActions[mod] || []
+    setPerms((prev) => {
+      const next = { ...prev }
+      for (const act of actions) next[`${mod}.${act}`] = on
+      return next
+    })
   }
 
   const saveRole = async () => {
@@ -115,9 +157,19 @@ export default function RolesPermissions() {
       for (const [k, v] of Object.entries(perms)) {
         if (v) permissions[k] = '1'
       }
-      await groupsApi.update(selectedId, { name: name.trim(), permissions })
+      // Preserve role flags even if not shown in the grid
+      if (perms.admin) permissions.admin = '1'
+      if (perms.superuser) permissions.superuser = '1'
+
+      const body: { name?: string; permissions: Record<string, string> } = { permissions }
+      if (!BUILTIN.has(selected?.name || '') && name.trim()) body.name = name.trim()
+
+      await groupsApi.update(selectedId, body)
       await groupsApi.setMembers(selectedId, memberIds)
-      toast.success('Role saved')
+      toast.success(`Saved permissions for “${selected?.name || 'role'}”`)
+      setSavedPerms({ ...perms })
+      setSavedName(name.trim())
+      setSavedMemberIds([...memberIds])
       await loadRoles()
       await refreshUser()
     } catch (e) {
@@ -137,7 +189,7 @@ export default function RolesPermissions() {
       setNewRoleName('')
       await loadRoles()
       if (id) setSelectedId(id)
-      toast.success('Role created')
+      toast.success('Role created — customize module permissions below')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Create failed')
     } finally {
@@ -162,44 +214,71 @@ export default function RolesPermissions() {
   }
 
   const modules = Object.keys(moduleActions)
+  const filteredUsers = useMemo(() => {
+    const q = memberFilter.trim().toLowerCase()
+    if (!q) return allUsers
+    return allUsers.filter((u) => u.label.toLowerCase().includes(q))
+  }, [allUsers, memberFilter])
 
   return (
-    <AppLayout title="Roles & permissions" subtitle="Control module access and ops email recipients">
+    <AppLayout title="Roles & permissions" subtitle="Choose a role, tick module permissions, then Save">
       {error ? <div className="callout callout-danger"><p>{error}</p></div> : null}
-      <div className="row">
-        <div className="col-md-3">
-          <Box title="Roles" type="primary"
-            tools={canEdit ? (
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <input
-                  className="form-control input-sm"
-                  style={{ width: 120 }}
-                  placeholder="New role"
-                  value={newRoleName}
-                  onChange={(e) => setNewRoleName(e.target.value)}
-                />
-                <button type="button" className="btn btn-xs btn-theme" disabled={busy} onClick={() => { void createRole() }}>
-                  Add
+
+      <div className="roles-layout">
+        <aside className="roles-sidebar">
+          <div className="roles-sidebar-head">
+            <h3>Roles</h3>
+            <p className="help-block" style={{ margin: 0 }}>Select a role to customize access</p>
+          </div>
+
+          {canEdit ? (
+            <div className="roles-create">
+              <input
+                className="form-control"
+                placeholder="New role name…"
+                value={newRoleName}
+                onChange={(e) => setNewRoleName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    void createRole()
+                  }
+                }}
+              />
+              <button type="button" className="btn btn-theme" disabled={busy || !newRoleName.trim()} onClick={() => { void createRole() }}>
+                Add
+              </button>
+            </div>
+          ) : null}
+
+          <div className="roles-card-list" role="list">
+            {roles.map((r) => {
+              const active = selectedId === r.id
+              const count = Number(r.users_count ?? 0)
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  role="listitem"
+                  className={`roles-card${active ? ' is-active' : ''}`}
+                  onClick={() => {
+                    if (dirty && !window.confirm('You have unsaved permission changes. Discard them?')) return
+                    setSelectedId(r.id)
+                  }}
+                >
+                  <span className="roles-card-name">{r.name}</span>
+                  <span className="roles-card-meta">
+                    <span className="roles-card-count">{userCountLabel(count)}</span>
+                    {BUILTIN.has(r.name) ? <span className="roles-card-tag">Built-in</span> : null}
+                  </span>
                 </button>
-              </div>
-            ) : undefined}
-          >
-            <ul className="nav nav-pills nav-stacked">
-              {roles.map((r) => (
-                <li key={r.id} className={selectedId === r.id ? 'active' : ''}>
-                  <a
-                    href={`#role-${r.id}`}
-                    onClick={(e) => { e.preventDefault(); setSelectedId(r.id) }}
-                  >
-                    {r.name}
-                    <span className="badge pull-right">{r.users_count ?? 0}</span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </Box>
-        </div>
-        <div className="col-md-9">
+              )
+            })}
+            {roles.length === 0 ? <p className="text-muted" style={{ padding: '8px 4px' }}>No roles yet.</p> : null}
+          </div>
+        </aside>
+
+        <section className="roles-detail">
           {selected ? (
             <Box
               title={`Edit: ${selected.name}`}
@@ -213,8 +292,13 @@ export default function RolesPermissions() {
                   ) : null}
                   {' '}
                   {canEdit ? (
-                    <button type="button" className="btn btn-xs btn-theme" disabled={busy} onClick={() => { void saveRole() }}>
-                      {busy ? 'Saving…' : 'Save role'}
+                    <button
+                      type="button"
+                      className="btn btn-xs btn-theme"
+                      disabled={busy || !dirty}
+                      onClick={() => { void saveRole() }}
+                    >
+                      {busy ? 'Saving…' : dirty ? 'Save changes' : 'Saved'}
                     </button>
                   ) : (
                     <span className="text-muted">View only</span>
@@ -222,17 +306,26 @@ export default function RolesPermissions() {
                 </>
               )}
             >
-              <div className="form-group">
-                <label>Role name</label>
-                <input
-                  className="form-control"
-                  value={name}
-                  disabled={!canEdit || BUILTIN.has(selected.name)}
-                  onChange={(e) => setName(e.target.value)}
-                />
+              <div className="roles-detail-summary">
+                <div>
+                  <label className="control-label">Role name</label>
+                  <input
+                    className="form-control"
+                    value={name}
+                    disabled={!canEdit || BUILTIN.has(selected.name)}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                  {BUILTIN.has(selected.name) ? (
+                    <p className="help-block" style={{ marginBottom: 0 }}>Built-in role name is fixed — module permissions below are fully editable.</p>
+                  ) : null}
+                </div>
+                <div className="roles-detail-stat">
+                  <span className="roles-detail-stat-label">Assigned users</span>
+                  <strong className="roles-detail-stat-value">{userCountLabel(memberIds.length || Number(selected.users_count || 0))}</strong>
+                </div>
               </div>
 
-              <label className="checkbox-inline" style={{ marginBottom: 12 }}>
+              <label className="checkbox-inline roles-notify">
                 <input
                   type="checkbox"
                   checked={Boolean(perms['notify.ops'])}
@@ -242,40 +335,72 @@ export default function RolesPermissions() {
                 {' '}Receive ops workflow emails (assign, maintenance, inventory alerts)
               </label>
 
+              <div className="roles-perm-head">
+                <h4 className="roles-section-title" style={{ margin: 0 }}>Module permissions</h4>
+                {canEdit ? (
+                  <button
+                    type="button"
+                    className="btn btn-theme btn-sm"
+                    disabled={busy || !dirty}
+                    onClick={() => { void saveRole() }}
+                  >
+                    {busy ? 'Saving…' : dirty ? 'Save permissions' : 'All saved'}
+                  </button>
+                ) : null}
+              </div>
+              <p className="help-block" style={{ marginTop: 6 }}>
+                Tick or untick any box, then click <strong>Save permissions</strong>. Changes apply to every user in this role.
+              </p>
+
               <div className="table-responsive">
-                <table className="table table-bordered table-condensed">
+                <table className="table table-bordered table-condensed roles-perm-table">
                   <thead>
                     <tr>
                       <th>Module</th>
-                      {['view', 'create', 'edit', 'delete', 'checkout'].map((a) => (
+                      {ACTIONS.map((a) => (
                         <th key={a} style={{ textAlign: 'center' }}>{ACTION_LABELS[a] || a}</th>
                       ))}
+                      {canEdit ? <th style={{ textAlign: 'center', width: 120 }}>Quick</th> : null}
                     </tr>
                   </thead>
                   <tbody>
                     {modules.map((mod) => {
                       const actions = moduleActions[mod] || []
+                      const allOn = actions.length > 0 && actions.every((act) => perms[`${mod}.${act}`])
                       return (
                         <tr key={mod}>
                           <td><strong>{MODULE_LABELS[mod] || mod}</strong></td>
-                          {['view', 'create', 'edit', 'delete', 'checkout'].map((act) => {
+                          {ACTIONS.map((act) => {
                             const key = `${mod}.${act}`
                             const allowed = actions.includes(act)
                             return (
                               <td key={act} style={{ textAlign: 'center' }}>
                                 {allowed ? (
-                                  <input
-                                    type="checkbox"
-                                    checked={Boolean(perms[key])}
-                                    disabled={!canEdit}
-                                    onChange={() => toggle(key)}
-                                  />
+                                  <label className="roles-perm-check">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(perms[key])}
+                                      disabled={!canEdit}
+                                      onChange={() => toggle(key)}
+                                    />
+                                  </label>
                                 ) : (
                                   <span className="text-muted">—</span>
                                 )}
                               </td>
                             )
                           })}
+                          {canEdit ? (
+                            <td style={{ textAlign: 'center' }}>
+                              <button
+                                type="button"
+                                className="btn btn-default btn-xs"
+                                onClick={() => setModuleAll(mod, !allOn)}
+                              >
+                                {allOn ? 'Clear' : 'All'}
+                              </button>
+                            </td>
+                          ) : null}
                         </tr>
                       )
                     })}
@@ -283,11 +408,29 @@ export default function RolesPermissions() {
                 </table>
               </div>
 
-              <h4 style={{ marginTop: 20 }}>Members</h4>
-              <p className="text-muted">Users in this role inherit the permissions above.</p>
-              <div style={{ maxHeight: 220, overflow: 'auto', border: '1px solid #e5e7eb', padding: 10, borderRadius: 6 }}>
-                {allUsers.map((u) => (
-                  <label key={u.id} className="checkbox-inline" style={{ display: 'block', margin: '4px 0' }}>
+              {dirty && canEdit ? (
+                <div className="roles-save-bar">
+                  <span>Unsaved changes for <strong>{selected.name}</strong></span>
+                  <button type="button" className="btn btn-theme" disabled={busy} onClick={() => { void saveRole() }}>
+                    {busy ? 'Saving…' : 'Save permissions'}
+                  </button>
+                </div>
+              ) : null}
+
+              <h4 className="roles-section-title">Members</h4>
+              <p className="help-block" style={{ marginTop: 0 }}>
+                Users in this role inherit the permissions above. {memberIds.length} selected.
+              </p>
+              <input
+                className="form-control"
+                style={{ maxWidth: 320, marginBottom: 10 }}
+                placeholder="Filter users…"
+                value={memberFilter}
+                onChange={(e) => setMemberFilter(e.target.value)}
+              />
+              <div className="roles-members">
+                {filteredUsers.map((u) => (
+                  <label key={u.id} className="roles-member-row">
                     <input
                       type="checkbox"
                       checked={memberIds.includes(u.id)}
@@ -298,19 +441,21 @@ export default function RolesPermissions() {
                           : prev.filter((x) => x !== u.id))
                       }}
                     />
-                    {' '}{u.label}
+                    <span>{u.label}</span>
                   </label>
                 ))}
+                {filteredUsers.length === 0 ? <p className="text-muted">No users match.</p> : null}
               </div>
-              {members.length === 0 ? <p className="help-block">No members yet.</p> : null}
               <p style={{ marginTop: 12 }}>
                 <Link to="/users">Manage app users</Link>
               </p>
             </Box>
           ) : (
-            <p className="text-muted">Select a role</p>
+            <div className="roles-empty">
+              <p className="text-muted">Select a role on the left to view and edit permissions.</p>
+            </div>
           )}
-        </div>
+        </section>
       </div>
     </AppLayout>
   )
