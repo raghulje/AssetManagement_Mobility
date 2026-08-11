@@ -6,7 +6,6 @@ import { transformAsset } from '../services/transformers.js'
 import { logAction } from '../services/actionLog.js'
 import { actorLabel, notifyWorkflow, resolveAssigneeEmail } from '../services/notify.js'
 import { allocateAssetTag, nextAssetTag } from '../services/assetTag.js'
-import { extractPoFromFile } from '../services/poExtract.js'
 
 const router = Router()
 const parsePoUpload = multer({
@@ -322,6 +321,8 @@ router.post('/parse-po', (req, res) => {
     const file = req.file
     if (!file?.buffer?.length) return fail(res, 'PO file is required')
     try {
+      // Lazy-load so pdfjs-dist never runs at server boot
+      const { extractPoFromFile } = await import('../services/poExtract.js')
       const extracted = await extractPoFromFile({
         buffer: file.buffer,
         mime: file.mimetype,

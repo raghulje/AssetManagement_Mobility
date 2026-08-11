@@ -1,6 +1,14 @@
-import { createWorker } from 'tesseract.js'
-import { PDFParse } from 'pdf-parse'
 import { all } from '../db/index.js'
+
+/**
+ * pdf-parse v2 → pdfjs-dist needs Node 20+ and a canvas polyfill.
+ * Load worker/CanvasFactory BEFORE pdf-parse so DOMMatrix exists in Node.
+ */
+async function loadPdfParse() {
+  const { CanvasFactory } = await import('pdf-parse/worker')
+  const { PDFParse } = await import('pdf-parse')
+  return { PDFParse, CanvasFactory }
+}
 
 export type PoExtractedFields = {
   order_number: string | null
@@ -161,6 +169,7 @@ export function parsePoText(text: string): Omit<PoExtractedFields, 'supplier_id'
 }
 
 async function ocrImageBuffer(buf: Buffer): Promise<string> {
+  const { createWorker } = await import('tesseract.js')
   const worker = await createWorker('eng')
   try {
     const { data } = await worker.recognize(buf)
@@ -172,7 +181,8 @@ async function ocrImageBuffer(buf: Buffer): Promise<string> {
 
 async function extractTextFromPdf(buf: Buffer): Promise<{ text: string; method: 'pdf-text' | 'pdf-ocr'; warnings: string[] }> {
   const warnings: string[] = []
-  const parser = new PDFParse({ data: buf })
+  const { PDFParse, CanvasFactory } = await loadPdfParse()
+  const parser = new PDFParse({ data: buf, CanvasFactory })
   try {
     const textResult = await parser.getText()
     const text = String(textResult?.text || '').trim()

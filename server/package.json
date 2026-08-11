@@ -13,6 +13,7 @@
     "build:client": "npm --prefix ../client ci && npm --prefix ../client run build"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^0.1.100",
     "@node-saml/node-saml": "^5.1.0",
     "bcryptjs": "^3.0.2",
     "bwip-js": "^4.11.2",

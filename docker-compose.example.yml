@@ -6,7 +6,8 @@
 
 services:
   itam-uat:
-    image: node:18
+    # pdf-parse / pdfjs-dist require Node 20+ (Node 18 crashes on DOMMatrix)
+    image: node:20
     container_name: itam-uat
     working_dir: /app/server
     volumes:
