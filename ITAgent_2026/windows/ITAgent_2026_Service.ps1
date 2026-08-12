@@ -4,7 +4,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$apiBase = if ($env:REFEX_API_URL) { $env:REFEX_API_URL.TrimEnd('/') } else { 'http://localhost:3001/api/v1' }
+$apiBase = if ($env:REFEX_API_URL) { $env:REFEX_API_URL.TrimEnd('/') } else { 'https://asset.refexone.com/api/v1' }
 $agentKey = $env:REFEX_AGENT_KEY
 $assetTag = $env:REFEX_ASSET_TAG
 $pollMs = if ($env:REFEX_AGENT_POLL_MS) { [int]$env:REFEX_AGENT_POLL_MS } else { 30000 }
@@ -35,50 +35,68 @@ function Collect-Inventory {
   $hostname = [System.Net.Dns]::GetHostName()
   $serialnumber = [string]$bios.SerialNumber
 
-  $software = @()
+  function Sanitize-Text([string]$s) {
+    if ([string]::IsNullOrWhiteSpace($s)) { return '' }
+    return (($s -replace '[\x00-\x1F\x7F]', ' ') -replace '\s+', ' ').Trim()
+  }
+
+  $apps = New-Object System.Collections.Generic.List[object]
   $uninstallPaths = @(
     'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
     'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
     'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'
   )
   foreach ($path in $uninstallPaths) {
-    Get-ItemProperty $path -ErrorAction SilentlyContinue |
+    Get-ItemProperty -Path $path -ErrorAction SilentlyContinue |
       Where-Object { $_.DisplayName } |
       ForEach-Object {
-        $software += ('"{0}", "{1}", "{2}", "{3}"' -f `
-          $_.DisplayName, $_.Publisher, $_.DisplayVersion, $_.InstallDate)
+        $name = Sanitize-Text ([string]$_.DisplayName)
+        if (-not $name) { return }
+        $apps.Add([pscustomobject]@{
+          name         = $name
+          publisher    = Sanitize-Text ([string]$_.Publisher)
+          version      = Sanitize-Text ([string]$_.DisplayVersion)
+          install_date = Sanitize-Text ([string]$_.InstallDate)
+        })
       }
   }
-  $databaseString = ($software | Select-Object -Unique | Select-Object -First 400) -join ', '
+  $unique = @($apps | Sort-Object name, version -Unique | Select-Object -First 500)
+  $legacyCsv = (
+    $unique | ForEach-Object {
+      '"{0}", "{1}", "{2}", "{3}"' -f $_.name, $_.publisher, $_.version, $_.install_date
+    }
+  ) -join ', '
 
   $payload = [ordered]@{
-    Computer_Name         = $hostname
-    Host_Name             = $hostname
-    Serial_Number         = $serialnumber
-    OS_Name               = $os.Caption
-    OS_Version            = $os.Version
-    OS_Manufacturer       = $os.Manufacturer
-    OS_Build_Type         = $os.BuildType
-    OS_Configuration      = [string]$cs.DomainRole
-    Registered_Owner      = $os.RegisteredUser
-    Product_ID            = $os.SerialNumber
-    System_Manufacturer   = $cs.Manufacturer
-    System_Model          = $cs.Model
-    Processor             = $cpu.Name
-    Domain                = $cs.Domain
-    BIOS_Version          = $bios.SMBIOSBIOSVersion
-    Windows_Directory     = $env:windir
-    System_Directory      = $env:SystemRoot
-    System_Locale         = $os.Locale
-    Time_Zone             = $tz.Caption
-    Total_Physical_RAM    = [string]$cs.TotalPhysicalMemory
-    Virtual_RAM_Max       = [string]$os.TotalVirtualMemorySize
-    Virtual_RAM_Available = [string]$os.FreeVirtualMemory
-    Installed_Software    = $databaseString
-    platform              = 'windows'
-    Created_By            = 'ITAgent_2026'
-    agent_version         = $agentVersion
-    create_if_missing     = $true
+    Computer_Name            = $hostname
+    Host_Name                = $hostname
+    Serial_Number            = $serialnumber
+    OS_Name                  = $os.Caption
+    OS_Version               = $os.Version
+    OS_Manufacturer          = $os.Manufacturer
+    OS_Build_Type            = $os.BuildType
+    OS_Configuration         = [string]$cs.DomainRole
+    Registered_Owner         = $os.RegisteredUser
+    Product_ID               = $os.SerialNumber
+    System_Manufacturer      = $cs.Manufacturer
+    System_Model             = $cs.Model
+    Processor                = $cpu.Name
+    Domain                   = $cs.Domain
+    BIOS_Version             = $bios.SMBIOSBIOSVersion
+    Windows_Directory        = $env:windir
+    System_Directory         = $env:SystemRoot
+    System_Locale            = $os.Locale
+    Time_Zone                = $tz.Caption
+    Total_Physical_RAM       = [string]$cs.TotalPhysicalMemory
+    Virtual_RAM_Max          = [string]$os.TotalVirtualMemorySize
+    Virtual_RAM_Available    = [string]$os.FreeVirtualMemory
+    Installed_Software       = $legacyCsv
+    Installed_Software_List  = @($unique)
+    Installed_Software_Count = [int]$unique.Count
+    platform                 = 'windows'
+    Created_By               = 'ITAgent_2026'
+    agent_version            = $agentVersion
+    create_if_missing        = $true
   }
   if ($assetTag) { $payload.asset_tag = $assetTag }
   return $payload
@@ -130,8 +148,10 @@ function Sync-Inventory {
   $payload = Collect-Inventory
   if ($CommandId) { $payload.command_id = $CommandId }
   $headers = Get-AgentHeaders $State
-  Write-Host "$(Get-Date -Format o) Inventory sync..."
-  $res = Invoke-RestMethod -Uri "$apiBase/agent/sync" -Method Post -Body ($payload | ConvertTo-Json -Depth 6) -Headers $headers
+  $headers['Content-Type'] = 'application/json; charset=utf-8'
+  $json = $payload | ConvertTo-Json -Depth 8 -Compress
+  Write-Host "$(Get-Date -Format o) Inventory sync... software=$([int]$payload.Installed_Software_Count)"
+  $res = Invoke-RestMethod -Uri "$apiBase/agent/sync" -Method Post -Body $json -Headers $headers -TimeoutSec 180
   $act = [string]$res.payload.action
   if (-not $act) { $act = $(if ($res.payload.created) { 'created' } elseif ($res.payload.matched) { 'updated' } else { 'unmatched' }) }
   Write-Host "  Sync OK - action=$act tag=$($res.payload.asset.asset_tag) matched_by=$($res.payload.matched_by)"
@@ -159,15 +179,21 @@ if (-not $state -or -not $state.agent_uuid -or -not $state.agent_token) {
   $state = Register-Agent
 }
 
-# Initial inventory
-try { Sync-Inventory $state | Out-Null } catch { Write-Host "Initial sync failed: $($_.Exception.Message)" }
-
-$lastFull = [datetime]::UtcNow
+# Heartbeat first — do not block remote scan on a long inventory collection.
+$lastFull = [datetime]::UtcNow.AddMilliseconds(-$fullSyncMs)
+$hbCount = 0
 
 while ($true) {
   try {
     $hb = Send-Heartbeat $state
-    $cmds = @($hb.payload.commands)
+    $hbCount++
+    $cmds = @()
+    if ($null -ne $hb.payload -and $null -ne $hb.payload.commands) {
+      $cmds = @($hb.payload.commands)
+    }
+    if ($hbCount -eq 1 -or ($hbCount % 10) -eq 0) {
+      Write-Host "$(Get-Date -Format o) Heartbeat OK (#$hbCount) commands=$($cmds.Count)"
+    }
     foreach ($cmd in $cmds) {
       if (-not $cmd) { continue }
       $name = [string]$cmd.command
@@ -178,7 +204,9 @@ while ($true) {
         } catch {
           $errBody = @{ ok = $false; error = $_.Exception.Message } | ConvertTo-Json
           $headers = Get-AgentHeaders $state
-          Invoke-RestMethod -Uri "$apiBase/agent/commands/$($cmd.id)/ack" -Method Post -Body $errBody -Headers $headers | Out-Null
+          try {
+            Invoke-RestMethod -Uri "$apiBase/agent/commands/$($cmd.id)/ack" -Method Post -Body $errBody -Headers $headers | Out-Null
+          } catch {}
           Write-Host "  Command failed: $($_.Exception.Message)"
         }
       }
@@ -186,12 +214,15 @@ while ($true) {
 
     $elapsed = ([datetime]::UtcNow - $lastFull).TotalMilliseconds
     if ($elapsed -ge $fullSyncMs) {
-      Sync-Inventory $state | Out-Null
-      $lastFull = [datetime]::UtcNow
+      try {
+        Sync-Inventory $state | Out-Null
+        $lastFull = [datetime]::UtcNow
+      } catch {
+        Write-Host "Periodic sync failed: $($_.Exception.Message)"
+      }
     }
   } catch {
     Write-Host "$(Get-Date -Format o) Loop error: $($_.Exception.Message)"
-    # Re-register if credentials rejected
     if ($_.Exception.Message -match "401|Unauthorized|Invalid agent") {
       try { $state = Register-Agent } catch { Write-Host "Re-register failed: $($_.Exception.Message)" }
     }

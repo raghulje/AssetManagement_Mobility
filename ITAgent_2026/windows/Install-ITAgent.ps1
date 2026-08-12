@@ -1,9 +1,9 @@
 # Install ITAgent_2026 as a startup scheduled task (runs service loop).
 # Run elevated once on the device:
-#   .\Install-ITAgent.ps1 -ApiUrl "http://localhost:3001/api/v1"
+#   .\Install-ITAgent.ps1 -ApiUrl "https://asset.refexone.com/api/v1"
 
 param(
-  [string]$ApiUrl = $(if ($env:REFEX_API_URL) { $env:REFEX_API_URL } else { 'http://localhost:3001/api/v1' }),
+  [string]$ApiUrl = $(if ($env:REFEX_API_URL) { $env:REFEX_API_URL } else { 'https://asset.refexone.com/api/v1' }),
   [string]$AgentKey = $(if ($env:REFEX_AGENT_KEY) { $env:REFEX_AGENT_KEY } else { '' }),
   [string]$AssetTag = $(if ($env:REFEX_ASSET_TAG) { $env:REFEX_ASSET_TAG } else { '' }),
   [int]$PollMs = 30000,

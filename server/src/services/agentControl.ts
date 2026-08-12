@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import { all, get, run, now } from '../db/index.js'
+import { extractInstalledSoftware } from './agentSoftware.js'
 
 export type AgentRow = {
   id: number
@@ -191,6 +192,18 @@ export function readAgentAuth(req: { headers: Record<string, unknown>; body?: Re
 }
 
 export async function claimPendingCommands(agentId: number, limit = 5) {
+  // Re-queue scans that were claimed but never finished (agent crashed mid-scan).
+  const staleBefore = new Date(Date.now() - 2 * 60 * 1000)
+  const staleTs = staleBefore.toISOString().slice(0, 19).replace('T', ' ')
+  await run(`
+    UPDATE agent_commands
+    SET status = 'pending', claimed_at = NULL
+    WHERE agent_id = ?
+      AND status = 'claimed'
+      AND command IN ('scan', 'rerun')
+      AND (claimed_at IS NULL OR claimed_at < ?)
+  `, [agentId, staleTs]).catch(() => undefined)
+
   const pending = await all<AgentCommandRow>(`
     SELECT id, agent_id, asset_id, command, status, payload, created_at
     FROM agent_commands
@@ -260,6 +273,10 @@ export async function enqueueScanCommand(opts: {
     ORDER BY id DESC LIMIT 1
   `, [agent.id])
   if (existing) {
+    const pollAgeMs = agent.last_heartbeat_at
+      ? Date.now() - parseDbUtc(String(agent.last_heartbeat_at))
+      : Number.POSITIVE_INFINITY
+    const polling = Boolean(agent.last_heartbeat_at) && pollAgeMs <= 90_000
     return {
       ok: true as const,
       queued: false,
@@ -267,9 +284,20 @@ export async function enqueueScanCommand(opts: {
       status: existing.status,
       agent_id: agent.id,
       agent_uuid: agent.agent_uuid,
-      message: existing.status === 'claimed' ? 'Scan already in progress' : 'Scan already queued',
+      polling,
+      message: existing.status === 'claimed'
+        ? 'Scan already in progress'
+        : (polling
+          ? 'Scan already queued — waiting for next agent poll'
+          : 'Scan still queued, but the agent is not polling. On the PC use Install & Start (service), not Sync once only.'),
     }
   }
+
+  const presence = agentPresence(agent.last_heartbeat_at)
+  const pollAgeMs = agent.last_heartbeat_at
+    ? Date.now() - parseDbUtc(String(agent.last_heartbeat_at))
+    : Number.POSITIVE_INFINITY
+  const polling = Boolean(agent.last_heartbeat_at) && pollAgeMs <= 90_000
 
   const ts = now()
   const command = opts.command || 'scan'
@@ -285,7 +313,10 @@ export async function enqueueScanCommand(opts: {
     status: 'pending',
     agent_id: agent.id,
     agent_uuid: agent.agent_uuid,
-    message: 'Scan requested — agent will run on next poll',
+    polling,
+    message: polling
+      ? 'Scan requested — agent will run on next poll (~30s)'
+      : 'Scan queued, but the agent is not polling. On the PC run Install & Start (not only Sync once), then wait for Online + a fresh heartbeat.',
   }
 }
 
@@ -320,13 +351,39 @@ export async function getAssetAgentStatus(assetId: number) {
     ORDER BY id DESC LIMIT 20
   `, [assetId]).catch(() => [])
 
-  const presence = agentPresence(agent?.last_heartbeat_at, agent?.last_inventory_at || asset?.last_agent_sync_at)
+  let installed_software: ReturnType<typeof extractInstalledSoftware> = []
+  let installed_software_count = 0
+  try {
+    const latestSnap = await get<{ payload: unknown }>(`
+      SELECT payload FROM asset_agent_snapshots
+      WHERE asset_id = ?
+      ORDER BY id DESC LIMIT 1
+    `, [assetId])
+    if (latestSnap?.payload) {
+      const raw = typeof latestSnap.payload === 'string'
+        ? JSON.parse(latestSnap.payload)
+        : latestSnap.payload
+      installed_software = extractInstalledSoftware(raw)
+      installed_software_count = installed_software.length
+    }
+  } catch {
+    /* ignore parse errors */
+  }
+
+  const presence = agentPresence(agent?.last_heartbeat_at)
+  // Remote scan needs the *service loop* (heartbeat poll). A one-shot Sync only updates inventory.
+  const pollAgeMs = agent?.last_heartbeat_at
+    ? Date.now() - parseDbUtc(String(agent.last_heartbeat_at))
+    : Number.POSITIVE_INFINITY
+  const polling = Boolean(agent?.last_heartbeat_at) && pollAgeMs <= 90_000
 
   return {
     registered: Boolean(agent),
     presence: presence.presence,
     presence_label: presence.label,
     online: presence.online,
+    polling,
+    poll_interval_ms: Number(process.env.AGENT_POLL_INTERVAL_MS || 30000),
     agent: agent
       ? {
           id: agent.id,
@@ -345,5 +402,7 @@ export async function getAssetAgentStatus(assetId: number) {
     pending_commands: Number(pending?.c || 0),
     recent_commands: recent,
     recent_syncs: recentSyncs,
+    installed_software_count,
+    installed_software: installed_software.slice(0, 800),
   }
 }

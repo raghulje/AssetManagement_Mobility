@@ -147,7 +147,11 @@ Health: `https://your-domain.com/api/v1/status`
 On each PC, point the agent at the **public** API (domain), not a laptop LAN IP:
 
 ```powershell
-$env:REFEX_API_URL = "https://itam.your-domain.com/api/v1"
+$env:REFEX_API_URL = "https://asset.refexone.com/api/v1"
+# or:
+cd ITAgent_2026\windows
+.\Install-ITAgent.ps1 -ApiUrl "https://asset.refexone.com/api/v1"
+# or rebuild + redistribute: .\Build-ITAgentExe.ps1 → dist\ITAgent_2026.exe
 ```
 
 Or pass `-ApiUrl` when installing. Re-print asset labels after changing `PUBLIC_APP_URL` so QR codes use the new base.

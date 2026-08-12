@@ -38,7 +38,7 @@ cd ITAgent_2026\windows
 
 On each laptop/desktop: copy **`ITAgent_2026.exe`** only, double‑click:
 
-1. Confirm API URL (set to your deployed origin, e.g. `https://itam.your-domain.com/api/v1`)
+1. Confirm API URL (default: `https://asset.refexone.com/api/v1`)
 2. Click **Install & Start** (approve UAC) — registers agent + startup task for remote scan
 3. Or **Sync once** for a single inventory push
 4. **Uninstall** removes the startup task
@@ -56,7 +56,7 @@ Task name: `ITAgent_2026`
 | `ITAgent_2026_Service.ps1` | Long-running service loop |
 
 ```powershell
-.\Install-ITAgent.ps1 -ApiUrl "http://localhost:3001/api/v1"
+.\Install-ITAgent.ps1 -ApiUrl "https://asset.refexone.com/api/v1"
 .\ITAgent_2026.ps1
 .\ITAgent_2026_Service.ps1
 ```
@@ -66,7 +66,7 @@ Task name: `ITAgent_2026`
 ```bash
 cd ITAgent_2026/node
 npm install
-export REFEX_API_URL="http://localhost:3001/api/v1"
+export REFEX_API_URL="https://asset.refexone.com/api/v1"
 npm run watch   # register + heartbeat + remote scan
 # npm run sync  # one-shot
 ```
@@ -82,7 +82,7 @@ npm run watch   # register + heartbeat + remote scan
 
 | Variable | Default | Notes |
 |----------|---------|--------|
-| `REFEX_API_URL` | `http://localhost:3001/api/v1` | Server API base (`https://your-domain/api/v1` in production) |
+| `REFEX_API_URL` | `https://asset.refexone.com/api/v1` | Server API base (override only for local/dev) |
 | `REFEX_AGENT_KEY` | _(empty)_ | Must match server `AGENT_API_KEY` when set |
 | `REFEX_ASSET_TAG` | _(empty)_ | Force bind to a tag |
 | `REFEX_AGENT_POLL_MS` | `30000` | Heartbeat / command poll |

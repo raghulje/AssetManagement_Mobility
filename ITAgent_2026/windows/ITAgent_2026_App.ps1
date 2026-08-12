@@ -11,7 +11,7 @@
 param(
   [ValidateSet('gui', 'install', 'uninstall', 'sync', 'service')]
   [string]$Mode = 'gui',
-  [string]$ApiUrl = $(if ($env:REFEX_API_URL) { $env:REFEX_API_URL } else { 'http://localhost:3001/api/v1' }),
+  [string]$ApiUrl = $(if ($env:REFEX_API_URL) { $env:REFEX_API_URL } else { 'https://asset.refexone.com/api/v1' }),
   [string]$AgentKey = $(if ($env:REFEX_AGENT_KEY) { $env:REFEX_AGENT_KEY } else { '' }),
   [string]$AssetTag = $(if ($env:REFEX_ASSET_TAG) { $env:REFEX_ASSET_TAG } else { '' }),
   [int]$PollMs = $(if ($env:REFEX_AGENT_POLL_MS) { [int]$env:REFEX_AGENT_POLL_MS } else { 30000 }),
@@ -69,50 +69,78 @@ function Collect-Inventory {
   $hostname = [System.Net.Dns]::GetHostName()
   $serialnumber = [string]$bios.SerialNumber
 
-  $software = @()
+  function Sanitize-Text([string]$s) {
+    if ([string]::IsNullOrWhiteSpace($s)) { return '' }
+    return (($s -replace '[\x00-\x1F\x7F]', ' ') -replace '\s+', ' ').Trim()
+  }
+
+  # Registry uninstall keys (same approach as legacy HSAgent) — works under SYSTEM for HKLM.
+  $apps = New-Object System.Collections.Generic.List[object]
   $uninstallPaths = @(
     'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
     'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
     'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'
   )
   foreach ($path in $uninstallPaths) {
-    Get-ItemProperty $path -ErrorAction SilentlyContinue |
-      Where-Object { $_.DisplayName } |
-      ForEach-Object {
-        $software += ('"{0}", "{1}", "{2}", "{3}"' -f `
-          $_.DisplayName, $_.Publisher, $_.DisplayVersion, $_.InstallDate)
-      }
+    try {
+      Get-ItemProperty -Path $path -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName } |
+        ForEach-Object {
+          $name = Sanitize-Text ([string]$_.DisplayName)
+          if (-not $name) { return }
+          $apps.Add([pscustomobject]@{
+            name         = $name
+            publisher    = Sanitize-Text ([string]$_.Publisher)
+            version      = Sanitize-Text ([string]$_.DisplayVersion)
+            install_date = Sanitize-Text ([string]$_.InstallDate)
+          })
+        }
+    } catch {
+      Write-AgentLog "Software scan skipped for $path : $($_.Exception.Message)"
+    }
   }
-  $databaseString = ($software | Select-Object -Unique | Select-Object -First 400) -join ', '
+
+  $unique = @($apps | Sort-Object name, version -Unique | Select-Object -First 500)
+  $nameList = ($unique | ForEach-Object { $_.name }) -join '; '
+  # Legacy Kissflow/HSAgent-compatible quoted CSV string
+  $legacyCsv = (
+    $unique | ForEach-Object {
+      '"{0}", "{1}", "{2}", "{3}"' -f $_.name, $_.publisher, $_.version, $_.install_date
+    }
+  ) -join ', '
+
+  Write-AgentLog ("Collected {0} installed apps" -f $unique.Count)
 
   $payload = [ordered]@{
-    Computer_Name         = $hostname
-    Host_Name             = $hostname
-    Serial_Number         = $serialnumber
-    OS_Name               = $os.Caption
-    OS_Version            = $os.Version
-    OS_Manufacturer       = $os.Manufacturer
-    OS_Build_Type         = $os.BuildType
-    OS_Configuration      = [string]$cs.DomainRole
-    Registered_Owner      = $os.RegisteredUser
-    Product_ID            = $os.SerialNumber
-    System_Manufacturer   = $cs.Manufacturer
-    System_Model          = $cs.Model
-    Processor             = $cpu.Name
-    Domain                = $cs.Domain
-    BIOS_Version          = $bios.SMBIOSBIOSVersion
-    Windows_Directory     = $env:windir
-    System_Directory      = $env:SystemRoot
-    System_Locale         = $os.Locale
-    Time_Zone             = $tz.Caption
-    Total_Physical_RAM    = [string]$cs.TotalPhysicalMemory
-    Virtual_RAM_Max       = [string]$os.TotalVirtualMemorySize
-    Virtual_RAM_Available = [string]$os.FreeVirtualMemory
-    Installed_Software    = $databaseString
-    platform              = 'windows'
-    Created_By            = 'ITAgent_2026'
-    agent_version         = $agentVersion
-    create_if_missing     = $true
+    Computer_Name              = $hostname
+    Host_Name                  = $hostname
+    Serial_Number              = $serialnumber
+    OS_Name                    = $os.Caption
+    OS_Version                 = $os.Version
+    OS_Manufacturer            = $os.Manufacturer
+    OS_Build_Type              = $os.BuildType
+    OS_Configuration           = [string]$cs.DomainRole
+    Registered_Owner           = $os.RegisteredUser
+    Product_ID                 = $os.SerialNumber
+    System_Manufacturer        = $cs.Manufacturer
+    System_Model               = $cs.Model
+    Processor                  = $cpu.Name
+    Domain                     = $cs.Domain
+    BIOS_Version               = $bios.SMBIOSBIOSVersion
+    Windows_Directory          = $env:windir
+    System_Directory           = $env:SystemRoot
+    System_Locale              = $os.Locale
+    Time_Zone                  = $tz.Caption
+    Total_Physical_RAM         = [string]$cs.TotalPhysicalMemory
+    Virtual_RAM_Max            = [string]$os.TotalVirtualMemorySize
+    Virtual_RAM_Available      = [string]$os.FreeVirtualMemory
+    Installed_Software         = $(if ($legacyCsv) { $legacyCsv } else { $nameList })
+    Installed_Software_List    = @($unique)
+    Installed_Software_Count   = [int]$unique.Count
+    platform                   = 'windows'
+    Created_By                 = 'ITAgent_2026'
+    agent_version              = $agentVersion
+    create_if_missing          = $true
   }
   if ($script:AssetTag) { $payload.asset_tag = $script:AssetTag }
   return $payload
@@ -174,8 +202,10 @@ function Sync-Inventory {
   $payload = Collect-Inventory
   if ($CommandId) { $payload.command_id = $CommandId }
   $headers = Get-AgentHeaders $State
-  Write-AgentLog 'Inventory sync...'
-  $res = Invoke-RestMethod -Uri "$api/agent/sync" -Method Post -Body ($payload | ConvertTo-Json -Depth 6) -Headers $headers
+  $headers['Content-Type'] = 'application/json; charset=utf-8'
+  $json = $payload | ConvertTo-Json -Depth 8 -Compress
+  Write-AgentLog ("Inventory sync... software={0}" -f [int]$payload.Installed_Software_Count)
+  $res = Invoke-RestMethod -Uri "$api/agent/sync" -Method Post -Body $json -Headers $headers -TimeoutSec 180
   $act = [string]$res.payload.action
   if (-not $act) {
     $act = $(if ($res.payload.created) { 'created' } elseif ($res.payload.matched) { 'updated' } else { 'unmatched' })
@@ -221,16 +251,25 @@ function Install-AgentTask {
   if ($self.Kind -eq 'exe') {
     Copy-Item -LiteralPath $self.Path -Destination (Join-Path $dir 'ITAgent_2026.exe') -Force
     $exe = Join-Path $dir 'ITAgent_2026.exe'
+    # Wrapper loads env.ps1 then runs service mode. Keep the process alive for polling.
     @"
 @echo off
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& { . '$dir\env.ps1'; & '$exe' -Mode service }"
+cd /d "$dir"
+:loop
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ". '$dir\env.ps1'; & '$exe' -Mode service"
+timeout /t 5 /nobreak >nul
+goto loop
 "@ | Set-Content -Path $runner -Encoding ASCII
   } else {
     Copy-Item -LiteralPath $self.Path -Destination (Join-Path $dir 'ITAgent_2026_App.ps1') -Force
     $app = Join-Path $dir 'ITAgent_2026_App.ps1'
     @"
 @echo off
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& { . '$dir\env.ps1'; & '$app' -Mode service }"
+cd /d "$dir"
+:loop
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ". '$dir\env.ps1'; & '$app' -Mode service"
+timeout /t 5 /nobreak >nul
+goto loop
 "@ | Set-Content -Path $runner -Encoding ASCII
   }
 
@@ -258,6 +297,10 @@ function Invoke-SyncOnce {
   $env:REFEX_AGENT_STATE_DIR = $script:InstallDir
   $state = Load-State
   if (-not $state -or -not $state.agent_uuid) { $state = Register-Agent }
+  elseif ([string]$state.api_base -ne (Get-ApiBase $script:ApiUrl)) {
+    Write-AgentLog "API URL changed ($($state.api_base) → $(Get-ApiBase $script:ApiUrl)); re-registering"
+    $state = Register-Agent
+  }
   $res = Sync-Inventory $state
   $tag = [string]$res.payload.asset.asset_tag
   $id = [string]$res.payload.asset.id
@@ -279,33 +322,56 @@ function Start-ServiceLoop {
 
   Write-AgentLog "Service start → $(Get-ApiBase $script:ApiUrl) poll=$($script:PollMs)ms"
   $state = Load-State
-  if (-not $state -or -not $state.agent_uuid -or -not $state.agent_token) {
+  $wantApi = Get-ApiBase $script:ApiUrl
+  if (-not $state -or -not $state.agent_uuid -or -not $state.agent_token -or [string]$state.api_base -ne $wantApi) {
+    if ($state -and [string]$state.api_base -and [string]$state.api_base -ne $wantApi) {
+      Write-AgentLog "API URL changed ($($state.api_base) → $wantApi); re-registering"
+    }
     $state = Register-Agent
   }
-  try { Sync-Inventory $state | Out-Null } catch { Write-AgentLog "Initial sync failed: $($_.Exception.Message)" }
-  $lastFull = [datetime]::UtcNow
+
+  # Heartbeat FIRST so remote "Request inventory scan" is claimed quickly.
+  # Heavy inventory sync runs after (and when a scan command arrives).
+  $lastFull = [datetime]::UtcNow.AddMilliseconds(-$script:FullSyncMs) # allow first full sync after first poll cycle
+  $hbCount = 0
 
   while ($true) {
     try {
       $hb = Send-Heartbeat $state
-      foreach ($cmd in @($hb.payload.commands)) {
+      $hbCount++
+      $cmds = @()
+      if ($null -ne $hb.payload -and $null -ne $hb.payload.commands) {
+        $cmds = @($hb.payload.commands)
+      }
+      if ($hbCount -eq 1 -or ($hbCount % 10) -eq 0) {
+        Write-AgentLog "Heartbeat OK (#$hbCount) commands=$($cmds.Count)"
+      }
+      foreach ($cmd in $cmds) {
         if (-not $cmd) { continue }
         $name = [string]$cmd.command
         Write-AgentLog "Command #$($cmd.id): $name"
         if ($name -eq 'scan' -or $name -eq 'rerun') {
           try {
             Sync-Inventory $state $cmd.id | Out-Null
+            Write-AgentLog "Command #$($cmd.id) completed"
           } catch {
             $api = Get-ApiBase $script:ApiUrl
             $errBody = @{ ok = $false; error = $_.Exception.Message } | ConvertTo-Json
-            Invoke-RestMethod -Uri "$api/agent/commands/$($cmd.id)/ack" -Method Post -Body $errBody -Headers (Get-AgentHeaders $state) | Out-Null
+            try {
+              Invoke-RestMethod -Uri "$api/agent/commands/$($cmd.id)/ack" -Method Post -Body $errBody -Headers (Get-AgentHeaders $state) | Out-Null
+            } catch {}
             Write-AgentLog "Command failed: $($_.Exception.Message)"
           }
         }
       }
       if (([datetime]::UtcNow - $lastFull).TotalMilliseconds -ge $script:FullSyncMs) {
-        Sync-Inventory $state | Out-Null
-        $lastFull = [datetime]::UtcNow
+        try {
+          Sync-Inventory $state | Out-Null
+          $lastFull = [datetime]::UtcNow
+          Write-AgentLog 'Periodic inventory sync OK'
+        } catch {
+          Write-AgentLog "Periodic sync failed: $($_.Exception.Message)"
+        }
       }
     } catch {
       Write-AgentLog "Loop error: $($_.Exception.Message)"

@@ -16,6 +16,7 @@ type AgentStatus = {
   presence?: string
   presence_label?: string
   online?: boolean
+  polling?: boolean
   pending_commands?: number
   last_agent_sync_at?: string | null
   agent_hostname?: string | null
@@ -45,6 +46,13 @@ type AgentStatus = {
     matched_by?: string | null
     client_ip?: string | null
     created_at?: string | null
+  }>
+  installed_software_count?: number
+  installed_software?: Array<{
+    name: string
+    publisher?: string
+    version?: string
+    install_date?: string
   }>
 }
 
@@ -428,6 +436,11 @@ export default function AssetDetail() {
                 <span className={presenceClass(agentStatus?.presence)}>
                   {agentStatus?.presence_label || 'No agent'}
                 </span>
+                {agentStatus?.polling ? (
+                  <span className="label label-success" style={{ marginLeft: 8 }}>Polling</span>
+                ) : agentStatus?.registered ? (
+                  <span className="label label-warning" style={{ marginLeft: 8 }}>Not polling</span>
+                ) : null}
                 {agentStatus?.pending_commands ? (
                   <span className="label label-info" style={{ marginLeft: 8 }}>
                     {agentStatus.pending_commands} queued
@@ -457,8 +470,27 @@ export default function AssetDetail() {
               <div className="callout callout-warning">
                 <p className="mb-0">
                   No agent registered for this asset yet. On the device, install and run
-                  {' '}<code>ITAgent_2026/windows/Install-ITAgent.ps1</code> (or the Node service loop).
-                  After the first register + sync, this button becomes active.
+                  {' '}<code>ITAgent_2026</code> → <strong>Install &amp; Start</strong>
+                  (not Sync once only). After heartbeats show Online, this button can queue remote scans.
+                </p>
+              </div>
+            )}
+
+            {agentStatus?.registered && (agentStatus.pending_commands || 0) > 0 && !agentStatus.polling && (
+              <div className="callout callout-warning">
+                <p className="mb-0">
+                  Scan is queued, but this PC is <strong>not polling</strong> right now.
+                  On <code>{String(agentStatus?.agent?.hostname || 'the device')}</code> open the agent EXE →
+                  confirm API <code>https://asset.refexone.com/api/v1</code> → click <strong>Install &amp; Start</strong>
+                  (approve UAC). Within ~30 seconds the pending scan should move to done.
+                </p>
+              </div>
+            )}
+
+            {agentStatus?.registered && agentStatus.polling && (agentStatus.pending_commands || 0) > 0 && (
+              <div className="callout callout-info">
+                <p className="mb-0">
+                  Agent is polling — waiting for the next heartbeat (~30s) to claim and run the scan.
                 </p>
               </div>
             )}
@@ -524,6 +556,43 @@ export default function AssetDetail() {
                 ))}
               </tbody>
             </table>
+
+            <h5 style={{ marginTop: 16 }}>
+              Installed software{' '}
+              {agentStatus?.installed_software_count
+                ? <span className="text-muted" style={{ fontWeight: 400 }}>({agentStatus.installed_software_count})</span>
+                : null}
+            </h5>
+            <div className="table-responsive" style={{ maxHeight: 360, overflow: 'auto', marginBottom: 16 }}>
+              <table className="table table-striped table-condensed">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Publisher</th>
+                    <th>Version</th>
+                    <th>Install date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(agentStatus?.installed_software || []).length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="text-muted">
+                        No software list yet — run a full inventory sync / remote scan on the device
+                        (Install &amp; Start, then Request inventory scan).
+                      </td>
+                    </tr>
+                  )}
+                  {(agentStatus?.installed_software || []).map((app, i) => (
+                    <tr key={`${app.name}-${app.version || ''}-${i}`}>
+                      <td>{app.name}</td>
+                      <td>{app.publisher || '—'}</td>
+                      <td>{app.version || '—'}</td>
+                      <td>{app.install_date || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             <h5 style={{ marginTop: 16 }}>Remote commands</h5>
             <table className="table table-striped table-condensed">

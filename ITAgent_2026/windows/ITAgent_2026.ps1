@@ -13,7 +13,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$apiBase = if ($env:REFEX_API_URL) { $env:REFEX_API_URL.TrimEnd('/') } else { 'http://localhost:3001/api/v1' }
+$apiBase = if ($env:REFEX_API_URL) { $env:REFEX_API_URL.TrimEnd('/') } else { 'https://asset.refexone.com/api/v1' }
 $agentKey = $env:REFEX_AGENT_KEY
 $assetTag = $env:REFEX_ASSET_TAG
 $stateDir = if ($env:REFEX_AGENT_STATE_DIR) { $env:REFEX_AGENT_STATE_DIR } else {
@@ -39,50 +39,69 @@ function Get-Inventory {
   $hostname = [System.Net.Dns]::GetHostName()
   $serialnumber = [string]$bios.SerialNumber
 
-  $software = @()
+  function Sanitize-Text([string]$s) {
+    if ([string]::IsNullOrWhiteSpace($s)) { return '' }
+    return (($s -replace '[\x00-\x1F\x7F]', ' ') -replace '\s+', ' ').Trim()
+  }
+
+  $apps = New-Object System.Collections.Generic.List[object]
   $uninstallPaths = @(
     'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
     'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
     'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'
   )
   foreach ($path in $uninstallPaths) {
-    Get-ItemProperty $path -ErrorAction SilentlyContinue |
+    Get-ItemProperty -Path $path -ErrorAction SilentlyContinue |
       Where-Object { $_.DisplayName } |
       ForEach-Object {
-        $software += ('"{0}", "{1}", "{2}", "{3}"' -f `
-          $_.DisplayName, $_.Publisher, $_.DisplayVersion, $_.InstallDate)
+        $name = Sanitize-Text ([string]$_.DisplayName)
+        if (-not $name) { return }
+        $apps.Add([pscustomobject]@{
+          name         = $name
+          publisher    = Sanitize-Text ([string]$_.Publisher)
+          version      = Sanitize-Text ([string]$_.DisplayVersion)
+          install_date = Sanitize-Text ([string]$_.InstallDate)
+        })
       }
   }
-  $databaseString = ($software | Select-Object -Unique | Select-Object -First 400) -join ', '
+  $unique = @($apps | Sort-Object name, version -Unique | Select-Object -First 500)
+  $legacyCsv = (
+    $unique | ForEach-Object {
+      '"{0}", "{1}", "{2}", "{3}"' -f $_.name, $_.publisher, $_.version, $_.install_date
+    }
+  ) -join ', '
+  Write-Log ("Collected {0} installed apps" -f $unique.Count) 'Cyan'
 
   $payload = [ordered]@{
-    Computer_Name         = $hostname
-    Host_Name             = $hostname
-    Serial_Number         = $serialnumber
-    OS_Name               = $os.Caption
-    OS_Version            = $os.Version
-    OS_Manufacturer       = $os.Manufacturer
-    OS_Build_Type         = $os.BuildType
-    OS_Configuration      = [string]$cs.DomainRole
-    Registered_Owner      = $os.RegisteredUser
-    Product_ID            = $os.SerialNumber
-    System_Manufacturer   = $cs.Manufacturer
-    System_Model          = $cs.Model
-    Processor             = $cpu.Name
-    Domain                = $cs.Domain
-    BIOS_Version          = $bios.SMBIOSBIOSVersion
-    Windows_Directory     = $env:windir
-    System_Directory      = $env:SystemRoot
-    System_Locale         = $os.Locale
-    Time_Zone             = $tz.Caption
-    Total_Physical_RAM    = [string]$cs.TotalPhysicalMemory
-    Virtual_RAM_Max       = [string]$os.TotalVirtualMemorySize
-    Virtual_RAM_Available = [string]$os.FreeVirtualMemory
-    Installed_Software    = $databaseString
-    platform              = 'windows'
-    Created_By            = 'ITAgent_2026'
-    agent_version         = '2026.1'
-    create_if_missing     = $true
+    Computer_Name            = $hostname
+    Host_Name                = $hostname
+    Serial_Number            = $serialnumber
+    OS_Name                  = $os.Caption
+    OS_Version               = $os.Version
+    OS_Manufacturer          = $os.Manufacturer
+    OS_Build_Type            = $os.BuildType
+    OS_Configuration         = [string]$cs.DomainRole
+    Registered_Owner         = $os.RegisteredUser
+    Product_ID               = $os.SerialNumber
+    System_Manufacturer      = $cs.Manufacturer
+    System_Model             = $cs.Model
+    Processor                = $cpu.Name
+    Domain                   = $cs.Domain
+    BIOS_Version             = $bios.SMBIOSBIOSVersion
+    Windows_Directory        = $env:windir
+    System_Directory         = $env:SystemRoot
+    System_Locale            = $os.Locale
+    Time_Zone                = $tz.Caption
+    Total_Physical_RAM       = [string]$cs.TotalPhysicalMemory
+    Virtual_RAM_Max          = [string]$os.TotalVirtualMemorySize
+    Virtual_RAM_Available    = [string]$os.FreeVirtualMemory
+    Installed_Software       = $legacyCsv
+    Installed_Software_List  = @($unique)
+    Installed_Software_Count = [int]$unique.Count
+    platform                 = 'windows'
+    Created_By               = 'ITAgent_2026'
+    agent_version            = '2026.1'
+    create_if_missing        = $true
   }
   if ($assetTag) { $payload.asset_tag = $assetTag }
   return $payload
@@ -118,8 +137,13 @@ if ($agentKey) { $headers['X-Agent-Key'] = $agentKey }
 try {
   # --- Register (required for Agent tab / remote scan) ---
   $state = Load-AgentState
-  if (-not $state -or -not $state.agent_uuid -or -not $state.agent_token) {
-    Write-Log "Registering agent with server…" 'Cyan'
+  $needsRegister = (-not $state -or -not $state.agent_uuid -or -not $state.agent_token -or [string]$state.api_base -ne $apiBase)
+  if ($needsRegister) {
+    if ($state -and [string]$state.api_base -and [string]$state.api_base -ne $apiBase) {
+      Write-Log "API URL changed ($($state.api_base) → $apiBase); re-registering…" 'Cyan'
+    } else {
+      Write-Log "Registering agent with server…" 'Cyan'
+    }
     $regBody = @{
       Computer_Name = $payload.Computer_Name
       Serial_Number = $payload.Serial_Number
@@ -156,9 +180,10 @@ try {
   Write-Log "Heartbeat OK" 'Green'
 
   # --- Inventory sync ---
-  Write-Log "Syncing inventory…" 'Cyan'
+  Write-Log "Syncing inventory (software=$([int]$payload.Installed_Software_Count))…" 'Cyan'
+  $headers['Content-Type'] = 'application/json; charset=utf-8'
   $response = Invoke-RestMethod -Uri "$apiBase/agent/sync" -Method Post `
-    -Body ($payload | ConvertTo-Json -Depth 6) -Headers $headers -TimeoutSec 120
+    -Body ($payload | ConvertTo-Json -Depth 8 -Compress) -Headers $headers -TimeoutSec 180
 
   $payloadOut = $response.payload
   $action = [string]$payloadOut.action
@@ -189,7 +214,8 @@ try {
   Write-Host " Asset tag: $tag" -ForegroundColor Green
   Write-Host " Asset id : $assetId" -ForegroundColor Green
   Write-Host " Matched  : $matchedBy" -ForegroundColor Green
-  Write-Host " Open     : http://localhost:3001/hardware/$assetId  (Agent tab)" -ForegroundColor Cyan
+  $publicOrigin = ($apiBase -replace '/api/v1/?$', '')
+  Write-Host " Open     : $publicOrigin/hardware/$assetId  (Agent tab)" -ForegroundColor Cyan
   Write-Host " Message  : $($response.messages -join '; ')" -ForegroundColor Green
   Write-Host "========================================" -ForegroundColor Green
   Write-Host ""

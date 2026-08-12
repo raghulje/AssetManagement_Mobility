@@ -14,6 +14,7 @@ import {
   newAgentCredentials,
   readAgentAuth,
 } from '../services/agentControl.js'
+import { extractInstalledSoftware, sanitizeAgentPayload } from '../services/agentSoftware.js'
 
 const router = Router()
 const AGENT_VERSION_DEFAULT = '2026.1'
@@ -102,22 +103,22 @@ router.post('/register', async (req, res) => {
         agent_uuid = ?, token_hash = ?, asset_id = COALESCE(?, asset_id),
         hostname = COALESCE(?, hostname), serial_number = COALESCE(?, serial_number),
         platform = COALESCE(?, platform), agent_version = ?,
-        last_heartbeat_at = ?, last_ip = ?, updated_at = ?
+        last_ip = ?, updated_at = ?
       WHERE id = ?
     `, [
       creds.agent_uuid, creds.token_hash, asset?.id || null,
       hostname || null, serial || null, platform, agentVersion,
-      ts, ip, ts, existing.id,
+      ip, ts, existing.id,
     ])
   } else {
     await run(`
       INSERT INTO agents (
         agent_uuid, token_hash, asset_id, hostname, serial_number, platform,
-        agent_version, last_heartbeat_at, last_ip, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        agent_version, last_ip, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       creds.agent_uuid, creds.token_hash, asset?.id || null, hostname || null, serial || null,
-      platform, agentVersion, ts, ip, ts, ts,
+      platform, agentVersion, ip, ts, ts,
     ])
   }
 
@@ -316,7 +317,14 @@ router.post('/sync', async (req, res) => {
       action = 'created'
     }
 
-    const payloadJson = JSON.stringify(b)
+    const safeBody = sanitizeAgentPayload(b as Record<string, unknown>)
+    const software = extractInstalledSoftware(safeBody)
+    // Keep structured list on the stored snapshot for the UI
+    if (software.length && !Array.isArray((safeBody as { Installed_Software_List?: unknown }).Installed_Software_List)) {
+      ;(safeBody as { Installed_Software_List: unknown }).Installed_Software_List = software
+      ;(safeBody as { Installed_Software_Count: number }).Installed_Software_Count = software.length
+    }
+    const payloadJson = JSON.stringify(safeBody)
 
     const snap = await run(`
       INSERT INTO asset_agent_snapshots (asset_id, serial_number, hostname, platform, payload, matched_by, created_at)
@@ -351,14 +359,13 @@ router.post('/sync', async (req, res) => {
           hostname = COALESCE(?, hostname),
           serial_number = COALESCE(?, serial_number),
           platform = COALESCE(?, platform),
-          last_heartbeat_at = ?,
           last_inventory_at = ?,
           last_ip = ?,
           updated_at = ?
         WHERE id = ?
       `, [
         asset?.id || null, hostname || null, usableSerial || serialRaw || null, platform,
-        ts, ts, ip, ts, agent.id,
+        ts, ip, ts, agent.id,
       ])
 
       const syncResult = {
@@ -398,6 +405,7 @@ router.post('/sync', async (req, res) => {
         os: osName || null,
         model: systemModel || null,
         manufacturer: manufacturer || null,
+        software_count: software.length,
       },
     })
 
