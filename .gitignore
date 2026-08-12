@@ -45,6 +45,10 @@ Thumbs.db
 # Local scratch / analysis
 _phase0_analysis.json
 
+# Local handoff kits (not part of ITAM product)
+for_kathikaa/
+for_kathikaa.zip
+
 # Local business / PII data dumps (keep out of git)
 Employee_List*.xlsx
 *.xlsx

@@ -12,6 +12,24 @@ function nestName(v: unknown): string {
   return v != null && v !== '' ? String(v) : '—'
 }
 
+/** Return to the previous in-app page, or a fallback when there is no history. */
+function PageBack({ fallback = '/', label = 'Back' }: { fallback?: string; label?: string }) {
+  const navigate = useNavigate()
+  return (
+    <button
+      type="button"
+      className="btn btn-default btn-sm"
+      onClick={() => {
+        const idx = typeof window.history.state?.idx === 'number' ? window.history.state.idx : 0
+        if (idx > 0) navigate(-1)
+        else navigate(fallback)
+      }}
+    >
+      <i className="fas fa-arrow-left" /> {label}
+    </button>
+  )
+}
+
 /** Audit feature — routes commented out in App.tsx; restore when needed. */
 export function AssetAudit() {
   const { id } = useParams()
@@ -111,7 +129,7 @@ export function AuditDue() {
 
   return (
     <AppLayout title="Assets Due for Audit" subtitle={loading ? 'Loading…' : `${rows.length} assets`}>
-      <Box title="Audit Due">
+      <Box title="Audit Due" tools={<PageBack fallback="/hardware" />}>
         <table className="table table-striped table-hover">
           <thead><tr><th>Asset Tag</th><th>Name</th><th>Location</th><th>Next Audit</th><th>Actions</th></tr></thead>
           <tbody>
@@ -155,7 +173,16 @@ export function EolDue() {
 
   return (
     <AppLayout title="Assets Approaching EOL" subtitle={loading ? 'Loading…' : `${rows.length} assets`}>
-      <Box title="EOL & Warranty Due (30 days)">
+      <Box
+        title="EOL & Warranty Due (30 days)"
+        tools={(
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <PageBack fallback="/" />
+            <Link to="/hardware" className="btn btn-default btn-sm">Assets</Link>
+          </div>
+        )}
+      >
+        <div className="table-responsive">
         <table className="table table-striped table-hover">
           <thead>
             <tr>
@@ -184,6 +211,7 @@ export function EolDue() {
             ))}
           </tbody>
         </table>
+        </div>
       </Box>
     </AppLayout>
   )
@@ -202,7 +230,7 @@ export function CheckinDue() {
 
   return (
     <AppLayout title="Assets Due for Unassign" subtitle={loading ? 'Loading…' : `${rows.length} assets`}>
-      <Box title="Due for Unassign">
+      <Box title="Due for Unassign" tools={<PageBack fallback="/hardware" />}>
         <table className="table table-striped table-hover">
           <thead><tr><th>Asset Tag</th><th>Assigned To</th><th>Expected Return</th><th>Actions</th></tr></thead>
           <tbody>
@@ -395,7 +423,7 @@ export function BulkAudit() {
 export function RequestedAssets() {
   return (
     <AppLayout title="Requested Assets">
-      <Box title="Pending Requests">
+      <Box title="Pending Requests" tools={<PageBack fallback="/hardware" />}>
         <p className="text-muted">No pending asset requests.</p>
       </Box>
     </AppLayout>
