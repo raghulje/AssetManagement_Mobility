@@ -2,7 +2,7 @@
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
-USE `ITAssetManagement_2026`;
+USE `Mobility_AssetManagement_2026`;
 
 SET @col_exists := (
   SELECT COUNT(*) FROM information_schema.COLUMNS

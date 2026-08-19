@@ -2,7 +2,7 @@
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
-USE `ITAssetManagement_2026`;
+USE `Mobility_AssetManagement_2026`;
 
 CREATE TABLE IF NOT EXISTS `uploads` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,

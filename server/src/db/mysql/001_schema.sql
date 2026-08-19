@@ -1,6 +1,6 @@
 -- =============================================================================
 -- IT Asset Management 2026 — MySQL Schema (International / Enterprise)
--- Database: ITAssetManagement_2026
+-- Database: Mobility_AssetManagement_2026
 -- Charset: utf8mb4 (full Unicode / emoji / CJK)
 -- Engine: InnoDB (transactions, FKs, row-level locking)
 -- =============================================================================
@@ -9,11 +9,11 @@ SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 SET sql_mode = 'STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION';
 
-CREATE DATABASE IF NOT EXISTS `ITAssetManagement_2026`
+CREATE DATABASE IF NOT EXISTS `Mobility_AssetManagement_2026`
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
-USE `ITAssetManagement_2026`;
+USE `Mobility_AssetManagement_2026`;
 
 -- -----------------------------------------------------------------------------
 -- Schema versioning

@@ -1,14 +1,13 @@
 import { Link } from 'react-router-dom'
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import {
-  ArrowRight, BarChart3, Boxes, CheckCircle2,
-  // ClipboardCheck, // Audit feature — restore when needed
+  ArrowRight, BarChart3, CheckCircle2,
   Eye, EyeOff, LayoutDashboard, Lock, Monitor, Package,
   Rocket, ShieldCheck, Sparkles, User, Zap,
 } from 'lucide-react'
 import confetti from 'canvas-confetti'
-import AnimatedCharacters, { type MascotMood } from './animated-characters/AnimatedCharacters'
+import { EVMascot, useMascotController } from './mascot'
 import './login-suite.css'
 
 type Props = {
@@ -48,46 +47,35 @@ const fadeUp = {
 
 export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) {
   const reduce = useReducedMotion()
+  const mascot = useMascotController()
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [isTyping, setIsTyping] = useState(false)
-  const [isPasswordFocused, setIsPasswordFocused] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   const [userError, setUserError] = useState(false)
   const [passwordError, setPasswordError] = useState(false)
   const [shake, setShake] = useState(false)
-  const [mascotMood, setMascotMood] = useState<MascotMood>('idle')
 
-  const assets = useCountUp(1200, 1400)
-  const deployed = useCountUp(640, 1300)
-  // Audit feature — restore when needed
-  // const audited = useCountUp(98, 1500, '%')
-  // const due = useCountUp(120, 1200)
-  const inStock = useCountUp(380, 1200)
-  const licenses = useCountUp(210, 1350)
-
-  const mood: MascotMood = useMemo(() => {
-    if (mascotMood === 'success' || mascotMood === 'fail') return mascotMood
-    if (isPasswordFocused) return 'password'
-    if (isTyping) return 'typing'
-    return 'idle'
-  }, [mascotMood, isPasswordFocused, isTyping])
+  const assets = useCountUp(1569, 1400)
+  const deployed = useCountUp(1499, 1300)
+  const inStock = useCountUp(5, 1200)
+  const licenses = useCountUp(70, 1350)
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setUserError(false)
     setPasswordError(false)
     setErrorMsg('')
-    setMascotMood('idle')
 
     const cleanEmail = email.trim().toLowerCase()
     if (!cleanEmail || !cleanEmail.includes('@') || cleanEmail.length < 5) {
       setUserError(true)
       setErrorMsg('Please enter a valid email address.')
       setShake(true)
-      setMascotMood('fail')
+      mascot.setFocus('email')
+      mascot.setError()
       setTimeout(() => setShake(false), 500)
       return
     }
@@ -95,15 +83,17 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
       setPasswordError(true)
       setErrorMsg('Password must be at least 6 characters.')
       setShake(true)
-      setMascotMood('fail')
+      mascot.setFocus('password')
+      mascot.setError()
       setTimeout(() => setShake(false), 500)
       return
     }
 
     setIsSubmitting(true)
+    mascot.setLoading(true)
     try {
       await onSubmitProp({ email: cleanEmail, password })
-      setMascotMood('success')
+      mascot.setSuccess()
       if (!reduce) {
         confetti({
           particleCount: 70,
@@ -116,7 +106,7 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
       setPasswordError(true)
       setErrorMsg(err instanceof Error ? err.message : 'Login failed. Please try again.')
       setShake(true)
-      setMascotMood('fail')
+      mascot.setError()
       setTimeout(() => setShake(false), 520)
     } finally {
       setIsSubmitting(false)
@@ -133,29 +123,27 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
       </div>
 
       <div className="em-shell">
-        {/* LEFT — marketing */}
         <section className="em-hero">
           <motion.div custom={0} variants={fadeUp} initial="hidden" animate="show" className="em-badge">
             <Sparkles size={14} />
-            IT ASSET MANAGEMENT
+            REFEX MOBILITY
           </motion.div>
 
           <motion.h1 custom={1} variants={fadeUp} initial="hidden" animate="show" className="em-title">
-            Smarter Assets.<br />
-            <span>Stronger Business.</span>
+            Smarter Fleet.<br />
+            <span>Cleaner Mobility.</span>
           </motion.h1>
 
           <motion.p custom={2} variants={fadeUp} initial="hidden" animate="show" className="em-lead">
-            Track, manage and optimize your IT assets across the organization with complete visibility and control.
+            Track, assign, capture and maintain your Refex EV fleet with complete visibility across cities.
           </motion.p>
 
           <motion.div custom={3} variants={fadeUp} initial="hidden" animate="show" className="em-features">
             {[
-              { icon: Boxes, title: 'Track', desc: 'Tags, serials & custody', color: 'green' },
-              { icon: Package, title: 'Assign', desc: 'Employees & locations', color: 'violet' },
-              // { icon: ClipboardCheck, title: 'Audit', desc: 'Due lists & reports', color: 'blue' }, // Audit feature — restore when needed
-              { icon: Rocket, title: 'Inventory', desc: 'Hardware & licenses', color: 'blue' },
-              { icon: Rocket, title: 'Ready', desc: 'Ready-to-assign assets', color: 'teal' },
+              { icon: Zap, title: 'Track', desc: 'Plates, models & cities', color: 'green' },
+              { icon: Package, title: 'Assign', desc: 'Drivers & custodians', color: 'violet' },
+              { icon: Rocket, title: 'Capture', desc: 'Geo-stamped photos', color: 'blue' },
+              { icon: ShieldCheck, title: 'Maintain', desc: 'Repairs & parts log', color: 'teal' },
             ].map((f) => (
               <article key={f.title} className={`em-feature em-feature--${f.color}`}>
                 <div className="em-feature-icon"><f.icon size={18} strokeWidth={2.2} /></div>
@@ -167,22 +155,20 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
 
           <motion.div custom={4} variants={fadeUp} initial="hidden" animate="show" className="em-preview">
             <aside className="em-preview-side">
-              <button type="button" className="is-active" aria-label="Dashboard"><LayoutDashboard size={16} /></button>
-              <button type="button" aria-label="Hardware"><Monitor size={16} /></button>
-              <button type="button" aria-label="Inventory"><Package size={16} /></button>
+              <button type="button" className="is-active" aria-label="Fleet"><LayoutDashboard size={16} /></button>
+              <button type="button" aria-label="Vehicles"><Monitor size={16} /></button>
+              <button type="button" aria-label="Captures"><Package size={16} /></button>
               <button type="button" aria-label="Reports"><BarChart3 size={16} /></button>
-              <button type="button" aria-label="Security"><ShieldCheck size={16} /></button>
+              <button type="button" aria-label="Safety"><ShieldCheck size={16} /></button>
             </aside>
 
             <div className="em-preview-main">
               <div className="em-stats">
                 {[
-                  { label: 'Total Assets', value: assets, tone: 'teal' },
-                  { label: 'Assigned', value: deployed, tone: 'blue' },
-                  // { label: 'Audited', value: audited, tone: 'green' }, // Audit feature — restore when needed
-                  // { label: 'Due for Audit', value: due, tone: 'orange' },
-                  { label: 'In Stock', value: inStock, tone: 'green' },
-                  { label: 'Licenses', value: licenses, tone: 'orange' },
+                  { label: 'Fleet vehicles', value: assets, tone: 'teal' },
+                  { label: 'EV units', value: deployed, tone: 'blue' },
+                  { label: 'Cities', value: inStock, tone: 'green' },
+                  { label: 'CNG / Petrol', value: licenses, tone: 'orange' },
                 ].map((s) => (
                   <div key={s.label} className={`em-stat em-stat--${s.tone}`}>
                     <span>{s.label}</span>
@@ -196,25 +182,25 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
 
               <div className="em-preview-grid">
                 <div className="em-panel">
-                  <header>Asset Overview</header>
+                  <header>Fleet overview</header>
                   <div className="em-donut-wrap">
                     <div className="em-donut" aria-hidden />
                     <ul className="em-legend">
-                      <li><i className="t" /> Hardware</li>
-                      <li><i className="b" /> Licenses</li>
-                      <li><i className="o" /> Accessories</li>
-                      <li><i className="g" /> Other</li>
+                      <li><i className="t" /> Tigor</li>
+                      <li><i className="b" /> Citroën</li>
+                      <li><i className="o" /> XUV 400</li>
+                      <li><i className="g" /> Nexon</li>
                     </ul>
                   </div>
                 </div>
                 <div className="em-panel">
-                  <header>Recent Activity</header>
+                  <header>Recent activity</header>
                   <ul className="em-timeline">
-                    <li>Asset assigned to employee</li>
-                    {/* <li>Audit completed</li> */}{/* Audit feature — restore when needed */}
-                    <li>Agent inventory synced</li>
-                    <li>Accessory returned to stock</li>
-                    <li>License Pack assigned</li>
+                    <li>Vehicle assigned in Chennai</li>
+                    <li>Geo photo capture saved</li>
+                    <li>Part replacement logged</li>
+                    <li>QR label generated</li>
+                    <li>EOL reminder queued</li>
                   </ul>
                 </div>
               </div>
@@ -227,23 +213,8 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
             <li><CheckCircle2 size={15} /> Real-time Insights</li>
             <li><CheckCircle2 size={15} /> Enterprise Ready</li>
           </motion.ul>
-
-          <motion.div
-            className="em-bot"
-            aria-hidden
-            animate={reduce ? undefined : { y: [0, -6, 0] }}
-            transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
-          >
-            <div className="em-bot-body">
-              <div className="em-bot-eye" />
-              <div className="em-bot-eye" />
-              <div className="em-bot-mouth" />
-            </div>
-            <div className="em-bot-arm" />
-          </motion.div>
         </section>
 
-        {/* RIGHT — auth */}
         <section className="em-auth">
           <motion.div
             className={`em-card${shake ? ' is-shake' : ''}`}
@@ -252,22 +223,15 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
             transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1], delay: 0.12 }}
           >
             <div className="em-card-head">
+              <img className="em-card-logo" src="/refexone-logo.png" alt="RefexOne" />
               <div>
                 <h2>Welcome back!</h2>
-                <p>Sign in to your asset workspace.</p>
+                <p>Sign in to your EV asset workspace.</p>
               </div>
             </div>
 
             <div className="em-mascots">
-              <AnimatedCharacters
-                isTyping={isTyping}
-                isPasswordFocused={isPasswordFocused}
-                showPassword={showPassword}
-                passwordLength={password.length}
-                emailLength={email.length}
-                isExcited={isSubmitting || mascotMood === 'success'}
-                mood={mood}
-              />
+              <EVMascot snapshot={mascot.snapshot} containerRef={mascot.containerRef} />
             </div>
 
             <form onSubmit={onSubmit} noValidate>
@@ -281,12 +245,15 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
                     value={email}
                     onChange={(e) => {
                       setEmail(e.target.value)
+                      mascot.setTyping(true)
                       if (userError) setUserError(false)
                       if (errorMsg) setErrorMsg('')
-                      if (mascotMood === 'fail') setMascotMood('idle')
                     }}
-                    onFocus={() => setIsTyping(true)}
-                    onBlur={() => setIsTyping(false)}
+                    onFocus={() => {
+                      mascot.setFocus('email')
+                      mascot.setTyping(true)
+                    }}
+                    onBlur={() => mascot.setFocus('none')}
                     placeholder="name@refex.co.in"
                     autoComplete="email"
                   />
@@ -303,19 +270,23 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
                     value={password}
                     onChange={(e) => {
                       setPassword(e.target.value)
+                      mascot.setTyping(true)
                       if (passwordError) setPasswordError(false)
                       if (errorMsg) setErrorMsg('')
-                      if (mascotMood === 'fail') setMascotMood('idle')
                     }}
-                    onFocus={() => setIsPasswordFocused(true)}
-                    onBlur={() => setIsPasswordFocused(false)}
+                    onFocus={() => mascot.setFocus('password')}
+                    onBlur={() => mascot.setFocus('none')}
                     placeholder="Enter your password"
                     autoComplete="current-password"
                   />
                   <button
                     type="button"
                     className="em-eye-btn"
-                    onClick={() => setShowPassword((p) => !p)}
+                    onClick={() => {
+                      const next = !showPassword
+                      setShowPassword(next)
+                      mascot.setShowPassword(next)
+                    }}
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
                     {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
@@ -333,7 +304,19 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
 
               {errorMsg ? <div className="em-error" role="alert">{errorMsg}</div> : null}
 
-              <button type="submit" className="em-submit" disabled={isSubmitting}>
+              <button
+                type="submit"
+                className="em-submit"
+                disabled={isSubmitting}
+                onMouseEnter={() => {
+                  mascot.setButtonHovered(true)
+                  mascot.setFocus('button')
+                }}
+                onMouseLeave={() => {
+                  mascot.setButtonHovered(false)
+                  mascot.setFocus('none')
+                }}
+              >
                 {isSubmitting ? (
                   <span className="em-spinner" aria-hidden />
                 ) : (
@@ -350,7 +333,7 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
 
       <footer className="em-foot">
         <Zap size={12} />
-        Refex · Enterprise IT Asset Management
+        Refex Mobility · EV Asset Management
       </footer>
     </div>
   )

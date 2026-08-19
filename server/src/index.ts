@@ -3,6 +3,7 @@ import { createApp } from './app.js'
 import { seed } from './db/seed.js'
 import { startHrmsAutoSync } from './services/employeeHrmsSync.js'
 import { startEolAlertScheduler } from './services/eolAlerts.js'
+import { startVehicleEolAlertScheduler } from './services/vehicleEolAlerts.js'
 import { startLicenseAlertScheduler } from './services/licenseAlerts.js'
 
 dotenv.config()
@@ -37,5 +38,6 @@ app.listen(port, host, () => {
   console.log(`Login:  POST /api/v1/login  { "email": "…", "password": "…" }`)
   startHrmsAutoSync()
   startEolAlertScheduler()
+  startVehicleEolAlertScheduler()
   startLicenseAlertScheduler()
 })

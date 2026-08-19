@@ -130,10 +130,22 @@ export default function PublicAsset() {
           {asset.map_latitude != null && asset.map_longitude != null ? (
             <Field
               label="Map pin"
-              value={[
-                asset.map_address,
-                `Lat ${Number(asset.map_latitude).toFixed(6)}, Lng ${Number(asset.map_longitude).toFixed(6)}`,
-              ].filter(Boolean).join(' · ')}
+              value={(
+                <span>
+                  {[
+                    asset.map_address,
+                    `Lat ${Number(asset.map_latitude).toFixed(6)}, Lng ${Number(asset.map_longitude).toFixed(6)}`,
+                  ].filter(Boolean).join(' · ')}
+                  {' · '}
+                  <a
+                    href={`https://www.google.com/maps?q=${asset.map_latitude},${asset.map_longitude}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open in Google Maps
+                  </a>
+                </span>
+              )}
             />
           ) : null}
           <Field label="Supplier" value={asset.supplier} />

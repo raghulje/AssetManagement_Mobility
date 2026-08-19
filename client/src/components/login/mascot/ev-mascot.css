@@ -1,0 +1,153 @@
+/* Refex Mobility EV companion — illustrated SVG character (not a photo) */
+
+.evm-stage {
+  position: relative;
+  width: 100%;
+  min-height: 168px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  user-select: none;
+  pointer-events: none;
+}
+
+.evm-scene {
+  position: relative;
+  width: min(100%, 360px);
+  height: 168px;
+  transform-origin: 50% 90%;
+}
+
+.evm-ground {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 4px;
+  height: 14px;
+  border-radius: 999px;
+  background: radial-gradient(ellipse at center, rgba(15, 23, 42, 0.14), transparent 72%);
+}
+
+.evm-glow {
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: 2px;
+  height: 40px;
+  border-radius: 50%;
+  filter: blur(10px);
+  z-index: 0;
+  transition: opacity 0.35s ease, background 0.35s ease;
+}
+
+.evm-svg {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+.evm-car-group {
+  transition: transform 0.2s ease;
+}
+
+.evm-wheel {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.evm-wheel.is-spinning {
+  animation: evm-wheel-spin linear infinite;
+}
+
+@keyframes evm-wheel-spin {
+  to { transform: rotate(360deg); }
+}
+
+.evm-dust-p {
+  fill: rgba(148, 163, 184, 0.65);
+  animation: evm-dust-fly 0.55s ease-out forwards;
+}
+
+@keyframes evm-dust-fly {
+  0% { opacity: 0.7; transform: translate(0, 0) scale(1); }
+  100% { opacity: 0; transform: translate(-8px, -10px) scale(0.2); }
+}
+
+.evm-chip {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748B;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #E2E8F0;
+  border-radius: 999px;
+  padding: 3px 10px;
+  backdrop-filter: blur(6px);
+  white-space: nowrap;
+  z-index: 6;
+}
+
+.evm-chip--privacy { color: #C2410C; border-color: #FDBA74; }
+.evm-chip--loading { color: #0369A1; border-color: #BAE6FD; }
+.evm-chip--success { color: #047857; border-color: #A7F3D0; background: #ECFDF5; }
+.evm-chip--error { color: #B45309; border-color: #FDE68A; background: #FFFBEB; }
+.evm-chip--attentive { color: #E85A2E; }
+
+.evm-stage.is-near .evm-svg {
+  filter: drop-shadow(0 8px 16px rgba(232, 90, 46, 0.18));
+}
+
+.evm-stage.phase-success .evm-car-group {
+  animation: evm-celebrate 0.9s ease-out;
+}
+
+@keyframes evm-celebrate {
+  0% { transform: translateY(0); }
+  35% { transform: translateY(-6px); }
+  70% { transform: translate(4px, 0); }
+  100% { transform: translateY(0); }
+}
+
+.evm-stage.phase-error .evm-car-group {
+  animation: evm-concern 0.5s ease-in-out;
+}
+
+@keyframes evm-concern {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+.evm-stage.phase-loading .evm-charger {
+  animation: evm-charge-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes evm-charge-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .evm-wheel.is-spinning,
+  .evm-dust-p,
+  .evm-stage.phase-success .evm-car-group,
+  .evm-stage.phase-error .evm-car-group,
+  .evm-stage.phase-loading .evm-charger {
+    animation: none !important;
+  }
+  .evm-dust-svg { display: none; }
+}
+
+@media (max-width: 640px) {
+  .evm-stage { min-height: 140px; }
+  .evm-scene { height: 140px; width: min(100%, 300px); }
+  .evm-chip { font-size: 9px; }
+}

@@ -322,7 +322,7 @@ export default function AppLayout({ children, title, subtitle }: Props) {
 
   const searchTag = (e: FormEvent) => {
     e.preventDefault()
-    if (tag.trim()) navigate(`/hardware?q=${encodeURIComponent(tag.trim())}`)
+    if (tag.trim()) navigate(`/vehicles?q=${encodeURIComponent(tag.trim())}`)
   }
 
   return (
@@ -350,35 +350,25 @@ export default function AppLayout({ children, title, subtitle }: Props) {
             <i className="fas fa-bars" />
           </button>
           <form className="header-search" onSubmit={searchTag}>
-            <input value={tag} onChange={(e) => setTag(e.target.value)} placeholder="Search asset tag" />
+            <input value={tag} onChange={(e) => setTag(e.target.value)} placeholder="Search vehicle number" />
             <button type="submit"><i className="fas fa-search" /></button>
           </form>
           <div className="navbar-custom-menu">
             <ul className="navbar-nav">
-              {can('assets.view') ? <li><NavLink to="/hardware" title="Assets"><i className="fas fa-barcode" /></NavLink></li> : null}
-              {can('licenses.view') ? <li><NavLink to="/licenses" title="Licenses"><i className="fas fa-save" /></NavLink></li> : null}
-              {can('accessories.view') ? <li><NavLink to="/accessories" title="Accessories"><i className="fas fa-keyboard" /></NavLink></li> : null}
-              {can('consumables.view') ? <li><NavLink to="/consumables" title="Consumables"><i className="fas fa-tint" /></NavLink></li> : null}
-              {can('components.view') ? <li><NavLink to="/components" title="Components"><i className="fas fa-hdd" /></NavLink></li> : null}
-              {can('people.view') ? <li><NavLink to="/employees" title="Employees"><i className="fas fa-id-badge" /></NavLink></li> : null}
-              {can('people.view') ? <li><NavLink to="/users" title="App Users"><i className="fas fa-users" /></NavLink></li> : null}
-              {(can('assets.create') || can('licenses.create') || can('people.create')) ? (
-                <li className={`dropdown ${createOpen ? 'open' : ''}`}>
-                  <button type="button" className="nav-icon-btn" onClick={() => setCreateOpen((o) => !o)}>
-                    <i className="fas fa-plus" />
-                  </button>
-                  <div className="dropdown-menu">
-                    {can('assets.create') ? <NavLink to="/hardware/create" onClick={() => setCreateOpen(false)}>Asset</NavLink> : null}
-                    {can('licenses.create') ? <NavLink to="/licenses/create" onClick={() => setCreateOpen(false)}>License</NavLink> : null}
-                    {can('accessories.create') ? <NavLink to="/accessories/create" onClick={() => setCreateOpen(false)}>Accessory</NavLink> : null}
-                    {can('consumables.create') ? <NavLink to="/consumables/create" onClick={() => setCreateOpen(false)}>Consumable</NavLink> : null}
-                    {can('components.create') ? <NavLink to="/components/create" onClick={() => setCreateOpen(false)}>Component</NavLink> : null}
-                    {can('people.create') ? <NavLink to="/employees/create" onClick={() => setCreateOpen(false)}>Employee</NavLink> : null}
-                    {can('people.create') ? <NavLink to="/users/create" onClick={() => setCreateOpen(false)}>App User</NavLink> : null}
-                  </div>
-                </li>
-              ) : null}
-              {isAdmin ? <li><NavLink to="/admin" title="Admin"><i className="fas fa-cog" /></NavLink></li> : null}
+              <li><NavLink to="/vehicles" title="Vehicles"><i className="fas fa-car" /></NavLink></li>
+              <li><NavLink to="/vehicles/eol/due" title="EOL due"><i className="fas fa-hourglass-half" /></NavLink></li>
+              <li><NavLink to="/users" title="Users"><i className="fas fa-users" /></NavLink></li>
+              <li className={`dropdown ${createOpen ? 'open' : ''}`}>
+                <button type="button" className="nav-icon-btn" onClick={() => setCreateOpen((o) => !o)}>
+                  <i className="fas fa-plus" />
+                </button>
+                <div className="dropdown-menu">
+                  <NavLink to="/vehicles/create" onClick={() => setCreateOpen(false)}>Vehicle</NavLink>
+                  <NavLink to="/masters" onClick={() => setCreateOpen(false)}>City / Model</NavLink>
+                  <NavLink to="/users/create" onClick={() => setCreateOpen(false)}>User</NavLink>
+                </div>
+              </li>
+              {isAdmin ? <li><NavLink to="/settings" title="Settings"><i className="fas fa-cog" /></NavLink></li> : null}
               <li className={`dropdown ${userOpen ? 'open' : ''}`}>
                 <button type="button" className="nav-icon-btn nav-user-btn" onClick={() => setUserOpen((o) => !o)}>
                   <i className="fas fa-user" aria-hidden="true" />
@@ -398,59 +388,21 @@ export default function AppLayout({ children, title, subtitle }: Props) {
 
       <aside className="main-sidebar" aria-hidden={isNarrow && collapsed}>
         <ul className="sidebar-menu">
-          <li className={path === '/' ? 'active' : ''}>
-            <NavLink to="/" onClick={closeDrawer}><i className="fas fa-tachometer-alt fa-fw" /><span>Dashboard</span></NavLink>
+          <li className={path === '/' || (path.startsWith('/vehicles') && !path.includes('/eol')) ? 'active' : ''}>
+            <NavLink to="/vehicles" onClick={closeDrawer}><i className="fas fa-car fa-fw" /><span>Vehicles</span></NavLink>
           </li>
-
-          {can('assets.view') ? (
-            <li className={section === 'assets' ? 'active' : ''}>
-              <NavLink to="/hardware" onClick={closeDrawer}><i className="fas fa-barcode fa-fw" /><span>Assets</span></NavLink>
-            </li>
-          ) : null}
-          {can('licenses.view') ? (
-            <li className={path.startsWith('/licenses') ? 'active' : ''}>
-              <NavLink to="/licenses" onClick={closeDrawer}><i className="fas fa-save fa-fw" /><span>Licenses</span></NavLink>
-            </li>
-          ) : null}
-          {can('accessories.view') ? (
-            <li className={path.startsWith('/accessories') ? 'active' : ''}>
-              <NavLink to="/accessories" onClick={closeDrawer}><i className="fas fa-keyboard fa-fw" /><span>Accessories</span></NavLink>
-            </li>
-          ) : null}
-          {can('consumables.view') ? (
-            <li className={path.startsWith('/consumables') ? 'active' : ''}>
-              <NavLink to="/consumables" onClick={closeDrawer}><i className="fas fa-tint fa-fw" /><span>Consumables</span></NavLink>
-            </li>
-          ) : null}
-          {can('components.view') ? (
-            <li className={path.startsWith('/components') ? 'active' : ''}>
-              <NavLink to="/components" onClick={closeDrawer}><i className="fas fa-hdd fa-fw" /><span>Components</span></NavLink>
-            </li>
-          ) : null}
-
-          {can('people.view') ? (
-            <li className={section === 'people' ? 'active' : ''}>
-              <NavLink to="/employees" onClick={closeDrawer}><i className="fas fa-users fa-fw" /><span>People</span></NavLink>
-            </li>
-          ) : null}
-          {can('settings.view') ? (
-            <li className={section === 'masters' ? 'active' : ''}>
-              <NavLink to="/companies" onClick={closeDrawer}><i className="fas fa-database fa-fw" /><span>Masters</span></NavLink>
-            </li>
-          ) : null}
-          {can('settings.edit') ? (
-            <li className={path.startsWith('/import') ? 'active' : ''}>
-              <NavLink to="/import" onClick={closeDrawer}><i className="fas fa-file-import fa-fw" /><span>Import</span></NavLink>
-            </li>
-          ) : null}
+          <li className={path.startsWith('/vehicles/eol') ? 'active' : ''}>
+            <NavLink to="/vehicles/eol/due" onClick={closeDrawer}><i className="fas fa-hourglass-half fa-fw" /><span>EOL / Warranty</span></NavLink>
+          </li>
+          <li className={path.startsWith('/masters') ? 'active' : ''}>
+            <NavLink to="/masters" onClick={closeDrawer}><i className="fas fa-database fa-fw" /><span>Masters</span></NavLink>
+          </li>
+          <li className={path.startsWith('/users') ? 'active' : ''}>
+            <NavLink to="/users" onClick={closeDrawer}><i className="fas fa-users fa-fw" /><span>Users</span></NavLink>
+          </li>
           {isAdmin ? (
-            <li className={section === 'settings' ? 'active' : ''}>
+            <li className={path.startsWith('/settings') ? 'active' : ''}>
               <NavLink to="/settings" onClick={closeDrawer}><i className="fas fa-cog fa-fw" /><span>Settings</span></NavLink>
-            </li>
-          ) : null}
-          {isAdmin ? (
-            <li className={section === 'reports' ? 'active' : ''}>
-              <NavLink to="/reports" onClick={closeDrawer}><i className="fas fa-chart-bar fa-fw" /><span>Reports</span></NavLink>
             </li>
           ) : null}
         </ul>

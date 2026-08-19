@@ -1,2 +1,2 @@
-/** App display name — not demo inventory */
-export const siteName = 'Refex'
+/** App display name — Refex Mobility fleet */
+export const siteName = 'Refex Mobility'

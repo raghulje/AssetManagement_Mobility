@@ -1,14 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 
-type Kind = 'laptop' | 'phone' | 'mouse'
-
-const CREW = [
-  { id: 'laptop', label: 'Laptop', kind: 'laptop' as Kind, width: 112, height: 86 },
-  { id: 'phone', label: 'Phone', kind: 'phone' as Kind, width: 46, height: 92 },
-  { id: 'mouse', label: 'Mouse', kind: 'mouse' as Kind, width: 68, height: 78 },
-]
-
 type EyeProps = {
   mouseX: number
   mouseY: number
@@ -20,12 +12,13 @@ type EyeProps = {
   forceX?: number
   forceY?: number
   sad?: boolean
+  color?: string
 }
 
-/** Large kawaii eye — white circle + black pupil that tracks cursor */
+/** Large green kawaii eye — white sclera + green pupil that tracks cursor */
 function Eye({
-  mouseX, mouseY, size = 17, pupil = 6.5, max = 3.4,
-  blink, closed, forceX, forceY, sad,
+  mouseX, mouseY, size = 22, pupil = 9, max = 4.2,
+  blink, closed, forceX, forceY, sad, color = '#16A34A',
 }: EyeProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ x: 0, y: 0 })
@@ -47,16 +40,24 @@ function Eye({
   }, [mouseX, mouseY, forceX, forceY, max, closed, sad, blink])
 
   if (closed || blink) {
-    return <div className="km-eye km-eye--closed" style={{ width: size }} />
+    return <div className="km-eye km-eye--closed km-eye--green" style={{ width: size }} />
   }
 
   return (
     <div
       ref={ref}
-      className={`km-eye${sad ? ' km-eye--sad' : ''}`}
+      className={`km-eye km-eye--green${sad ? ' km-eye--sad' : ''}`}
       style={{ width: size, height: size }}
     >
-      <i style={{ width: pupil, height: pupil, transform: `translate(${pos.x}px, ${pos.y}px)` }} />
+      <i
+        style={{
+          width: pupil,
+          height: pupil,
+          background: color,
+          boxShadow: `inset -2px -2px 0 rgba(0,0,0,0.12), 0 0 0 2px ${color}33`,
+          transform: `translate(${pos.x}px, ${pos.y}px)`,
+        }}
+      />
     </div>
   )
 }
@@ -65,108 +66,147 @@ function Mouth({ mood }: { mood: 'o' | 'smile' | 'flat' | 'sad' | 'happy' }) {
   return <div className={`km-mouth km-mouth--${mood}`} />
 }
 
-/**
- * Flat chibi device silhouettes matching the login mock exactly:
- * blue laptop, teal phone, charcoal mouse — no arms/legs.
- */
-function DeviceArt({ kind }: { kind: Kind }) {
-  if (kind === 'laptop') {
-    return (
-      <svg className="km-art" viewBox="0 0 148 112" aria-hidden>
-        <defs>
-          <linearGradient id="kmLpBody" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#60A5FA" />
-            <stop offset="100%" stopColor="#3B82F6" />
-          </linearGradient>
-          <linearGradient id="kmLpScreen" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#E0F2FE" />
-            <stop offset="100%" stopColor="#93C5FD" />
-          </linearGradient>
-          <filter id="kmSoft" x="-20%" y="-20%" width="140%" height="140%">
-            <feDropShadow dx="0" dy="5" stdDeviation="4" floodColor="#1e3a8a" floodOpacity="0.16" />
-          </filter>
-        </defs>
-        <g filter="url(#kmSoft)">
-          {/* Lid / bezel */}
-          <rect x="16" y="6" width="116" height="78" rx="16" fill="url(#kmLpBody)" />
-          {/* Soft face screen */}
-          <rect x="26" y="16" width="96" height="56" rx="10" fill="url(#kmLpScreen)" />
-          {/* Base */}
-          <path
-            d="M6 88h136c4 0 6 2.5 6 6v6H0v-6c0-3.5 2-6 6-6z"
-            fill="#2563EB"
-          />
-          <rect x="62" y="92" width="24" height="3" rx="1.5" fill="rgba(255,255,255,0.4)" />
-        </g>
-      </svg>
-    )
-  }
-
-  if (kind === 'phone') {
-    return (
-      <svg className="km-art" viewBox="0 0 70 130" aria-hidden>
-        <defs>
-          <linearGradient id="kmPhBody" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#2DD4BF" />
-            <stop offset="100%" stopColor="#14B8A6" />
-          </linearGradient>
-          <linearGradient id="kmPhFace" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#99F6E4" />
-            <stop offset="100%" stopColor="#5EEAD4" />
-          </linearGradient>
-          <filter id="kmSoftPh" x="-25%" y="-10%" width="150%" height="130%">
-            <feDropShadow dx="0" dy="5" stdDeviation="4" floodColor="#115e59" floodOpacity="0.18" />
-          </filter>
-        </defs>
-        <g filter="url(#kmSoftPh)">
-          <rect x="6" y="2" width="58" height="126" rx="18" fill="url(#kmPhBody)" />
-          <rect x="6" y="2" width="58" height="126" rx="18" fill="none" stroke="#0F766E" strokeWidth="2.5" opacity="0.35" />
-          {/* Face panel — soft mint like the mock */}
-          <rect x="12" y="20" width="46" height="92" rx="12" fill="url(#kmPhFace)" />
-          {/* Speaker pill */}
-          <rect x="26" y="10" width="18" height="5" rx="2.5" fill="rgba(15,23,42,0.28)" />
-          {/* Home indicator */}
-          <rect x="28" y="116" width="14" height="3.5" rx="1.75" fill="rgba(255,255,255,0.45)" />
-        </g>
-      </svg>
-    )
-  }
-
-  /* Charcoal mouse — upright pebble + antenna cable */
+function SmokePuff({ delay, side }: { delay: number; side: 'front' | 'rear' }) {
   return (
-    <svg className="km-art" viewBox="0 0 108 118" aria-hidden>
-      <defs>
-        <linearGradient id="kmMsBody" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#64748B" />
-          <stop offset="50%" stopColor="#475569" />
-          <stop offset="100%" stopColor="#334155" />
-        </linearGradient>
-        <filter id="kmSoftMs" x="-25%" y="-15%" width="150%" height="140%">
-          <feDropShadow dx="0" dy="5" stdDeviation="4" floodColor="#0f172a" floodOpacity="0.2" />
-        </filter>
-      </defs>
-      {/* Antenna cable curving up-right */}
-      <g className="km-mouse-cable">
-        <path
-          d="M54 22 C52 6, 64 -4, 82 10"
-          fill="none"
-          stroke="#CBD5E1"
-          strokeWidth="3.2"
-          strokeLinecap="round"
-        />
-        <circle cx="84" cy="11" r="3.2" fill="#E2E8F0" />
-      </g>
-      <g filter="url(#kmSoftMs)">
-        <ellipse cx="52" cy="68" rx="34" ry="40" fill="url(#kmMsBody)" />
-        {/* Soft highlight */}
-        <ellipse cx="52" cy="48" rx="18" ry="14" fill="rgba(255,255,255,0.1)" />
-        {/* Center seam */}
-        <path d="M52 32 v42" stroke="rgba(15,23,42,0.22)" strokeWidth="1.5" />
-        {/* Scroll wheel */}
-        <rect x="47" y="36" width="10" height="16" rx="5" fill="rgba(15,23,42,0.4)" />
-        <rect x="49" y="39" width="6" height="8" rx="3" fill="rgba(148,163,184,0.55)" />
-      </g>
-    </svg>
+    <span
+      className={`km-smoke km-smoke--${side}`}
+      style={{ animationDelay: `${delay}ms` }}
+      aria-hidden
+    />
+  )
+}
+
+/** White Refex Mobility hatchback EV — charger left, battery buddy right */
+function EvHeroScene({
+  spinFast,
+  smoking,
+  covering,
+}: {
+  spinFast: boolean
+  smoking: boolean
+  covering: boolean
+}) {
+  return (
+    <div className={`km-hero${spinFast ? ' is-spin-fast' : ''}${smoking ? ' is-smoking' : ''}${covering ? ' is-covering' : ''}`}>
+      {/* Eco glow + city silhouette */}
+      <div className="km-hero-glow" aria-hidden>
+        <svg className="km-skyline" viewBox="0 0 280 80" preserveAspectRatio="xMidYMax meet">
+          <path
+            d="M0 78 L18 78 L18 52 L28 52 L28 38 L40 38 L40 58 L52 58 L52 30 L68 18 L84 30 L84 50 L100 50 L100 42 L112 42 L112 60 L128 60 L128 36 L140 24 L152 36 L152 55 L170 55 L170 40 L186 40 L186 62 L204 62 L204 28 L220 28 L220 48 L238 48 L238 35 L252 35 L252 58 L280 58 L280 78 Z"
+            fill="rgba(15,118,110,0.14)"
+          />
+          <g fill="rgba(15,118,110,0.22)">
+            <rect x="48" y="8" width="3" height="14" rx="1" />
+            <path d="M49.5 8 L42 18 L57 18 Z" />
+            <rect x="210" y="6" width="3" height="16" rx="1" />
+            <path d="M211.5 6 L204 17 L219 17 Z" />
+          </g>
+        </svg>
+      </div>
+
+      {/* Charger */}
+      <div className="km-charger" aria-hidden>
+        <svg viewBox="0 0 56 120" className="km-charger-art">
+          <rect x="14" y="8" width="28" height="88" rx="8" fill="#0F766E" />
+          <rect x="18" y="14" width="20" height="28" rx="4" fill="#ECFDF5" />
+          <rect x="22" y="20" width="12" height="3" rx="1.5" fill="#14B8A6" />
+          <rect x="22" y="27" width="8" height="3" rx="1.5" fill="#5EEAD4" />
+          <circle cx="28" cy="52" r="7" fill="#34D399" />
+          <path d="M26 48 L31 52 L27 52 L30 56 L25 52 L29 52 Z" fill="#fff" />
+          <path d="M28 72 C40 78, 46 90, 44 104" fill="none" stroke="#94A3B8" strokeWidth="3" strokeLinecap="round" />
+          <rect x="40" y="102" width="10" height="6" rx="2" fill="#64748B" />
+          <rect x="10" y="96" width="36" height="10" rx="3" fill="#134E4A" />
+        </svg>
+      </div>
+
+      {/* Car */}
+      <div className="km-car-wrap">
+        <svg className="km-car-art" viewBox="0 0 280 150" aria-hidden>
+          <defs>
+            <linearGradient id="kmBody" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#FFFFFF" />
+              <stop offset="100%" stopColor="#E2E8F0" />
+            </linearGradient>
+            <linearGradient id="kmGlass" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#BAE6FD" />
+              <stop offset="100%" stopColor="#7DD3FC" />
+            </linearGradient>
+            <filter id="kmCarSoft" x="-15%" y="-15%" width="130%" height="140%">
+              <feDropShadow dx="0" dy="6" stdDeviation="5" floodColor="#0f172a" floodOpacity="0.16" />
+            </filter>
+          </defs>
+
+          {/* Ground shadow */}
+          <ellipse cx="140" cy="138" rx="96" ry="8" fill="rgba(15,23,42,0.12)" />
+
+          <g filter="url(#kmCarSoft)">
+            {/* Body */}
+            <path
+              d="M34 98 C42 72, 70 52, 118 46 C160 42, 198 48, 228 68 C242 78, 250 90, 254 102 L258 112 C258 120, 250 126, 242 126 L46 126 C36 126, 30 120, 30 112 Z"
+              fill="url(#kmBody)"
+              stroke="#CBD5E1"
+              strokeWidth="1.5"
+            />
+            {/* Roof / windshield glass area (face sits here) */}
+            <path
+              d="M78 74 C100 52, 150 48, 188 58 C200 62, 208 70, 214 80 L92 86 C86 84, 80 80, 78 74 Z"
+              fill="url(#kmGlass)"
+              opacity="0.95"
+            />
+            {/* Side window */}
+            <path d="M150 78 L198 74 L208 90 L156 92 Z" fill="#E0F2FE" opacity="0.85" />
+            {/* Bumper smile area */}
+            <path d="M48 112 C70 118, 110 120, 140 118" fill="none" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" opacity="0.5" />
+            {/* Door line + branding */}
+            <path d="M148 86 L148 118" stroke="#CBD5E1" strokeWidth="1.5" />
+            <text x="108" y="108" fontSize="9" fontWeight="700" fill="#0F766E" letterSpacing="0.5">refex</text>
+            <text x="138" y="108" fontSize="7" fontWeight="700" fill="#14B8A6" letterSpacing="1">MOBILITY</text>
+            {/* Headlight */}
+            <ellipse cx="52" cy="100" rx="8" ry="5" fill="#FEF08A" stroke="#F59E0B" strokeWidth="1" />
+            {/* EV badge */}
+            <rect x="218" y="96" width="22" height="10" rx="3" fill="#ECFDF5" stroke="#14B8A6" strokeWidth="1" />
+            <text x="222" y="104" fontSize="7" fontWeight="800" fill="#0F766E">EV</text>
+          </g>
+
+          {/* Wheels — spin via CSS on .km-wheel */}
+          <g className="km-wheel km-wheel--rear" style={{ transformOrigin: '86px 126px' }}>
+            <circle cx="86" cy="126" r="18" fill="#0F172A" />
+            <circle cx="86" cy="126" r="11" fill="#334155" />
+            <circle cx="86" cy="126" r="4" fill="#94A3B8" />
+            <path d="M86 115 L86 137 M75 126 L97 126" stroke="#64748B" strokeWidth="2" />
+          </g>
+          <g className="km-wheel km-wheel--front" style={{ transformOrigin: '214px 126px' }}>
+            <circle cx="214" cy="126" r="18" fill="#0F172A" />
+            <circle cx="214" cy="126" r="11" fill="#334155" />
+            <circle cx="214" cy="126" r="4" fill="#94A3B8" />
+            <path d="M214 115 L214 137 M203 126 L225 126" stroke="#64748B" strokeWidth="2" />
+          </g>
+        </svg>
+
+        {/* Tire friction smog */}
+        <div className="km-smoke-layer" aria-hidden>
+          <SmokePuff delay={0} side="rear" />
+          <SmokePuff delay={180} side="rear" />
+          <SmokePuff delay={360} side="rear" />
+          <SmokePuff delay={90} side="front" />
+          <SmokePuff delay={270} side="front" />
+          <SmokePuff delay={450} side="front" />
+        </div>
+      </div>
+
+      {/* Battery buddy */}
+      <div className="km-battery" aria-hidden>
+        <svg viewBox="0 0 64 90" className="km-battery-art">
+          <rect x="14" y="18" width="36" height="56" rx="10" fill="#22C55E" />
+          <rect x="20" y="10" width="24" height="10" rx="3" fill="#16A34A" />
+          <circle cx="26" cy="38" r="3.5" fill="#052e16" />
+          <circle cx="38" cy="38" r="3.5" fill="#052e16" />
+          <path d="M26 50 Q32 56 38 50" fill="none" stroke="#052e16" strokeWidth="2.2" strokeLinecap="round" />
+          <path d="M50 48 C58 52, 60 62, 56 70" fill="none" stroke="#94A3B8" strokeWidth="3" strokeLinecap="round" />
+          <rect x="52" y="68" width="10" height="6" rx="2" fill="#64748B" />
+        </svg>
+      </div>
+    </div>
   )
 }
 
@@ -183,8 +223,8 @@ type Props = {
 }
 
 /**
- * Kawaii device mascots matching the enterprise login mock:
- * blue laptop, teal phone, charcoal mouse — faces on devices, soft glow, cursor-tracking eyes.
+ * Interactive Refex Mobility EV mascot:
+ * cursor-tracking eyes, eyes close on password, spinning wheels + tire smog.
  */
 export default function AnimatedCharacters({
   isTyping = false,
@@ -195,17 +235,17 @@ export default function AnimatedCharacters({
   isExcited = false,
   mood = 'idle',
 }: Props) {
-  void passwordLength
   const reduce = useReducedMotion()
   const [mouseX, setMouseX] = useState(0)
   const [mouseY, setMouseY] = useState(0)
-  const [blinkMask, setBlinkMask] = useState(() => CREW.map(() => false))
-  const [bouncePhase, setBouncePhase] = useState(0)
+  const [blink, setBlink] = useState(false)
 
   const covering = (isPasswordFocused && !showPassword) || mood === 'password'
   const watching = isTyping || emailLength > 0 || mood === 'typing'
   const sad = mood === 'fail'
   const happy = mood === 'success' || isExcited
+  const spinFast = isTyping || isExcited || passwordLength > 0 || watching
+  const smoking = !reduce && (spinFast || isExcited)
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -217,115 +257,82 @@ export default function AnimatedCharacters({
   }, [])
 
   useEffect(() => {
-    if (reduce) return
-    const id = setInterval(() => setBouncePhase((p) => (p + 1) % 6), 700)
-    return () => clearInterval(id)
-  }, [reduce])
+    if (reduce || covering) return
+    let timeout: ReturnType<typeof setTimeout>
+    const run = () => {
+      timeout = setTimeout(() => {
+        setBlink(true)
+        setTimeout(() => {
+          setBlink(false)
+          run()
+        }, 130)
+      }, Math.random() * 2600 + 1600)
+    }
+    run()
+    return () => clearTimeout(timeout)
+  }, [reduce, covering])
 
-  useEffect(() => {
-    const clears = CREW.map((_, i) => {
-      let timeout: ReturnType<typeof setTimeout>
-      const run = () => {
-        timeout = setTimeout(() => {
-          setBlinkMask((prev) => {
-            const next = [...prev]
-            next[i] = true
-            return next
-          })
-          setTimeout(() => {
-            setBlinkMask((prev) => {
-              const next = [...prev]
-              next[i] = false
-              return next
-            })
-            run()
-          }, 140)
-        }, Math.random() * 2800 + 1800 + i * 400)
-      }
-      run()
-      return () => clearTimeout(timeout)
-    })
-    return () => clears.forEach((c) => c())
-  }, [])
+  const mouth: 'o' | 'smile' | 'flat' | 'sad' | 'happy' = sad
+    ? 'sad'
+    : happy
+      ? 'happy'
+      : covering
+        ? 'flat'
+        : watching
+          ? 'o'
+          : 'smile'
 
-  const bounceY = (i: number) => {
-    if (reduce) return 0
-    const wave = [0, -5, -2, -7, -1, -4][(bouncePhase + i * 2) % 6]
-    return wave + (happy ? -6 : 0)
-  }
-
-  /** Idle mouths match the mock: laptop o · phone flat · mouse o */
-  const mouthFor = (index: number): 'o' | 'smile' | 'flat' | 'sad' | 'happy' => {
-    if (sad) return 'sad'
-    if (happy) return 'happy'
-    if (covering) return index === 1 ? 'flat' : 'o'
-    if (watching) return 'o'
-    if (index === 1) return 'flat'
-    return 'o'
-  }
+  const forceX = watching && !covering
+    ? Math.min(3.8, Math.max(-1.2, emailLength * 0.32))
+    : undefined
+  const forceY = watching && !covering ? 2.6 : undefined
 
   return (
-    <div className="km-stage">
-      <div className="km-glow" aria-hidden />
-      {CREW.map((buddy, index) => {
-        const y = bounceY(index)
-        const closedEyes = covering && index !== 1
-        const phoneSleepy = covering && index === 1
+    <div className={`km-stage km-stage--ev${sad ? ' is-sad' : ''}${happy ? ' is-happy' : ''}`}>
+      <motion.div
+        className="km-hero-motion"
+        initial={reduce ? false : { opacity: 0, y: 16, scale: 0.94 }}
+        animate={{
+          opacity: 1,
+          y: reduce ? 0 : happy ? -4 : 0,
+          scale: 1,
+        }}
+        transition={{ type: 'spring', stiffness: 240, damping: 18 }}
+      >
+        <EvHeroScene spinFast={spinFast && !covering} smoking={smoking && !covering} covering={covering} />
 
-        const forceX = watching && !covering
-          ? Math.min(3.2, Math.max(-1, emailLength * 0.28))
-          : undefined
-        const forceY = watching && !covering ? 2.4 : undefined
-
-        const eyeTop = buddy.kind === 'laptop' ? '32%' : buddy.kind === 'phone' ? '36%' : '40%'
-        const eyeSize = buddy.kind === 'phone' ? 14 : buddy.kind === 'mouse' ? 16 : 17
-        const eyeGap = buddy.kind === 'phone' ? 6 : 8
-
-        return (
-          <motion.button
-            key={buddy.id}
-            type="button"
-            className={`km-buddy km-buddy--${buddy.kind}${sad ? ' is-sad' : ''}${happy ? ' is-happy' : ''}`}
-            aria-label={buddy.label}
-            initial={reduce ? false : { opacity: 0, y: 14, scale: 0.9 }}
-            animate={{ opacity: 1, y, scale: 1 }}
-            transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.05 + index * 0.08 }}
-            style={{ zIndex: index + 1 }}
-          >
-            <div className="km-figure" style={{ width: buddy.width, height: buddy.height }}>
-              <DeviceArt kind={buddy.kind} />
-
-              <div className="km-face" style={{ top: eyeTop }}>
-                <div className="km-eyes" style={{ gap: eyeGap }}>
-                  <Eye
-                    mouseX={mouseX}
-                    mouseY={mouseY}
-                    size={eyeSize}
-                    pupil={eyeSize * 0.38}
-                    blink={blinkMask[index] && !covering}
-                    closed={closedEyes || phoneSleepy}
-                    sad={sad}
-                    forceX={forceX}
-                    forceY={forceY}
-                  />
-                  <Eye
-                    mouseX={mouseX}
-                    mouseY={mouseY}
-                    size={eyeSize}
-                    pupil={eyeSize * 0.38}
-                    blink={blinkMask[index] && !covering}
-                    closed={closedEyes || phoneSleepy}
-                    sad={sad}
-                    forceX={forceX}
-                    forceY={forceY}
-                  />
-                </div>
-                <Mouth mood={mouthFor(index)} />
-              </div>
-            </div>
-          </motion.button>
-        )
-      })}
+        <div className="km-face km-face--windshield">
+          <div className="km-eyes" style={{ gap: 14 }}>
+            <Eye
+              mouseX={mouseX}
+              mouseY={mouseY}
+              size={24}
+              pupil={10}
+              max={4.5}
+              blink={blink && !covering}
+              closed={covering}
+              sad={sad}
+              forceX={forceX}
+              forceY={forceY}
+              color="#16A34A"
+            />
+            <Eye
+              mouseX={mouseX}
+              mouseY={mouseY}
+              size={24}
+              pupil={10}
+              max={4.5}
+              blink={blink && !covering}
+              closed={covering}
+              sad={sad}
+              forceX={forceX}
+              forceY={forceY}
+              color="#16A34A"
+            />
+          </div>
+          <Mouth mood={mouth} />
+        </div>
+      </motion.div>
     </div>
   )
 }

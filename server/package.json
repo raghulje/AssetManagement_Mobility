@@ -6,6 +6,7 @@
   "scripts": {
     "migrate": "tsx src/db/migrate.ts",
     "seed": "tsx src/db/seed.ts",
+    "import:vehicles": "tsx scripts/import-vehicles.ts",
     "seed:inventory": "tsx scripts/seed-inventory-demo.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node --import tsx src/index.ts",

@@ -269,11 +269,11 @@ export default function AssetDetail() {
                       Lat {Number(a.map_latitude).toFixed(6)}, Lng {Number(a.map_longitude).toFixed(6)}
                       {' · '}
                       <a
-                        href={`https://www.openstreetmap.org/?mlat=${a.map_latitude}&mlon=${a.map_longitude}#map=17/${a.map_latitude}/${a.map_longitude}`}
+                        href={`https://www.google.com/maps?q=${a.map_latitude},${a.map_longitude}`}
                         target="_blank"
                         rel="noreferrer"
                       >
-                        Open in OSM
+                        Open in Google Maps
                       </a>
                     </span>
                   </span>

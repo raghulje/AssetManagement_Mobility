@@ -3,7 +3,7 @@
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
-USE `ITAssetManagement_2026`;
+USE `Mobility_AssetManagement_2026`;
 
 UPDATE `companies`
 SET `deleted_at` = COALESCE(`deleted_at`, NOW()), `updated_at` = NOW()

@@ -11,6 +11,8 @@ const typeMap: Record<string, string> = {
   hardware: 'asset',
   assets: 'asset',
   asset: 'asset',
+  vehicles: 'vehicle',
+  vehicle: 'vehicle',
   users: 'user',
   user: 'user',
   licenses: 'license',
@@ -45,17 +47,18 @@ router.post('/:objectType/:id/files', (req, res) => {
   const kind = (allowed.has(rawKind) ? rawKind : 'file') as
     'image' | 'file' | 'audit' | 'invoice' | 'po' | 'other' | 'signature' | 'eula' | 'received'
 
-  const subdir = (kind === 'image' || kind === 'received')
-    ? (type === 'user' ? 'public/avatars' : 'public/assets')
-    : kind === 'audit'
-      ? 'private_uploads/audits'
-      : `private_uploads/${
-        type === 'asset' ? 'assets'
-          : type === 'user' ? 'users'
-            : type === 'license' ? 'licenses'
-              : type === 'license_invoice' ? 'license_invoices'
-                : 'maintenances'
-      }`
+    const subdir = (kind === 'image' || kind === 'received')
+      ? (type === 'user' ? 'public/avatars' : type === 'vehicle' ? 'public/vehicles' : 'public/assets')
+      : kind === 'audit'
+        ? 'private_uploads/audits'
+        : `private_uploads/${
+          type === 'asset' ? 'assets'
+            : type === 'vehicle' ? 'vehicles'
+              : type === 'user' ? 'users'
+                : type === 'license' ? 'licenses'
+                  : type === 'license_invoice' ? 'license_invoices'
+                    : 'maintenances'
+        }`
 
   const upload = makeUploader(subdir, 'file')
   upload(req, res, async (err) => {
