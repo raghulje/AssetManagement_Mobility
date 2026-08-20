@@ -51,7 +51,7 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
           particleCount: 70,
           spread: 62,
           origin: { y: 0.55, x: 0.5 },
-          colors: ['#0F9D8A', '#34D399', '#3B82F6', '#F97316'],
+          colors: ['#f4553b', '#ff6b4a', '#F97316', '#3B82F6'],
         })
       }
     } catch (err) {
@@ -82,7 +82,7 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
             transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1], delay: 0.12 }}
           >
             <div className="em-card-head">
-              <img className="em-card-logo" src="/refexone-logo.png" alt="RefexOne" />
+              <img className="em-card-logo" src="/mobility_logo.png" alt="Refex Mobility" />
               <div>
                 <h2>Welcome back!</h2>
                 <p>Sign in to your EV asset workspace.</p>

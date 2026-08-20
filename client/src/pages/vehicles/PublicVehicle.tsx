@@ -38,7 +38,7 @@ export default function PublicVehicle() {
   return (
     <div className="suite-page" style={{ maxWidth: 480, margin: '40px auto', padding: 20 }}>
       <div style={{ textAlign: 'center', marginBottom: 16 }}>
-        <img src="/refexone-logo.png" alt="Refex Mobility" style={{ height: 40 }} />
+        <img src="/mobility_logo.png" alt="Refex Mobility" style={{ height: 40 }} />
         <h2 style={{ margin: '12px 0 4px' }}>Refex Mobility</h2>
         <p style={{ color: '#64748b' }}>Fleet vehicle</p>
       </div>

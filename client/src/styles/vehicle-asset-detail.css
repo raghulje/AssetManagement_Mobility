@@ -6,8 +6,8 @@
   --vad-ink: #0F172A;
   --vad-muted: #64748B;
   --vad-border: #E2E8F0;
-  --vad-teal: #0F9D8A;
-  --vad-teal-soft: rgba(15, 157, 138, 0.12);
+  --vad-teal: #f4553b;
+  --vad-teal-soft: rgba(244, 85, 59, 0.12);
   --vad-radius: 16px;
   --vad-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.04);
   --vad-shadow-hover: 0 8px 24px rgba(15, 23, 42, 0.1);
@@ -93,8 +93,8 @@
 }
 
 .vad-btn-edit {
-  background: var(--vad-teal) !important;
-  border-color: var(--vad-teal) !important;
+  background: linear-gradient(135deg, #f4553b, #ff6b4a) !important;
+  border-color: #f4553b !important;
   color: #fff !important;
 }
 
@@ -249,8 +249,8 @@
 }
 
 .vad-kpi {
-  background: linear-gradient(180deg, #f0fdfa 0%, #ffffff 100%);
-  border: 1px solid #ccfbf1;
+  background: linear-gradient(180deg, #fff5f3 0%, #ffffff 100%);
+  border: 1px solid #ffd8d0;
   border-radius: 14px;
   padding: 14px 14px 12px;
   display: flex;
@@ -279,7 +279,7 @@
   font-size: 1.4rem;
   font-weight: 800;
   letter-spacing: -0.03em;
-  color: #0F9D8A;
+  color: #f4553b;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
@@ -533,7 +533,7 @@
   transition: background 140ms ease;
 }
 
-.vad-link-btn:hover { background: #f0fdfa; }
+.vad-link-btn:hover { background: #fff5f3; }
 
 .vad-assign-actions {
   display: grid;
@@ -599,7 +599,7 @@
 
 .vad-qa button:hover,
 .vad-qa a:hover {
-  background: #f0fdfa;
+  background: #fff5f3;
   border-color: #99f6e4;
   color: var(--vad-teal);
 }

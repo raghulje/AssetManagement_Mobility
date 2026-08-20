@@ -685,7 +685,7 @@ export function SettingsGeneral() {
           Clears every asset&apos;s QR token, public URL, image path, and printed-label counters, and deletes
           stored QR PNG files. Use after changing the public domain (e.g. to{' '}
           <code>https://asset.refexone.com</code>) so Print Label mints fresh codes without{' '}
-          <code>:3053</code>.
+          <code>:3073</code>.
         </p>
         <button
           type="button"

@@ -153,8 +153,8 @@ export default function EVMascot({ snapshot, containerRef }: Props) {
               <stop offset="1" stopColor="#0F172A" />
             </linearGradient>
             <radialGradient id={`halo-${uid}`} cx="50%" cy="50%" r="50%">
-              <stop stopColor="#0F9D8A" stopOpacity="0.18" />
-              <stop offset="1" stopColor="#0F9D8A" stopOpacity="0" />
+              <stop stopColor="#f4553b" stopOpacity="0.18" />
+              <stop offset="1" stopColor="#f4553b" stopOpacity="0" />
             </radialGradient>
             <filter id={`soft-${uid}`} x="-20%" y="-20%" width="140%" height="140%">
               <feDropShadow dx="0" dy="6" stdDeviation="5" floodColor="#0F172A" floodOpacity="0.18" />
@@ -274,17 +274,17 @@ export default function EVMascot({ snapshot, containerRef }: Props) {
               ) : peek ? (
                 <>
                   <ellipse cx="8" cy="10" rx="7.5" ry="7" fill="#F8FAFC" stroke="#E2E8F0" strokeWidth="1" />
-                  <circle cx={8 + pupilX * 0.35} cy={10 + pupilY * 0.35} r="3.2" fill="#0F9D8A" />
+                  <circle cx={8 + pupilX * 0.35} cy={10 + pupilY * 0.35} r="3.2" fill="#f4553b" />
                   <circle cx={6.5 + pupilX * 0.35} cy={8.8 + pupilY * 0.35} r="1.1" fill="#FFFFFF" opacity="0.85" />
                   <path d="M24 10 Q32 6 40 10" stroke="#0F172A" strokeWidth="2.2" strokeLinecap="round" fill="none" opacity="0.7" />
                 </>
               ) : (
                 <>
                   <ellipse cx="8" cy="10" rx={phase === 'success' ? 8.2 : 7.5} ry={phase === 'error' ? 5.5 : 7} fill="#F8FAFC" stroke="#E2E8F0" strokeWidth="1" />
-                  <circle cx={8 + pupilX} cy={10 + pupilY} r="3.4" fill="#0F9D8A" />
+                  <circle cx={8 + pupilX} cy={10 + pupilY} r="3.4" fill="#f4553b" />
                   <circle cx={6.4 + pupilX} cy={8.6 + pupilY} r="1.2" fill="#FFFFFF" opacity="0.9" />
                   <ellipse cx="32" cy="10" rx={phase === 'success' ? 8.2 : 7.5} ry={phase === 'error' ? 5.5 : 7} fill="#F8FAFC" stroke="#E2E8F0" strokeWidth="1" />
-                  <circle cx={32 + pupilX} cy={10 + pupilY} r="3.4" fill="#0F9D8A" />
+                  <circle cx={32 + pupilX} cy={10 + pupilY} r="3.4" fill="#f4553b" />
                   <circle cx={30.4 + pupilX} cy={8.6 + pupilY} r="1.2" fill="#FFFFFF" opacity="0.9" />
                 </>
               )}
@@ -393,8 +393,8 @@ export default function EVMascot({ snapshot, containerRef }: Props) {
 
           {/* Tiny battery buddy */}
           <g className="evm-buddy" transform="translate(318, 128)">
-            <rect x="0" y="8" width="22" height="26" rx="5" fill="#0F9D8A" />
-            <rect x="6" y="3" width="10" height="6" rx="2" fill="#34D399" />
+            <rect x="0" y="8" width="22" height="26" rx="5" fill="#f4553b" />
+            <rect x="6" y="3" width="10" height="6" rx="2" fill="#ff6b4a" />
             <circle cx="7" cy="18" r="2.2" fill="#ECFDF5" />
             <circle cx="15" cy="18" r="2.2" fill="#ECFDF5" />
             <circle cx="7" cy="18" r="1" fill="#0F172A" />

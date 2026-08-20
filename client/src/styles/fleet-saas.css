@@ -1,8 +1,8 @@
 /* Refex Mobility — Fleet SaaS design layer (enterprise, not CRUD template) */
 
 :root {
-  --rm-teal: #0F9D8A;
-  --rm-teal-soft: rgba(15, 157, 138, 0.12);
+  --rm-teal: #f4553b;
+  --rm-teal-soft: rgba(244, 85, 59, 0.12);
   --rm-orange: #F97316;
   --rm-green: #34D399;
   --rm-ink: #0F172A;
@@ -67,9 +67,9 @@ body::before { opacity: 0.2 !important; }
 .rm-kpi {
   --kpi-accent: var(--rm-teal);
   --kpi-accent-soft: var(--rm-teal-soft);
-  --kpi-border: #ccfbf1;
-  --kpi-wash: #f0fdfa;
-  --kpi-value: #0F9D8A;
+  --kpi-border: #ffd8d0;
+  --kpi-wash: #fff5f3;
+  --kpi-value: #f4553b;
 
   position: relative;
   display: grid;
@@ -125,9 +125,9 @@ body::before { opacity: 0.2 !important; }
 }
 
 .rm-kpi.is-active {
-  border-color: rgba(15, 157, 138, 0.55);
+  border-color: rgba(244, 85, 59, 0.55);
   box-shadow: none;
-  background: linear-gradient(180deg, #e6faf6 0%, #ffffff 70%);
+  background: linear-gradient(180deg, #ffece8 0%, #ffffff 70%);
 }
 
 .rm-kpi__icon {
@@ -860,9 +860,9 @@ body::before { opacity: 0.2 !important; }
   margin: 0;
   padding: 10px 12px;
   border-radius: 12px;
-  background: #f0fdfa;
-  border: 1px solid #ccfbf1;
-  color: #0f766e;
+  background: #fff5f3;
+  border: 1px solid #ffd8d0;
+  color: #c73a28;
   font-size: 12.5px;
   font-weight: 550;
   line-height: 1.45;
@@ -1198,9 +1198,9 @@ body::before { opacity: 0.2 !important; }
 
 .btn-primary,
 .btn-theme {
-  background: var(--rm-teal) !important;
-  border-color: var(--rm-teal) !important;
-  box-shadow: 0 8px 18px -10px rgba(15, 157, 138, 0.55) !important;
+  background: linear-gradient(135deg, #f4553b, #ff6b4a) !important;
+  border-color: #f4553b !important;
+  box-shadow: 0 8px 18px -10px rgba(244, 85, 59, 0.55) !important;
   border-radius: 12px !important;
   font-weight: 700 !important;
   transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease;
@@ -1210,7 +1210,7 @@ body::before { opacity: 0.2 !important; }
 .btn-theme:hover {
   filter: brightness(1.04);
   transform: translateY(-1px);
-  box-shadow: 0 10px 22px -10px rgba(15, 157, 138, 0.65) !important;
+  box-shadow: 0 10px 22px -10px rgba(244, 85, 59, 0.65) !important;
 }
 
 .btn-default,
@@ -1245,7 +1245,7 @@ body::before { opacity: 0.2 !important; }
 }
 
 .main-sidebar .sidebar-menu > li.active > a {
-  border-color: rgba(15, 157, 138, 0.5) !important;
+  border-color: rgba(244, 85, 59, 0.5) !important;
   box-shadow: none !important;
   font-weight: 750;
 }

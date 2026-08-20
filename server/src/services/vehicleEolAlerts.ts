@@ -25,7 +25,7 @@ export type VehicleEolDueRow = {
 }
 
 function appBase() {
-  return (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'http://localhost:3053').replace(/\/$/, '')
+  return (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'http://localhost:3073').replace(/\/$/, '')
 }
 
 export async function listEolDueVehicles(search = ''): Promise<VehicleEolDueRow[]> {

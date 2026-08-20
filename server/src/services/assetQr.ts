@@ -9,8 +9,8 @@ const QR_DIR = path.join(storageRoot, 'public/assets/qr')
 
 /**
  * Browser-facing origin for QR / email links.
- * Must be the proxied HTTPS domain — never container PORT (e.g. :3053).
- * Example: https://asset.refexone.com  (not https://asset.refexone.com:3053)
+ * Must be the proxied HTTPS domain — never container PORT (e.g. :3073).
+ * Example: https://asset.refexone.com  (not https://asset.refexone.com:3073)
  * Local Vite default: http://localhost:5173 (not bare http://localhost → port 80).
  */
 export function clientBase() {
@@ -111,7 +111,7 @@ export async function ensureAssetQr(assetId: number, opts?: { refreshImage?: boo
     fs.writeFileSync(urlSidecar, pageUrl, 'utf8')
   }
 
-  // Always sync qr_url to current PUBLIC_APP_URL (fixes old …:3053/asset/… rows)
+  // Always sync qr_url to current PUBLIC_APP_URL (fixes old …:3073/asset/… rows)
   if (asset.qr_url !== pageUrl || !asset.qr_image_path) {
     await run(`
       UPDATE assets SET qr_url = ?, qr_image_path = COALESCE(qr_image_path, ?), updated_at = ?

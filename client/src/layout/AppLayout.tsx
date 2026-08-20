@@ -281,7 +281,7 @@ export default function AppLayout({ children, title, subtitle, dense, hideHeader
       ) : null}
       <header className="main-header">
         <NavLink to="/" className="logo" aria-label={siteName} onClick={closeDrawer}>
-          <img src="/refexone-logo.png" alt={siteName} />
+          <img src="/mobility_logo.png" alt={siteName} />
         </NavLink>
         <nav className="navbar">
           <button
