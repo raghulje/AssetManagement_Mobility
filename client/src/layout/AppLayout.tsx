@@ -19,7 +19,7 @@ function useIsNarrow() {
   return narrow
 }
 
-type Props = { children: ReactNode; title: string; subtitle?: string }
+type Props = { children: ReactNode; title: string; subtitle?: string; dense?: boolean; hideHeader?: boolean }
 
 type SectionTab = {
   to: string
@@ -126,8 +126,6 @@ const SECTION_TABS: Record<SectionKey, SectionTab[]> = {
     // },
   ],
   people: [
-    { to: '/employees', label: 'Employees', isActive: (p) => p.startsWith('/employees') && !p.startsWith('/employees/import') },
-    { to: '/employees/import', label: 'Sync / Import HRMS', isActive: (p) => p.startsWith('/employees/import') },
     {
       to: '/users',
       label: 'App Users',
@@ -139,62 +137,28 @@ const SECTION_TABS: Record<SectionKey, SectionTab[]> = {
     },
     { to: '/users?superadmins=true', label: 'Superadmins', isActive: (p, s) => p === '/users' && new URLSearchParams(s).get('superadmins') === 'true' },
     { to: '/users?admins=true', label: 'Admins', isActive: (p, s) => p === '/users' && new URLSearchParams(s).get('admins') === 'true' },
-    { to: '/users?status=deleted', label: 'Deleted Users', isActive: (p, s) => p === '/users' && new URLSearchParams(s).get('status') === 'deleted' },
-    { to: '/users?activated=1', label: 'Login Enabled', isActive: (p, s) => p === '/users' && new URLSearchParams(s).get('activated') === '1' },
-    { to: '/users?activated=0', label: 'Login Disabled', isActive: (p, s) => p === '/users' && new URLSearchParams(s).get('activated') === '0' },
   ],
   masters: [
-    { to: '/companies', label: 'Companies', isActive: (p) => p.startsWith('/companies') },
-    { to: '/departments', label: 'Departments', isActive: (p) => p.startsWith('/departments') },
-    { to: '/locations', label: 'Locations', isActive: (p) => p.startsWith('/locations') },
-    { to: '/suppliers', label: 'Suppliers / Vendors', isActive: (p) => p.startsWith('/suppliers') },
-    { to: '/models', label: 'Asset Models', isActive: (p) => p.startsWith('/models') },
+    { to: '/masters', label: 'Cities & Models', isActive: (p) => p.startsWith('/masters') },
   ],
   settings: [
     { to: '/settings', label: 'General', isActive: (p) => p === '/settings' },
     { to: '/settings/roles', label: 'Roles & permissions', isActive: (p) => p.startsWith('/settings/roles') },
     { to: '/settings/notifications', label: 'Notifications', isActive: (p) => p.startsWith('/settings/notifications') },
-    { to: '/categories', label: 'Categories', isActive: (p) => p.startsWith('/categories') },
-    { to: '/statuslabels', label: 'Status Labels', isActive: (p) => p.startsWith('/statuslabels') },
-    { to: '/manufacturers', label: 'Manufacturers', isActive: (p) => p.startsWith('/manufacturers') },
-    { to: '/fields', label: 'Custom Fields', isActive: (p) => p.startsWith('/fields') },
-    { to: '/depreciations', label: 'Depreciation', isActive: (p) => p.startsWith('/depreciations') },
   ],
   reports: [
-    { to: '/reports', label: 'List All', isActive: (p) => p === '/reports' },
-    { to: '/reports/activity', label: 'Activity Report', isActive: (p) => p.startsWith('/reports/activity') },
-    { to: '/reports/custom', label: 'Custom Report', isActive: (p) => p.startsWith('/reports/custom') },
-    // { to: '/reports/audit', label: 'Audit Report', isActive: (p) => p.startsWith('/reports/audit') }, // Audit feature — restore when needed
-    { to: '/reports/depreciation', label: 'Depreciation Report', isActive: (p) => p.startsWith('/reports/depreciation') },
-    { to: '/reports/licenses', label: 'License Report', isActive: (p) => p.startsWith('/reports/licenses') },
-    { to: '/reports/maintenances', label: 'Asset Maintenance Report', isActive: (p) => p.startsWith('/reports/maintenances') },
-    { to: '/reports/unaccepted', label: 'Unaccepted Assets', isActive: (p) => p.startsWith('/reports/unaccepted') },
-    { to: '/reports/accessories', label: 'Accessory Report', isActive: (p) => p.startsWith('/reports/accessories') },
+    { to: '/audit', label: 'Fleet audit', isActive: (p) => p.startsWith('/audit') },
   ],
 }
 
 function resolveSection(pathname: string, search = ''): SectionKey | null {
-  // Asset opened from an employee record should stay under People in the sidebar
-  const from = new URLSearchParams(search).get('from')
-  if (from === 'employee' && pathname.startsWith('/hardware')) return 'people'
-  if (pathname.startsWith('/hardware') || pathname.startsWith('/maintenances')) return 'assets'
-  if (pathname.startsWith('/employees') || pathname.startsWith('/users')) return 'people'
-  if (
-    pathname.startsWith('/companies')
-    || pathname.startsWith('/departments')
-    || pathname.startsWith('/locations')
-    || pathname.startsWith('/suppliers')
-    || pathname.startsWith('/models')
-  ) return 'masters'
-  if (
-    pathname.startsWith('/settings')
-    || pathname.startsWith('/categories')
-    || pathname.startsWith('/statuslabels')
-    || pathname.startsWith('/manufacturers')
-    || pathname.startsWith('/fields')
-    || pathname.startsWith('/depreciations')
-  ) return 'settings'
-  if (pathname.startsWith('/reports')) return 'reports'
+  void search
+  // Drivers is fleet-only — never mix App Users / Admin tabs here
+  if (pathname.startsWith('/drivers')) return null
+  if (pathname.startsWith('/users')) return 'people'
+  if (pathname.startsWith('/masters')) return 'masters'
+  if (pathname.startsWith('/settings')) return 'settings'
+  if (pathname.startsWith('/audit') || pathname.startsWith('/reports')) return 'reports'
   return null
 }
 
@@ -203,34 +167,14 @@ function resolveSection(pathname: string, search = ''): SectionKey | null {
  * Hide them on create, edit, and single-record view pages.
  */
 function shouldShowSectionTabs(pathname: string): boolean {
-  if (pathname.startsWith('/reports')) return true
+  if (pathname.startsWith('/audit') || pathname.startsWith('/reports')) return true
 
   const listRoutes = [
-    /^\/hardware\/?$/,
-    // /^\/hardware\/audit\/due\/?$/, // Audit feature — restore when needed
-    /^\/hardware\/eol\/due\/?$/,
-    /^\/hardware\/checkins\/due\/?$/,
-    /^\/hardware\/quickscancheckin\/?$/,
-    /^\/hardware\/bulkcheckout\/?$/,
-    // /^\/hardware\/bulkaudit\/?$/, // Audit feature — restore when needed
-    /^\/hardware\/history\/?$/,
-    /^\/maintenances\/?$/,
-    /^\/employees\/?$/,
-    /^\/employees\/import\/?$/,
     /^\/users\/?$/,
-    /^\/companies\/?$/,
-    /^\/departments\/?$/,
-    /^\/locations\/?$/,
-    /^\/suppliers\/?$/,
-    /^\/models\/?$/,
+    /^\/masters\/?$/,
     /^\/settings\/?$/,
     /^\/settings\/roles\/?$/,
     /^\/settings\/notifications\/?$/,
-    /^\/categories\/?$/,
-    /^\/statuslabels\/?$/,
-    /^\/manufacturers\/?$/,
-    /^\/fields\/?$/,
-    /^\/depreciations\/?$/,
   ]
   return listRoutes.some((re) => re.test(pathname))
 }
@@ -276,7 +220,7 @@ function SectionTabs({ section }: { section: SectionKey }) {
   )
 }
 
-export default function AppLayout({ children, title, subtitle }: Props) {
+export default function AppLayout({ children, title, subtitle, dense, hideHeader }: Props) {
   const isNarrow = useIsNarrow()
   /** Desktop: false = sidebar visible. Mobile: true = drawer closed. */
   const [collapsed, setCollapsed] = useState(() =>
@@ -350,22 +294,24 @@ export default function AppLayout({ children, title, subtitle }: Props) {
             <i className="fas fa-bars" />
           </button>
           <form className="header-search" onSubmit={searchTag}>
-            <input value={tag} onChange={(e) => setTag(e.target.value)} placeholder="Search vehicle number" />
+            <input value={tag} onChange={(e) => setTag(e.target.value)} placeholder="Search vehicles, plates, drivers…" />
             <button type="submit"><i className="fas fa-search" /></button>
           </form>
           <div className="navbar-custom-menu">
             <ul className="navbar-nav">
               <li><NavLink to="/vehicles" title="Vehicles"><i className="fas fa-car" /></NavLink></li>
-              <li><NavLink to="/vehicles/eol/due" title="EOL due"><i className="fas fa-hourglass-half" /></NavLink></li>
-              <li><NavLink to="/users" title="Users"><i className="fas fa-users" /></NavLink></li>
+              <li><NavLink to="/drivers" title="Drivers"><i className="fas fa-id-card" /></NavLink></li>
+              <li><NavLink to="/audit" title="Audit"><i className="fas fa-clipboard-list" /></NavLink></li>
+              <li><NavLink to="/users" title="App users"><i className="fas fa-user-shield" /></NavLink></li>
               <li className={`dropdown ${createOpen ? 'open' : ''}`}>
                 <button type="button" className="nav-icon-btn" onClick={() => setCreateOpen((o) => !o)}>
                   <i className="fas fa-plus" />
                 </button>
                 <div className="dropdown-menu">
                   <NavLink to="/vehicles/create" onClick={() => setCreateOpen(false)}>Vehicle</NavLink>
+                  <NavLink to="/drivers" onClick={() => setCreateOpen(false)}>Driver</NavLink>
                   <NavLink to="/masters" onClick={() => setCreateOpen(false)}>City / Model</NavLink>
-                  <NavLink to="/users/create" onClick={() => setCreateOpen(false)}>User</NavLink>
+                  <NavLink to="/users/create" onClick={() => setCreateOpen(false)}>App user</NavLink>
                 </div>
               </li>
               {isAdmin ? <li><NavLink to="/settings" title="Settings"><i className="fas fa-cog" /></NavLink></li> : null}
@@ -391,14 +337,20 @@ export default function AppLayout({ children, title, subtitle }: Props) {
           <li className={path === '/' || (path.startsWith('/vehicles') && !path.includes('/eol')) ? 'active' : ''}>
             <NavLink to="/vehicles" onClick={closeDrawer}><i className="fas fa-car fa-fw" /><span>Vehicles</span></NavLink>
           </li>
+          <li className={path.startsWith('/drivers') ? 'active' : ''}>
+            <NavLink to="/drivers" onClick={closeDrawer}><i className="fas fa-id-card fa-fw" /><span>Drivers</span></NavLink>
+          </li>
           <li className={path.startsWith('/vehicles/eol') ? 'active' : ''}>
             <NavLink to="/vehicles/eol/due" onClick={closeDrawer}><i className="fas fa-hourglass-half fa-fw" /><span>EOL / Warranty</span></NavLink>
           </li>
           <li className={path.startsWith('/masters') ? 'active' : ''}>
             <NavLink to="/masters" onClick={closeDrawer}><i className="fas fa-database fa-fw" /><span>Masters</span></NavLink>
           </li>
+          <li className={path.startsWith('/audit') ? 'active' : ''}>
+            <NavLink to="/audit" onClick={closeDrawer}><i className="fas fa-clipboard-list fa-fw" /><span>Audit</span></NavLink>
+          </li>
           <li className={path.startsWith('/users') ? 'active' : ''}>
-            <NavLink to="/users" onClick={closeDrawer}><i className="fas fa-users fa-fw" /><span>Users</span></NavLink>
+            <NavLink to="/users" onClick={closeDrawer}><i className="fas fa-user-shield fa-fw" /><span>App users</span></NavLink>
           </li>
           {isAdmin ? (
             <li className={path.startsWith('/settings') ? 'active' : ''}>
@@ -409,22 +361,24 @@ export default function AppLayout({ children, title, subtitle }: Props) {
       </aside>
 
       <div className="content-wrapper">
-        <section className="content-header" key={`h-${location.pathname}`}>
-          <h1>
-            {title}
-            {subtitle ? <small>{subtitle}</small> : null}
-          </h1>
-          <ol className="breadcrumb">
-            <li><NavLink to="/">Home</NavLink></li>
-            <li>{title}</li>
-          </ol>
-        </section>
+        {!hideHeader ? (
+          <section className={`content-header${dense ? ' content-header--dense' : ''}`} key={`h-${location.pathname}`}>
+            <h1>
+              {title}
+              {subtitle ? <small>{subtitle}</small> : null}
+            </h1>
+            <ol className="breadcrumb">
+              <li><NavLink to="/">Home</NavLink></li>
+              <li>{title}</li>
+            </ol>
+          </section>
+        ) : null}
         {showSectionTabs && section ? <SectionTabs section={section} /> : null}
         <section className="content" key={`c-${location.pathname}`}>{children}</section>
       </div>
 
       <footer className="main-footer">
-        <strong>Copyright &copy; {new Date().getFullYear()} {siteName}.</strong> IT Asset Management.
+        <strong>Copyright &copy; {new Date().getFullYear()} {siteName}.</strong> Fleet &amp; Asset Management.
       </footer>
     </div>
   )

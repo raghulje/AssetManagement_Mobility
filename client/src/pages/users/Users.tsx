@@ -5,6 +5,7 @@ import { Box, DataTable, Field, PageForm } from '../../components/ui'
 import { DetailLayout, DetailPanel } from '../../components/DetailLayout'
 import { useToast } from '../../components/Toast'
 import { MasterSelect, masterPayloadId } from '../../components/MasterSelect'
+import { AppSelect } from '../../components/formControls'
 import { groupsApi, mastersApi, usersApi, type SelectOption } from '../../api/client'
 
 type Row = Record<string, unknown>
@@ -656,17 +657,17 @@ export function UserForm() {
           </label>
         </Field>
         <Field label="Role">
-          <select
-            className="form-control"
+          <AppSelect
             value={form.group_id}
-            onChange={(e) => set('group_id', e.target.value)}
+            onChange={(v) => set('group_id', v)}
             disabled={saving}
-          >
-            <option value="">— Select role —</option>
-            {roles.map((r) => (
-              <option key={r.id} value={String(r.id)}>{r.text}</option>
-            ))}
-          </select>
+            searchable
+            placeholder="— Select role —"
+            options={[
+              { value: '', label: '— Select role —' },
+              ...roles.map((r) => ({ value: String(r.id), label: r.text })),
+            ]}
+          />
           <span className="help-block">
             Module access comes from the role. Manage the matrix under{' '}
             <Link to="/settings/roles">Settings → Roles & permissions</Link>.

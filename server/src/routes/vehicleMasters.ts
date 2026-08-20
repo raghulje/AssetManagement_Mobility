@@ -111,8 +111,8 @@ vehicleMastersRouter.get('/models', async (req, res) => {
 })
 
 vehicleMastersRouter.get('/models/selectlist', async (_req, res) => {
-  const rows = await all<{ id: number; name: string; default_fuel_type: string; default_category: string | null }>(`
-    SELECT id, name, default_fuel_type, default_category FROM vehicle_models
+  const rows = await all<{ id: number; name: string; make: string | null; default_fuel_type: string; default_category: string | null }>(`
+    SELECT id, name, make, default_fuel_type, default_category FROM vehicle_models
     WHERE deleted_at IS NULL AND is_active = 1
     ORDER BY name
   `)
@@ -120,6 +120,7 @@ vehicleMastersRouter.get('/models/selectlist', async (_req, res) => {
     id: r.id,
     text: r.name,
     name: r.name,
+    make: r.make,
     default_fuel_type: r.default_fuel_type,
     default_category: r.default_category,
   })))

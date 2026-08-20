@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import AppLayout from '../../layout/AppLayout'
-import { DateField, Field, FileInput, PageForm } from '../../components/ui'
+import { AppSelect, DateField, Field, FileInput, PageForm } from '../../components/ui'
 import { MasterSelect, masterPayloadId } from '../../components/MasterSelect'
 import { CompanyEntityFields } from '../../components/CompanyEntityFields'
 import AssetAttachments, {
@@ -657,17 +657,17 @@ export default function AssetForm() {
           />
 
           <Field label="Status" required>
-            <select
-              className="form-control"
+            <AppSelect
               value={form.status_id}
-              onChange={(e) => set('status_id', e.target.value)}
+              onChange={(v) => set('status_id', v)}
               required
-            >
-              <option value="">Select status…</option>
-              {statuses.map((o) => (
-                <option key={o.id} value={o.id}>{o.text}</option>
-              ))}
-            </select>
+              searchable={statuses.length > 8}
+              placeholder="Select status…"
+              options={[
+                { value: '', label: 'Select status…' },
+                ...statuses.map((o) => ({ value: String(o.id), label: o.text })),
+              ]}
+            />
           </Field>
 
           {!isEdit && (
@@ -679,16 +679,16 @@ export default function AssetForm() {
                 value={empSearch}
                 onChange={(e) => setEmpSearch(e.target.value)}
               />
-              <select
-                className="form-control"
+              <AppSelect
                 value={form.assign_employee_id}
-                onChange={(e) => set('assign_employee_id', e.target.value)}
-              >
-                <option value="">— Do not assign yet —</option>
-                {employees.map((o) => (
-                  <option key={o.id} value={o.id}>{o.text}</option>
-                ))}
-              </select>
+                onChange={(v) => set('assign_employee_id', v)}
+                searchable={employees.length > 8}
+                placeholder="— Do not assign yet —"
+                options={[
+                  { value: '', label: '— Do not assign yet —' },
+                  ...employees.map((o) => ({ value: String(o.id), label: o.text })),
+                ]}
+              />
               <p className="help-block">Assigns this asset to the HRMS employee after create</p>
             </Field>
           )}

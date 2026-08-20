@@ -16,6 +16,8 @@ import PublicVehicle from './pages/vehicles/PublicVehicle'
 import VehicleEolDue from './pages/vehicles/VehicleEolDue'
 import VehicleMastersPage from './pages/vehicles/VehicleMastersPage'
 import { UsersList, UserDetail, UserForm } from './pages/users/Users'
+import { DriversPage, DriverDetailPage } from './pages/drivers/Drivers'
+import AuditPage from './pages/AuditPage'
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
@@ -58,6 +60,9 @@ export default function App() {
                   <Route path="/vehicles/:id/edit" element={<VehicleForm />} />
                   <Route path="/vehicles/:id" element={<VehicleDetail />} />
                   <Route path="/masters" element={<VehicleMastersPage />} />
+                  <Route path="/drivers" element={<DriversPage />} />
+                  <Route path="/drivers/:id" element={<DriverDetailPage />} />
+                  <Route path="/audit" element={<AuditPage />} />
                   <Route path="/users" element={<UsersList />} />
                   <Route path="/users/create" element={<UserForm />} />
                   <Route path="/users/:id" element={<UserDetail />} />

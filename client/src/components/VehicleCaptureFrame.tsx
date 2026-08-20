@@ -52,7 +52,7 @@ export function VehicleCaptureFrame({
       <div className="vc-frame__corner vc-frame__corner--br" aria-hidden />
 
       <header className="vc-frame__header">
-        <span className="vc-frame__title">VEHICLE CAPTURE</span>
+        <span className="vc-frame__title">CAPTURE</span>
         {onRemove ? (
           <button
             type="button"

@@ -358,10 +358,17 @@ export function BulkCheckout() {
             {assets.length === 0 ? <p className="help-block">No in-stock assets available</p> : null}
           </Field>
           <Field label="Assign to employee" required>
-            <select className="form-control" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} required>
-              <option value="">Select employee…</option>
-              {employees.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
-            </select>
+            <AppSelect
+              value={employeeId}
+              onChange={setEmployeeId}
+              required
+              searchable={employees.length > 8}
+              placeholder="Select employee…"
+              options={[
+                { value: '', label: 'Select employee…' },
+                ...employees.map((o) => ({ value: String(o.id), label: o.text })),
+              ]}
+            />
           </Field>
           <Field label="Notes"><textarea className="form-control" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
           <button type="submit" className="btn btn-theme" disabled={busy}>{busy ? 'Assigning…' : 'Assign'}</button>

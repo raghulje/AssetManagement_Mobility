@@ -7,6 +7,7 @@ import { useAuth } from '../api/AuthContext'
 import { api, hardwareApi } from '../api/client'
 import InteractiveLoginPage from '../components/login/InteractiveLoginPage'
 import { useToast } from '../components/Toast'
+import { AppSelect } from '../components/formControls'
 
 export { ImportPage } from './ImportPage'
 
@@ -373,11 +374,9 @@ export function AdminHub() {
     { to: '/settings', label: 'General Settings', icon: 'fas fa-cog' },
     { to: '/settings/roles', label: 'Roles & permissions', icon: 'fas fa-user-shield-alt' },
     { to: '/settings/notifications', label: 'Notifications / emails', icon: 'fas fa-envelope' },
-    { to: '/companies', label: 'Companies', icon: 'fas fa-building' },
-    { to: '/fields', label: 'Custom Fields', icon: 'fas fa-list' },
-    { to: '/statuslabels', label: 'Status Labels', icon: 'fas fa-flag' },
-    { to: '/import', label: 'Import', icon: 'fas fa-file-import' },
-    { to: '/reports', label: 'Reports', icon: 'fas fa-chart-bar' },
+    { to: '/masters', label: 'Cities & Models', icon: 'fas fa-database' },
+    { to: '/audit', label: 'Audit', icon: 'fas fa-clipboard-list' },
+    { to: '/drivers', label: 'Drivers', icon: 'fas fa-id-card' },
   ]
   return (
     <AppLayout title="Admin">
@@ -496,20 +495,28 @@ export function SettingsGeneral() {
   }
 
   return (
-    <AppLayout title="General Settings">
+    <AppLayout title="General Settings" subtitle="Application, notifications, and company options">
       {error ? <div className="callout callout-danger"><p>{error}</p></div> : null}
       {okMsg ? <div className="callout callout-success"><p>{okMsg}</p></div> : null}
-      <Box title="Settings" type="primary">
-        <form className="form-horizontal" onSubmit={(e) => { void submit(e) }}>
+      <form className="form-horizontal rm-page" onSubmit={(e) => { void submit(e) }}>
+        <Box title="Application">
           <Field label="Site Name"><input className="form-control" value={site} onChange={(e) => setSite(e.target.value)} /></Field>
           <Field label="Default Currency"><input className="form-control" value={currency} onChange={(e) => setCurrency(e.target.value)} /></Field>
           <Field label="Date Format">
-            <select className="form-control" value={dateFormat} onChange={(e) => setDateFormat(e.target.value)}>
-              <option value="YYYY-MM-DD">YYYY-MM-DD</option>
-              <option value="DD/MM/YYYY">DD/MM/YYYY</option>
-              <option value="MM/DD/YYYY">MM/DD/YYYY</option>
-            </select>
+            <AppSelect
+              value={dateFormat}
+              onChange={setDateFormat}
+              searchable={false}
+              options={[
+                { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
+                { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
+                { value: 'MM/DD/YYYY', label: 'MM/DD/YYYY' },
+              ]}
+            />
           </Field>
+        </Box>
+
+        <Box title="Notifications">
           <Field label="Alert Email">
             <input className="form-control" type="email" value={alertEmail} onChange={(e) => setAlertEmail(e.target.value)} />
             <span className="help-block">
@@ -517,35 +524,42 @@ export function SettingsGeneral() {
               <a href="/settings/notifications">Settings → Notifications</a>.
             </span>
           </Field>
+          <div style={{ paddingLeft: 15, marginBottom: 12 }}>
+            <button
+              type="button"
+              className="btn btn-default"
+              disabled={digestBusy || !alertEmail.trim() || !canEdit}
+              onClick={() => {
+                setDigestBusy(true)
+                setError('')
+                setOkMsg('')
+                api<{ messages?: string[]; payload?: { skippedReason?: string; sent?: boolean } }>('/notifications/eol/run', { method: 'POST' })
+                  .then((res) => {
+                    const payload = res.payload
+                    setOkMsg(
+                      payload?.sent
+                        ? (Array.isArray(res.messages) ? res.messages.join(' ') : 'EOL digest sent')
+                        : (payload?.skippedReason || (Array.isArray(res.messages) ? res.messages.join(' ') : 'Skipped')),
+                    )
+                  })
+                  .catch((err: Error) => setError(err.message))
+                  .finally(() => setDigestBusy(false))
+              }}
+            >
+              {digestBusy ? 'Sending…' : 'Send EOL digest now'}
+            </button>
+          </div>
+        </Box>
+
+        <Box title="Multi-company">
           <Field label="Full Multiple Companies Support">
             <label className="checkbox"><input type="checkbox" checked={fmcs} onChange={(e) => setFmcs(e.target.checked)} /> Enable FMCS</label>
           </Field>
-          <button type="submit" className="btn btn-theme" disabled={busy || !canEdit}>{busy ? 'Saving…' : 'Save Settings'}</button>{' '}
-          <button
-            type="button"
-            className="btn btn-default"
-            disabled={digestBusy || !alertEmail.trim() || !canEdit}
-            onClick={() => {
-              setDigestBusy(true)
-              setError('')
-              setOkMsg('')
-              api<{ messages?: string[]; payload?: { skippedReason?: string; sent?: boolean } }>('/notifications/eol/run', { method: 'POST' })
-                .then((res) => {
-                  const payload = res.payload
-                  setOkMsg(
-                    payload?.sent
-                      ? (Array.isArray(res.messages) ? res.messages.join(' ') : 'EOL digest sent')
-                      : (payload?.skippedReason || (Array.isArray(res.messages) ? res.messages.join(' ') : 'Skipped')),
-                  )
-                })
-                .catch((err: Error) => setError(err.message))
-                .finally(() => setDigestBusy(false))
-            }}
-          >
-            {digestBusy ? 'Sending…' : 'Send EOL digest now'}
-          </button>
-        </form>
-      </Box>
+          <div style={{ paddingLeft: 15 }}>
+            <button type="submit" className="btn btn-primary" disabled={busy || !canEdit}>{busy ? 'Saving…' : 'Save Settings'}</button>
+          </div>
+        </Box>
+      </form>
 
       <Box title="SAML / RefexOne SSO" type="primary">
         <p className="help-block" style={{ marginTop: 0 }}>

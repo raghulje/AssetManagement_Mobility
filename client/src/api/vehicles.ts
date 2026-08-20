@@ -1,21 +1,38 @@
 import { api, type ApiList } from './client'
 import { getApiBase } from './baseUrl'
 
+/** Core + Refex Mobility vehicle asset profile fields */
 export type Vehicle = {
   id: number
+  asset_id?: number
   vehicle_number: string
+  fleet_id?: string | null
   name?: string | null
   model: string
   model_id?: number | null
+  make?: string | null
+  variant?: string | null
+  model_year?: number | null
+  color?: string | null
+  primary_image_path?: string | null
+  seats?: number | null
   location_name: string
   city_id?: number | null
   category: string
+  vehicle_type?: string | null
+  vehicle_sub_type?: string | null
   fuel_type: string
   status: string
   notes?: string | null
+  description?: string | null
   assigned_to?: number | null
   assigned_type?: string | null
   assigned_name?: string | null
+  assignment_kind?: string | null
+  driver_name?: string | null
+  driver_phone?: string | null
+  assignment_status?: string | null
+  assignment_location?: string | null
   expected_checkin?: string | null
   last_checkout?: string | null
   last_checkin?: string | null
@@ -30,6 +47,115 @@ export type Vehicle = {
   qr_token?: string | null
   qr_url?: string | null
   qr_image_url?: string | null
+  barcode?: string | null
+  vin?: string | null
+  chassis_number?: string | null
+  engine_number?: string | null
+  motor_number?: string | null
+  battery_serial_number?: string | null
+  vehicle_id_number?: string | null
+  key_id?: string | null
+  rfid_tag?: string | null
+  registration_date?: string | null
+  registration_state?: string | null
+  registration_rto?: string | null
+  registration_expiry?: string | null
+  vehicle_class?: string | null
+  puc_number?: string | null
+  puc_issue_date?: string | null
+  puc_expiry_date?: string | null
+  fitness_number?: string | null
+  fitness_expiry_date?: string | null
+  permit_number?: string | null
+  permit_expiry_date?: string | null
+  powertrain_type?: string | null
+  battery_type?: string | null
+  battery_capacity?: number | null
+  battery_unit?: string | null
+  usable_battery_capacity?: number | null
+  charging_types?: string | null
+  charging_types_list?: string[]
+  ac_charging_capacity?: number | null
+  dc_fast_charging_capacity?: number | null
+  charging_connector_type?: string | null
+  charging_port_count?: number | null
+  range_value?: number | null
+  range_unit?: string | null
+  battery_warranty_start?: string | null
+  battery_warranty_end?: string | null
+  battery_warranty_km?: number | null
+  battery_health_pct?: number | null
+  battery_cycle_count?: number | null
+  state_of_charge_pct?: number | null
+  last_charging_at?: string | null
+  last_charging_location?: string | null
+  charging_station_id?: string | null
+  telematics_device_id?: string | null
+  company_id?: number | null
+  legal_entity_id?: number | null
+  company_name?: string | null
+  legal_entity_name?: string | null
+  business_unit?: string | null
+  department_id?: number | null
+  team_name?: string | null
+  cost_center?: string | null
+  sub_location?: string | null
+  fleet_name?: string | null
+  vehicle_pool?: string | null
+  vehicle_owner_id?: number | null
+  fleet_manager_id?: number | null
+  current_custodian_id?: number | null
+  location_type?: string | null
+  latitude?: number | null
+  longitude?: number | null
+  address?: string | null
+  last_location_updated?: string | null
+  gps_accuracy_m?: number | null
+  geofence_name?: string | null
+  parking_location?: string | null
+  procurement_type?: string | null
+  invoice_number?: string | null
+  invoice_date?: string | null
+  vendor_name?: string | null
+  dealer_name?: string | null
+  tax_amount?: number | null
+  total_cost?: number | null
+  currency?: string | null
+  funding_type?: string | null
+  financing_company?: string | null
+  loan_number?: string | null
+  loan_start_date?: string | null
+  loan_end_date?: string | null
+  asset_cost?: number | null
+  capitalized_cost?: number | null
+  current_book_value?: number | null
+  depreciation_method?: string | null
+  depreciation_rate?: number | null
+  depreciation_start_date?: string | null
+  useful_life_months?: number | null
+  residual_value?: number | null
+  gl_account?: string | null
+  profit_center?: string | null
+  asset_class?: string | null
+  insurance_provider?: string | null
+  insurance_policy_number?: string | null
+  insurance_policy_type?: string | null
+  insurance_start_date?: string | null
+  insurance_expiry_date?: string | null
+  insurance_idv?: number | null
+  insurance_premium?: number | null
+  insured_name?: string | null
+  insurance_status?: string | null
+  insurance_renewal_reminder?: string | null
+  warranty_provider?: string | null
+  warranty_start_date?: string | null
+  warranty_end_date?: string | null
+  warranty_km?: number | null
+  current_odometer_km?: number | null
+  warranty_status?: string | null
+  has_battery_warranty?: boolean | number | null
+  has_motor_warranty?: boolean | number | null
+  motor_warranty_end?: string | null
   captures_count: number
   maintenances_count?: number
   last_captured_at?: string | null
@@ -113,6 +239,7 @@ export const vehiclesApi = {
   checkin: (id: number | string, body: Record<string, unknown>) =>
     api<{ payload: Vehicle }>(`/vehicles/${id}/checkin`, { method: 'POST', json: body }),
   history: (id: number | string) => api<ApiList<Record<string, unknown>>>(`/vehicles/${id}/history`),
+  assignments: (id: number | string) => api<ApiList<Record<string, unknown>>>(`/vehicles/${id}/assignments`),
   ensureQr: (id: number | string) => api<Record<string, unknown>>(`/vehicles/${id}/qr`, { method: 'POST' }),
   maintenances: (id: number | string) => api<ApiList<VehicleMaintenance>>(`/vehicles/${id}/maintenances`),
   addMaintenance: (id: number | string, body: Record<string, unknown>) =>
@@ -122,30 +249,18 @@ export const vehiclesApi = {
   deleteMaintenance: (id: number | string, mid: number | string) =>
     api(`/vehicles/${id}/maintenances/${mid}`, { method: 'DELETE' }),
   captures: (id: number | string) => api<ApiList<VehicleCapture>>(`/vehicles/${id}/captures`),
-  startSession: (id: number | string, notes?: string) =>
+  startSession: (id: number | string) =>
     api<{ status: string; payload: { id: number } }>(`/vehicles/${id}/capture-sessions`, {
       method: 'POST',
-      json: { notes },
+      json: {},
     }),
-  uploadCapture: async (
-    id: number | string,
-    file: Blob,
-    meta: {
-      captured_at: string
-      latitude?: number | null
-      longitude?: number | null
-      address?: string | null
-      session_id?: number | null
-      filename?: string
-    },
-  ) => {
+  uploadCapture: async (id: number | string, file: File, meta: Record<string, string | number | null | undefined>) => {
     const fd = new FormData()
-    fd.append('file', file, meta.filename || `capture-${Date.now()}.jpg`)
-    fd.append('captured_at', meta.captured_at)
-    if (meta.latitude != null) fd.append('latitude', String(meta.latitude))
-    if (meta.longitude != null) fd.append('longitude', String(meta.longitude))
-    if (meta.address) fd.append('address', meta.address)
-    if (meta.session_id != null) fd.append('session_id', String(meta.session_id))
+    fd.append('file', file)
+    for (const [k, v] of Object.entries(meta)) {
+      if (v === undefined || v === null || v === '') continue
+      fd.append(k, String(v))
+    }
     const res = await fetch(`${getApiBase()}/vehicles/${id}/captures`, {
       method: 'POST',
       headers: authHeaders(),
@@ -158,32 +273,30 @@ export const vehiclesApi = {
     }
     return data as { status: string; messages: string[]; payload: VehicleCapture }
   },
-  deleteCapture: (vehicleId: number | string, captureId: number | string) =>
-    api(`/vehicles/${vehicleId}/captures/${captureId}`, { method: 'DELETE' }),
+  deleteCapture: (id: number | string, cid: number | string) =>
+    api(`/vehicles/${id}/captures/${cid}`, { method: 'DELETE' }),
   reverseGeocode: (lat: number, lng: number) =>
     api<{
-      lat: number
-      lng: number
-      address: string
-      formatted_address?: string
+      address?: string | null
+      formatted_address?: string | null
       locality_header?: string | null
-      place_name?: string | null
-      location_type?: string | null
-      place_id?: string | null
-      provider?: string
-    }>(`/geo/reverse?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}`),
+      [key: string]: unknown
+    }>(`/geo/reverse${qs({ lat, lng })}`),
   listFiles: (id: number | string) =>
-    api<ApiList<Record<string, unknown>>>(`/vehicles/${id}/files`),
+    api<ApiList<Record<string, unknown>>>(`/files${qs({ item_type: 'vehicle', item_id: id })}`),
   uploadFile: async (id: number | string, file: File, kind: string) => {
     const fd = new FormData()
     fd.append('file', file)
-    const res = await fetch(`${getApiBase()}/vehicles/${id}/files?kind=${encodeURIComponent(kind)}`, {
+    fd.append('item_type', 'vehicle')
+    fd.append('item_id', String(id))
+    fd.append('kind', kind)
+    const res = await fetch(`${getApiBase()}/files`, {
       method: 'POST',
       headers: authHeaders(),
       body: fd,
     })
     const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error((data.messages || []).join(', ') || 'Upload failed')
+    if (!res.ok) throw new Error(String(data.message || res.statusText))
     return data
   },
   deleteFile: (fileId: number | string) => api(`/files/${fileId}`, { method: 'DELETE' }),

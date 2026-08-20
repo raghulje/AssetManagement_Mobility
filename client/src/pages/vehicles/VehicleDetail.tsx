@@ -1,12 +1,12 @@
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import AppLayout from '../../layout/AppLayout'
-import { Box } from '../../components/ui'
 import { useToast } from '../../components/Toast'
 import { VehicleCaptureFrame, captureToFrameProps } from '../../components/VehicleCaptureFrame'
 import VehicleWebcamCapture from '../../components/VehicleWebcamCapture'
 import { stampGpsOnImage, fetchGpsStaticMapUrl } from '../../lib/stampGpsOnImage'
 import { readPrecisePosition, type PrecisePosition } from '../../lib/preciseLocation'
+import { assetImageSrc } from '../../api/baseUrl'
 import {
   vehiclesApi,
   type Vehicle,
@@ -14,6 +14,11 @@ import {
   type VehicleMaintenance,
 } from '../../api/vehicles'
 import { usersApi } from '../../api/client'
+import { driversApi } from '../../api/drivers'
+import { useAuth } from '../../api/AuthContext'
+import VehicleHero from './detail/VehicleHero'
+import OverviewTab from './detail/OverviewTab'
+import { AppSelect, DateField } from '../../components/formControls'
 
 type Tab = 'overview' | 'captures' | 'attachments' | 'maintenance' | 'history' | 'qr'
 
@@ -35,14 +40,32 @@ function formatSqlDate(d: Date) {
 
 const MAINT_TYPES = ['Repair', 'Service', 'Part Replacement', 'Upgrade', 'Inspection', 'Other']
 
+const MAINT_DETAIL_TYPES = new Set(['Part Replacement', 'Upgrade', 'Other'])
+
+function maintDetailLabel(type: string) {
+  if (type === 'Part Replacement') return 'Parts replaced'
+  if (type === 'Upgrade') return 'What was upgraded'
+  if (type === 'Other') return 'Describe the activity'
+  return 'Details'
+}
+
+function maintDetailHint(type: string) {
+  if (type === 'Part Replacement') return 'List the parts that were replaced (e.g. brake pads, battery module).'
+  if (type === 'Upgrade') return 'Describe exactly what was upgraded (e.g. software version, charger, seats).'
+  if (type === 'Other') return 'Describe what maintenance was performed.'
+  return ''
+}
+
 export default function VehicleDetail() {
   const { id } = useParams()
   const [params, setParams] = useSearchParams()
   const tab = (params.get('tab') as Tab) || 'overview'
   const navigate = useNavigate()
   const toast = useToast()
+  const { can, isAdmin } = useAuth()
   const fileRef = useRef<HTMLInputElement>(null)
   const attachRef = useRef<HTMLInputElement>(null)
+  const assignRef = useRef<HTMLElement | null>(null)
 
   const [vehicle, setVehicle] = useState<Vehicle | null>(null)
   const [captures, setCaptures] = useState<VehicleCapture[]>([])
@@ -53,11 +76,14 @@ export default function VehicleDetail() {
   const [maintenances, setMaintenances] = useState<VehicleMaintenance[]>([])
   const [history, setHistory] = useState<Record<string, unknown>[]>([])
   const [users, setUsers] = useState<Array<{ id: number; text?: string; name?: string }>>([])
+  const [drivers, setDrivers] = useState<Array<{ id: number; text: string; name?: string; phone?: string | null }>>([])
+  const [assignTargetType, setAssignTargetType] = useState<'driver' | 'user'>('driver')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [attachKind, setAttachKind] = useState('invoice')
   const [assignUserId, setAssignUserId] = useState('')
+  const [assignDriverId, setAssignDriverId] = useState('')
   const [assignReason, setAssignReason] = useState('')
   const [unassignReason, setUnassignReason] = useState('')
   const [maintForm, setMaintForm] = useState({
@@ -98,7 +124,7 @@ export default function VehicleDetail() {
 
   useEffect(() => {
     if (!id || !vehicle) return
-    if (tab === 'captures') {
+    if (tab === 'captures' || tab === 'overview') {
       vehiclesApi.captures(id).then((r) => setCaptures(r.rows || [])).catch(() => undefined)
     }
     if (tab === 'attachments') {
@@ -113,6 +139,14 @@ export default function VehicleDetail() {
   }, [id, tab, vehicle])
 
   useEffect(() => {
+    driversApi.select().then((r) => {
+      setDrivers((r.rows || []).map((d) => ({
+        id: d.id,
+        text: d.text,
+        name: d.name,
+        phone: d.phone,
+      })))
+    }).catch(() => undefined)
     usersApi.list({ limit: 200 }).then((r) => {
       setUsers((r.rows || []).map((u: Record<string, unknown>) => ({
         id: Number(u.id),
@@ -148,8 +182,10 @@ export default function VehicleDetail() {
       if (latitude != null && longitude != null) {
         try {
           const geo = await vehiclesApi.reverseGeocode(latitude, longitude)
-          address = geo.address || geo.formatted_address || null
-          localityHeader = geo.locality_header || null
+          address = (typeof geo.address === 'string' ? geo.address : null)
+            || (typeof geo.formatted_address === 'string' ? geo.formatted_address : null)
+            || null
+          localityHeader = typeof geo.locality_header === 'string' ? geo.locality_header : null
         } catch {
           address = `${latitude.toFixed(7)}, ${longitude.toFixed(7)}`
         }
@@ -201,12 +237,15 @@ export default function VehicleDetail() {
   }
 
   async function onAssign() {
-    if (!id || !assignUserId) return toast.error('Select a user')
+    if (!id) return
+    const targetId = assignTargetType === 'driver' ? assignDriverId : assignUserId
+    if (!targetId) return toast.error(assignTargetType === 'driver' ? 'Select a driver' : 'Select a user')
     setBusy(true)
     try {
       const res = await vehiclesApi.checkout(id, {
-        assigned_type: 'user',
-        assigned_to: Number(assignUserId),
+        assigned_type: assignTargetType,
+        assigned_to: Number(targetId),
+        assignment_kind: assignTargetType === 'driver' ? 'Driver' : 'Employee',
         reason: assignReason || 'Assigned',
       })
       setVehicle(res.payload)
@@ -255,6 +294,9 @@ export default function VehicleDetail() {
   async function onAddMaint(e: React.FormEvent) {
     e.preventDefault()
     if (!id || !maintForm.title.trim()) return toast.error('Title required')
+    if (MAINT_DETAIL_TYPES.has(maintForm.maintenance_type) && !maintForm.parts_replaced.trim()) {
+      return toast.error(`${maintDetailLabel(maintForm.maintenance_type)} is required for ${maintForm.maintenance_type}`)
+    }
     setBusy(true)
     try {
       await vehiclesApi.addMaintenance(id, {
@@ -301,282 +343,459 @@ export default function VehicleDetail() {
     navigate('/vehicles')
   }
 
-  if (loading) return <AppLayout title="Vehicle"><p>Loading…</p></AppLayout>
-  if (error || !vehicle) {
+  if (loading) {
     return (
-      <AppLayout title="Vehicle">
-        <div className="callout callout-danger">{error || 'Not found'}</div>
-        <Link to="/vehicles" className="btn btn-default">Back</Link>
+      <AppLayout title="Vehicle" hideHeader>
+        <div className="vad-page">
+          <div className="vad-skel-title vad-skeleton" />
+          <div className="vad-skel-line vad-skeleton" style={{ width: '40%' }} />
+          <div className="vad-hero vad-skeleton vad-skel-hero" />
+          <div className="vad-overview" style={{ marginTop: 8 }}>
+            <div className="vad-card vad-skeleton" style={{ height: 220 }} />
+            <div className="vad-card vad-skeleton" style={{ height: 220 }} />
+            <div className="vad-card vad-skeleton" style={{ height: 220 }} />
+          </div>
+        </div>
       </AppLayout>
     )
   }
 
-  const tabs: Array<{ id: Tab; label: string }> = [
+  if (error || !vehicle) {
+    return (
+      <AppLayout title="Vehicle" hideHeader>
+        <div className="vad-page">
+          <div className="vad-error">
+            <h2>Unable to load vehicle details</h2>
+            <p>{error || 'This vehicle could not be found.'}</p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+              <button type="button" className="btn btn-primary" onClick={() => void load()}>Retry</button>
+              <Link to="/vehicles" className="btn btn-default">Back to fleet</Link>
+            </div>
+          </div>
+        </div>
+      </AppLayout>
+    )
+  }
+
+  const canEdit = isAdmin || can('assets.edit') || can('assets.create') || can('assets.view')
+  const canDelete = isAdmin || can('assets.delete') || can('assets.edit')
+  const v = vehicle
+
+  const tabs: Array<{ id: Tab; label: string; count?: number }> = [
     { id: 'overview', label: 'Overview' },
-    { id: 'captures', label: `Photos (${vehicle.captures_count || 0})` },
-    { id: 'attachments', label: 'Attachments' },
-    { id: 'maintenance', label: `Maintenance (${vehicle.maintenances_count || 0})` },
-    { id: 'history', label: 'Activity log' },
-    { id: 'qr', label: 'QR label' },
+    { id: 'captures', label: 'Photos', count: v.captures_count || captures.length || 0 },
+    { id: 'attachments', label: 'Documents', count: files.length || undefined },
+    { id: 'maintenance', label: 'Maintenance', count: v.maintenances_count || maintenances.length || 0 },
+    { id: 'history', label: 'Activity' },
+    { id: 'qr', label: 'QR / Tags' },
   ]
 
+  const heroImage =
+    assetImageSrc(v.primary_image_path)
+    || captures[0]?.url
+    || null
+
+  const needsMaintDetail = MAINT_DETAIL_TYPES.has(maintForm.maintenance_type)
+
+  function focusAssignment() {
+    setTab('overview')
+    requestAnimationFrame(() => {
+      assignRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }
+
+  function onQuick(action: 'service' | 'inspection' | 'map' | 'rc' | 'activity') {
+    if (action === 'service' || action === 'inspection') {
+      setMaintForm((f) => ({
+        ...f,
+        maintenance_type: action === 'inspection' ? 'Inspection' : 'Service',
+        title: action === 'inspection' ? 'Inspection' : 'Scheduled service',
+      }))
+      setTab('maintenance')
+      return
+    }
+    if (action === 'activity') {
+      setTab('history')
+      return
+    }
+    if (action === 'map') {
+      if (v.latitude != null && v.longitude != null) {
+        window.open(`https://www.google.com/maps?q=${v.latitude},${v.longitude}`, '_blank', 'noopener,noreferrer')
+      } else {
+        toast.error('No coordinates on this vehicle')
+      }
+      return
+    }
+    if (action === 'rc') {
+      setTab('attachments')
+      toast.success('Open Documents to download RC if uploaded')
+    }
+  }
+
   return (
-    <AppLayout title={vehicle.vehicle_number} subtitle={`${vehicle.model} · ${vehicle.location_name}`}>
-      <div className="vehicle-detail-bar">
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <Link to="/vehicles" className="btn btn-default btn-sm"><i className="fas fa-arrow-left" /> Fleet</Link>
-          <Link to={`/vehicles/${vehicle.id}/edit`} className="btn btn-default btn-sm"><i className="fas fa-edit" /> Edit</Link>
-          <button type="button" className="btn btn-danger btn-sm" onClick={() => void removeVehicle()}>Delete</button>
-        </div>
-        <div className="vehicle-detail-meta">
-          <span className={`label ${vehicle.fuel_type === 'EV' ? 'label-success' : 'label-warning'}`}>{vehicle.fuel_type}</span>
-          <span className="label label-default">{vehicle.status}</span>
-          {vehicle.assigned_name ? <span>Assigned: {vehicle.assigned_name}</span> : <span>Unassigned</span>}
-        </div>
-      </div>
+    <AppLayout title={v.vehicle_number} hideHeader>
+      <div className="vad-page">
+        <VehicleHero
+          vehicle={v}
+          imageUrl={heroImage}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          onTransfer={focusAssignment}
+          onDelete={() => void removeVehicle()}
+        />
 
-      <ul className="nav nav-tabs vehicle-tabs">
-        {tabs.map((t) => (
-          <li key={t.id} className={tab === t.id ? 'active' : ''}>
-            <button type="button" onClick={() => setTab(t.id)}>{t.label}</button>
-          </li>
-        ))}
-      </ul>
-
-      {tab === 'overview' ? (
-        <div className="row">
-          <div className="col-md-7">
-            <Box title="Vehicle profile">
-              <table className="table table-condensed">
-                <tbody>
-                  <tr><th>Plate</th><td>{vehicle.vehicle_number}</td></tr>
-                  <tr><th>Model</th><td>{vehicle.model}</td></tr>
-                  <tr><th>City</th><td>{vehicle.location_name}</td></tr>
-                  <tr><th>Category</th><td>{vehicle.category}</td></tr>
-                  <tr><th>Purchase date</th><td>{vehicle.purchase_date || '—'}</td></tr>
-                  <tr><th>PO / order</th><td>{vehicle.order_number || '—'}</td></tr>
-                  <tr><th>Supplier</th><td>{vehicle.supplier_name || '—'}</td></tr>
-                  <tr><th>Cost</th><td>{vehicle.purchase_cost != null ? `₹${vehicle.purchase_cost}` : '—'}</td></tr>
-                  <tr><th>Warranty</th><td>{vehicle.warranty_months != null ? `${vehicle.warranty_months} months` : '—'}</td></tr>
-                  <tr><th>EOL date</th><td>{vehicle.vehicle_eol_date || '—'}</td></tr>
-                  <tr><th>Notes</th><td>{vehicle.notes || '—'}</td></tr>
-                </tbody>
-              </table>
-            </Box>
-          </div>
-          <div className="col-md-5">
-            <Box title="Assign / unassign">
-              {vehicle.assigned_to ? (
-                <>
-                  <p>Currently with <strong>{vehicle.assigned_name}</strong></p>
-                  <textarea className="form-control" rows={2} placeholder="Reason to unassign" value={unassignReason} onChange={(e) => setUnassignReason(e.target.value)} />
-                  <button type="button" className="btn btn-warning" style={{ marginTop: 8 }} disabled={busy} onClick={() => void onUnassign()}>
-                    Unassign
-                  </button>
-                </>
-              ) : (
-                <>
-                  <select className="form-control" value={assignUserId} onChange={(e) => setAssignUserId(e.target.value)}>
-                    <option value="">Select user…</option>
-                    {users.map((u) => <option key={u.id} value={u.id}>{u.text || u.name || u.id}</option>)}
-                  </select>
-                  <textarea className="form-control" rows={2} style={{ marginTop: 8 }} placeholder="Reason" value={assignReason} onChange={(e) => setAssignReason(e.target.value)} />
-                  <button type="button" className="btn btn-primary" style={{ marginTop: 8 }} disabled={busy} onClick={() => void onAssign()}>
-                    Assign vehicle
-                  </button>
-                </>
-              )}
-            </Box>
-          </div>
-        </div>
-      ) : null}
-
-      {tab === 'captures' ? (
-        <Box title="Photo captures" tools={(
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => setWebcamOpen(true)}>
-              <i className="fas fa-video" /> Webcam
+        <div className="vad-tabs" role="tablist">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              className={tab === t.id ? 'is-active' : ''}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+              {t.count != null ? <span>({t.count})</span> : null}
             </button>
-            <button type="button" className="btn btn-default btn-sm" disabled={busy} onClick={() => fileRef.current?.click()}>
-              <i className="fas fa-camera" /> Phone / file
-            </button>
-          </div>
-        )}>
-          <input ref={fileRef} type="file" accept="image/*" capture="environment" className="sr-only" onChange={(e) => {
-            const f = e.target.files?.[0]
-            e.target.value = ''
-            if (f) void processFile(f)
-          }} />
-          <VehicleWebcamCapture
-            open={webcamOpen}
-            vehicleLabel={vehicle.vehicle_number}
-            onClose={() => setWebcamOpen(false)}
-            onCapture={(file, position) => { void processFile(file, position) }}
+          ))}
+        </div>
+
+        {tab === 'overview' ? (
+          <OverviewTab
+            vehicle={v}
+            assignRef={assignRef}
+            drivers={drivers}
+            users={users}
+            assignTargetType={assignTargetType}
+            setAssignTargetType={setAssignTargetType}
+            assignDriverId={assignDriverId}
+            setAssignDriverId={setAssignDriverId}
+            assignUserId={assignUserId}
+            setAssignUserId={setAssignUserId}
+            assignReason={assignReason}
+            setAssignReason={setAssignReason}
+            unassignReason={unassignReason}
+            setUnassignReason={setUnassignReason}
+            busy={busy}
+            onAssign={() => void onAssign()}
+            onUnassign={() => void onUnassign()}
+            onQuick={onQuick}
           />
-          <div className="vc-grid">
-            <button type="button" className="vc-add-card" disabled={busy} onClick={() => setWebcamOpen(true)}>
-              <i className="fas fa-video" /><span>Open webcam</span>
-            </button>
-            {pending.map((p) => (
-              <div key={p.localId} className="vc-pending-wrap">
-                <VehicleCaptureFrame photoUrl={p.previewUrl} capturedAt={p.capturedAt} latitude={p.latitude} longitude={p.longitude} address={p.address} />
-                {p.uploading ? <div className="vc-pending-badge">Saving…</div> : null}
-                {p.error ? <div className="vc-pending-badge vc-pending-badge--error">{p.error}</div> : null}
-              </div>
-            ))}
-            {captures.map((c) => (
-              <VehicleCaptureFrame
-                key={c.id}
-                {...captureToFrameProps(c)}
-                busy={busy}
-                onRemove={async () => {
-                  if (!window.confirm('Delete capture?')) return
-                  await vehiclesApi.deleteCapture(id!, c.id)
-                  setCaptures((list) => list.filter((x) => x.id !== c.id))
-                  setVehicle((v) => (v ? { ...v, captures_count: Math.max(0, (v.captures_count || 1) - 1) } : v))
-                }}
-              />
-            ))}
-          </div>
-        </Box>
-      ) : null}
+        ) : null}
 
-      {tab === 'attachments' ? (
-        <Box title="Invoice / PO / documents">
-          <div className="vehicle-attach-bar">
-            <select className="form-control" value={attachKind} onChange={(e) => setAttachKind(e.target.value)} style={{ maxWidth: 180 }}>
-              <option value="invoice">Invoice</option>
-              <option value="po">Purchase Order</option>
-              <option value="other">Other</option>
-            </select>
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => attachRef.current?.click()}>
-              Upload
-            </button>
-            <input ref={attachRef} type="file" className="sr-only" onChange={onAttach} />
-          </div>
-          <table className="table table-striped">
-            <thead><tr><th>Kind</th><th>File</th><th>Date</th><th /></tr></thead>
-            <tbody>
-              {files.length === 0 ? <tr><td colSpan={4}>No attachments yet</td></tr> : null}
-              {files.map((f) => (
-                <tr key={String(f.id)}>
-                  <td>{String(f.kind)}</td>
-                  <td><a href={String(f.url)} target="_blank" rel="noreferrer">{String(f.original_filename || f.filename)}</a></td>
-                  <td>{String(f.created_at || '')}</td>
-                  <td>
-                    <button type="button" className="btn btn-xs btn-danger" onClick={async () => {
-                      await vehiclesApi.deleteFile(String(f.id))
-                      setFiles((list) => list.filter((x) => x.id !== f.id))
-                    }}>Delete</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Box>
-      ) : null}
-
-      {tab === 'maintenance' ? (
-        <>
-          <Box title="Log repair / part replacement">
-            <form className="vehicle-form-grid" onSubmit={onAddMaint}>
-              <label>Type
-                <select className="form-control" value={maintForm.maintenance_type} onChange={(e) => setMaintForm({ ...maintForm, maintenance_type: e.target.value })}>
-                  {MAINT_TYPES.map((t) => <option key={t}>{t}</option>)}
-                </select>
-              </label>
-              <label>Title *
-                <input className="form-control" required value={maintForm.title} onChange={(e) => setMaintForm({ ...maintForm, title: e.target.value })} />
-              </label>
-              <label>Start date
-                <input type="date" className="form-control" value={maintForm.start_date} onChange={(e) => setMaintForm({ ...maintForm, start_date: e.target.value })} />
-              </label>
-              <label>Completion
-                <input type="date" className="form-control" value={maintForm.completion_date} onChange={(e) => setMaintForm({ ...maintForm, completion_date: e.target.value })} />
-              </label>
-              <label>Cost
-                <input type="number" className="form-control" value={maintForm.cost} onChange={(e) => setMaintForm({ ...maintForm, cost: e.target.value })} />
-              </label>
-              <label>Odometer (km)
-                <input type="number" className="form-control" value={maintForm.odometer_km} onChange={(e) => setMaintForm({ ...maintForm, odometer_km: e.target.value })} />
-              </label>
-              <label>Vendor
-                <input className="form-control" value={maintForm.vendor_name} onChange={(e) => setMaintForm({ ...maintForm, vendor_name: e.target.value })} />
-              </label>
-              <label>Parts replaced
-                <input className="form-control" value={maintForm.parts_replaced} onChange={(e) => setMaintForm({ ...maintForm, parts_replaced: e.target.value })} />
-              </label>
-              <label className="vehicle-form-span">Notes
-                <textarea className="form-control" rows={2} value={maintForm.note} onChange={(e) => setMaintForm({ ...maintForm, note: e.target.value })} />
-              </label>
-              <label><input type="checkbox" checked={maintForm.is_warranty} onChange={(e) => setMaintForm({ ...maintForm, is_warranty: e.target.checked })} /> Warranty work</label>
-              <label><input type="checkbox" checked={maintForm.set_status} onChange={(e) => setMaintForm({ ...maintForm, set_status: e.target.checked })} /> Mark vehicle status = maintenance</label>
-              <div className="vehicle-form-span"><button className="btn btn-primary" disabled={busy}>Save log</button></div>
-            </form>
-          </Box>
-          <Box title="Maintenance history">
-            <table className="table table-striped">
-              <thead><tr><th>Type</th><th>Title</th><th>Dates</th><th>Parts</th><th>Cost</th><th /></tr></thead>
-              <tbody>
-                {maintenances.length === 0 ? <tr><td colSpan={6}>No maintenance logs</td></tr> : null}
-                {maintenances.map((m) => (
-                  <tr key={m.id}>
-                    <td>{m.maintenance_type}</td>
-                    <td>{m.title}</td>
-                    <td>{m.start_date || '—'} → {m.completion_date || 'open'}</td>
-                    <td>{m.parts_replaced || '—'}</td>
-                    <td>{m.cost != null ? `₹${m.cost}` : '—'}</td>
-                    <td>
-                      <button type="button" className="btn btn-xs btn-danger" onClick={async () => {
-                        await vehiclesApi.deleteMaintenance(id!, m.id)
-                        setMaintenances((list) => list.filter((x) => x.id !== m.id))
-                      }}>Delete</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Box>
-        </>
-      ) : null}
-
-      {tab === 'history' ? (
-        <Box title="Complete activity log">
-          <table className="table table-striped">
-            <thead><tr><th>When</th><th>Action</th><th>By</th><th>Note</th></tr></thead>
-            <tbody>
-              {history.length === 0 ? <tr><td colSpan={4}>No activity yet</td></tr> : null}
-              {history.map((h) => (
-                <tr key={String(h.id)}>
-                  <td>{String(h.action_date || h.created_at || '')}</td>
-                  <td>{String(h.action_type)}</td>
-                  <td>{String(h.actor_name || '—')}</td>
-                  <td>{String(h.note || '—')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Box>
-      ) : null}
-
-      {tab === 'qr' ? (
-        <Box title="QR code" tools={<button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void refreshQr()}>Generate / refresh</button>}>
-          {vehicle.qr_image_url ? (
-            <div className="vehicle-qr-panel">
-              <img src={vehicle.qr_image_url} alt="Vehicle QR" style={{ width: 220, height: 220, background: '#fff', border: '1px solid #cbd5e1' }} />
-              <div>
-                <p><strong>Public page</strong></p>
-                <a href={vehicle.qr_url || `/vehicle/${vehicle.qr_token}`} target="_blank" rel="noreferrer">
-                  {vehicle.qr_url || `/vehicle/${vehicle.qr_token}`}
-                </a>
-                <p className="help-block">Scan to open the public vehicle card (no login).</p>
+        {tab === 'captures' ? (
+          <div className="vad-panel">
+            <div className="vad-panel__bar">
+              <h3>Photo captures</h3>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => setWebcamOpen(true)}>
+                  Webcam
+                </button>
+                <button type="button" className="btn btn-default btn-sm" disabled={busy} onClick={() => fileRef.current?.click()}>
+                  Phone / file
+                </button>
               </div>
             </div>
-          ) : (
-            <p>No QR yet. Click generate.</p>
-          )}
-        </Box>
-      ) : null}
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" className="sr-only" onChange={(e) => {
+              const f = e.target.files?.[0]
+              e.target.value = ''
+              if (f) void processFile(f)
+            }} />
+            <VehicleWebcamCapture
+              open={webcamOpen}
+              vehicleLabel={v.vehicle_number}
+              onClose={() => setWebcamOpen(false)}
+              onCapture={(file, position) => { void processFile(file, position) }}
+            />
+            {captures.length === 0 && pending.length === 0 ? (
+              <div className="vad-empty">
+                <strong>No photos yet</strong>
+                Capture a GPS-stamped inspection photo to start the gallery.
+              </div>
+            ) : (
+              <div className="vad-gallery">
+                <button type="button" className="vc-add-card" disabled={busy} onClick={() => setWebcamOpen(true)}>
+                  <i className="fas fa-video" /><span>Open webcam</span>
+                </button>
+                {pending.map((p) => (
+                  <div key={p.localId} className="vc-pending-wrap">
+                    <VehicleCaptureFrame photoUrl={p.previewUrl} capturedAt={p.capturedAt} latitude={p.latitude} longitude={p.longitude} address={p.address} />
+                    {p.uploading ? <div className="vc-pending-badge">Saving...</div> : null}
+                    {p.error ? <div className="vc-pending-badge vc-pending-badge--error">{p.error}</div> : null}
+                  </div>
+                ))}
+                {captures.map((c) => (
+                  <VehicleCaptureFrame
+                    key={c.id}
+                    {...captureToFrameProps(c)}
+                    busy={busy}
+                    onRemove={async () => {
+                      if (!window.confirm('Delete capture?')) return
+                      await vehiclesApi.deleteCapture(id!, c.id)
+                      setCaptures((list) => list.filter((x) => x.id !== c.id))
+                      setVehicle((v) => (v ? { ...v, captures_count: Math.max(0, (v.captures_count || 1) - 1) } : v))
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {tab === 'attachments' ? (
+          <div className="vad-panel">
+            <div className="vad-panel__bar">
+              <h3>Documents</h3>
+              <div className="vehicle-attach-bar" style={{ margin: 0 }}>
+                <AppSelect
+                  value={attachKind}
+                  onChange={setAttachKind}
+                  searchable={false}
+                  className="vehicle-attach-kind"
+                  options={[
+                    { value: 'invoice', label: 'Invoice' },
+                    { value: 'po', label: 'Purchase Order' },
+                    { value: 'other', label: 'Other' },
+                  ]}
+                />
+                <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => attachRef.current?.click()}>
+                  Upload
+                </button>
+                <input ref={attachRef} type="file" className="sr-only" onChange={onAttach} />
+              </div>
+            </div>
+            {files.length === 0 ? (
+              <div className="vad-empty">
+                <strong>No documents yet</strong>
+                Upload invoice, PO, RC, or other vehicle documents.
+              </div>
+            ) : (
+              <table className="vad-doc-table">
+                <thead>
+                  <tr>
+                    <th>Document</th>
+                    <th>Type</th>
+                    <th>Uploaded</th>
+                    <th>Status</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {files.map((f) => (
+                    <tr key={String(f.id)}>
+                      <td>
+                        <a href={String(f.url)} target="_blank" rel="noreferrer">
+                          {String(f.original_filename || f.filename)}
+                        </a>
+                      </td>
+                      <td>{String(f.kind)}</td>
+                      <td>{String(f.created_at || '-')}</td>
+                      <td><span className="vad-badge-soft">Uploaded</span></td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-danger"
+                          onClick={async () => {
+                            await vehiclesApi.deleteFile(String(f.id))
+                            setFiles((list) => list.filter((x) => x.id !== f.id))
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        ) : null}
+
+        {tab === 'maintenance' ? (
+          <div style={{ display: 'grid', gap: 16 }}>
+            <div className="vad-panel">
+              <div className="vad-panel__bar"><h3>Log repair / service</h3></div>
+              <form className="vehicle-form-grid" onSubmit={onAddMaint}>
+                <label>Type
+                  <AppSelect
+                    value={maintForm.maintenance_type}
+                    onChange={(v) => setMaintForm({
+                      ...maintForm,
+                      maintenance_type: v,
+                      parts_replaced: MAINT_DETAIL_TYPES.has(v) ? maintForm.parts_replaced : '',
+                    })}
+                    searchable={false}
+                    options={MAINT_TYPES.map((t) => ({ value: t, label: t }))}
+                  />
+                </label>
+                <label>Title *
+                  <input className="form-control" required value={maintForm.title} onChange={(e) => setMaintForm({ ...maintForm, title: e.target.value })} />
+                </label>
+                <label>Start date
+                  <DateField value={maintForm.start_date} onChange={(v) => setMaintForm({ ...maintForm, start_date: v })} />
+                </label>
+                <label>Completion
+                  <DateField value={maintForm.completion_date} onChange={(v) => setMaintForm({ ...maintForm, completion_date: v })} />
+                </label>
+                <label>Cost
+                  <input type="number" className="form-control" value={maintForm.cost} onChange={(e) => setMaintForm({ ...maintForm, cost: e.target.value })} />
+                </label>
+                <label>Odometer (km)
+                  <input type="number" className="form-control" value={maintForm.odometer_km} onChange={(e) => setMaintForm({ ...maintForm, odometer_km: e.target.value })} />
+                </label>
+                <label>Vendor
+                  <input className="form-control" value={maintForm.vendor_name} onChange={(e) => setMaintForm({ ...maintForm, vendor_name: e.target.value })} />
+                </label>
+                {needsMaintDetail ? (
+                  <label className="vehicle-form-span">
+                    {maintDetailLabel(maintForm.maintenance_type)} *
+                    <textarea
+                      className="form-control"
+                      rows={3}
+                      required
+                      value={maintForm.parts_replaced}
+                      onChange={(e) => setMaintForm({ ...maintForm, parts_replaced: e.target.value })}
+                      placeholder={maintDetailHint(maintForm.maintenance_type)}
+                    />
+                  </label>
+                ) : null}
+                <label className="vehicle-form-span">Notes
+                  <textarea className="form-control" rows={2} value={maintForm.note} onChange={(e) => setMaintForm({ ...maintForm, note: e.target.value })} />
+                </label>
+                <label><input type="checkbox" checked={maintForm.is_warranty} onChange={(e) => setMaintForm({ ...maintForm, is_warranty: e.target.checked })} /> Warranty work</label>
+                <label><input type="checkbox" checked={maintForm.set_status} onChange={(e) => setMaintForm({ ...maintForm, set_status: e.target.checked })} /> Mark vehicle status = maintenance</label>
+                <div className="vehicle-form-span"><button className="btn btn-primary" disabled={busy}>Save log</button></div>
+              </form>
+            </div>
+
+            <div className="vad-panel">
+              <div className="vad-panel__bar"><h3>Service history</h3></div>
+              {maintenances.length === 0 ? (
+                <div className="vad-empty">
+                  <strong>No maintenance records yet</strong>
+                  <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => setMaintForm((f) => ({ ...f, maintenance_type: 'Service', title: 'Scheduled service' }))}>
+                    Schedule service
+                  </button>
+                </div>
+              ) : (
+                <ul className="vad-timeline">
+                  {maintenances.map((m) => (
+                    <li key={m.id}>
+                      <span className="vad-timeline__dot" />
+                      <div className="vad-timeline__body">
+                        <strong>{m.title}</strong>
+                        <span>
+                          {m.maintenance_type}
+                          {m.vendor_name ? ` · ${m.vendor_name}` : ''}
+                          {m.parts_replaced ? ` · ${m.parts_replaced}` : ''}
+                        </span>
+                      </div>
+                      <div className="vad-timeline__time">
+                        <div>{m.start_date || m.created_at || '-'}</div>
+                        <div>{m.cost != null ? `\u20B9${Number(m.cost).toLocaleString('en-IN')}` : ''}</div>
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-danger"
+                          style={{ marginTop: 4 }}
+                          onClick={async () => {
+                            await vehiclesApi.deleteMaintenance(id!, m.id)
+                            setMaintenances((list) => list.filter((x) => x.id !== m.id))
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {tab === 'history' ? (
+          <div className="vad-panel">
+            <div className="vad-panel__bar"><h3>Activity</h3></div>
+            {history.length === 0 ? (
+              <div className="vad-empty">
+                <strong>No activity yet</strong>
+                Assignments, uploads, and maintenance will appear here.
+              </div>
+            ) : (
+              <ul className="vad-timeline">
+                {history.map((h) => (
+                  <li key={String(h.id)}>
+                    <span className="vad-timeline__dot" />
+                    <div className="vad-timeline__body">
+                      <strong>{String(h.action_type || 'Activity')}</strong>
+                      <span>{String(h.actor_name || 'System')}{h.note ? ` · ${String(h.note)}` : ''}</span>
+                    </div>
+                    <div className="vad-timeline__time">{String(h.action_date || h.created_at || '')}</div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
+
+        {tab === 'qr' ? (
+          <div className="vad-panel">
+            <div className="vad-panel__bar">
+              <h3>QR / Tags</h3>
+              <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void refreshQr()}>
+                Generate / refresh
+              </button>
+            </div>
+            {v.qr_image_url ? (
+              <div className="rm-qr">
+                <img src={v.qr_image_url} alt="Vehicle QR" />
+                <div className="rm-qr__plate">{v.vehicle_number}</div>
+                <div className="rm-qr__model">
+                  Asset ID {v.id}
+                  {v.fleet_id ? ` · Fleet ${v.fleet_id}` : ''}
+                </div>
+                <div className="rm-page-actions" style={{ justifyContent: 'center' }}>
+                  <a className="btn btn-default btn-sm" href={v.qr_image_url} download={`${v.vehicle_number}-qr.png`}>
+                    Download QR
+                  </a>
+                  <button
+                    type="button"
+                    className="btn btn-default btn-sm"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(String(v.id)).then(
+                        () => toast.success('Asset ID copied'),
+                        () => toast.error('Copy failed'),
+                      )
+                    }}
+                  >
+                    Copy Asset ID
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-default btn-sm"
+                    onClick={() => window.print()}
+                  >
+                    Print QR
+                  </button>
+                  <a
+                    className="btn btn-default btn-sm"
+                    href={v.qr_token ? `/vehicle/${v.qr_token}` : (v.qr_url || '#')}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open public page
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <div className="vad-empty">
+                <strong>No QR yet</strong>
+                Generate a vehicle identity label for scanning.
+              </div>
+            )}
+          </div>
+        ) : null}
+      </div>
     </AppLayout>
   )
 }

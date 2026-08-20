@@ -7,10 +7,38 @@ import { makeUploader, storageRoot } from '../services/uploads.js'
 import { logAction } from '../services/actionLog.js'
 import { ensureVehicleQr } from '../services/vehicleQr.js'
 import { listEolDueVehicles } from '../services/vehicleEolAlerts.js'
+import {
+  pickVehicleProfile,
+  mapVehicleProfile,
+  UNIQUE_KEYS,
+  VEHICLE_PROFILE_KEYS,
+} from '../services/vehicleProfile.js'
 
 const router = Router()
 
-const STATUSES = new Set(['available', 'assigned', 'maintenance', 'retired', 'inactive', 'active'])
+const STATUSES = new Set([
+  'available', 'assigned', 'maintenance', 'retired', 'inactive', 'active',
+  'draft', 'ordered', 'received', 'under_inspection', 'in_use', 'charging',
+  'accident', 'temporarily_unavailable', 'decommissioned', 'disposed', 'lost', 'stolen',
+])
+
+async function assertUniqueProfile(
+  profile: Record<string, unknown>,
+  excludeId?: number | string,
+) {
+  for (const key of UNIQUE_KEYS) {
+    const val = profile[key]
+    if (val == null || val === '') continue
+    const sql = excludeId
+      ? `SELECT id, vehicle_number FROM vehicles WHERE ${key} = ? AND id <> ? AND deleted_at IS NULL LIMIT 1`
+      : `SELECT id, vehicle_number FROM vehicles WHERE ${key} = ? AND deleted_at IS NULL LIMIT 1`
+    const params = excludeId ? [val, excludeId] : [val]
+    const clash = await get<{ id: number; vehicle_number: string }>(sql, params)
+    if (clash) {
+      throw new Error(`${key.replace(/_/g, ' ')} already used by ${clash.vehicle_number}`)
+    }
+  }
+}
 
 async function loadVehicle(id: number | string) {
   return get<Record<string, unknown>>(`
@@ -29,8 +57,14 @@ async function loadVehicle(id: number | string) {
           SELECT TRIM(CONCAT(COALESCE(e.first_name,''),' ',COALESCE(e.last_name,''),
             ' (', COALESCE(e.employee_code,''), ')'))
           FROM employees e WHERE e.id = v.assigned_to)
+        WHEN v.assigned_type = 'driver' THEN (
+          SELECT TRIM(CONCAT(COALESCE(d.first_name,''),' ',COALESCE(d.last_name,''),
+            CASE WHEN d.driver_code IS NOT NULL AND d.driver_code <> '' THEN CONCAT(' (', d.driver_code, ')') ELSE '' END))
+          FROM vehicle_drivers d WHERE d.id = v.assigned_to)
         ELSE NULL
-      END AS assigned_name
+      END AS assigned_name,
+      (SELECT name FROM companies c WHERE c.id = v.company_id) AS company_name,
+      (SELECT name FROM legal_entities le WHERE le.id = v.legal_entity_id) AS legal_entity_name
     FROM vehicles v
     WHERE v.id = ? AND v.deleted_at IS NULL
   `, [id])
@@ -38,8 +72,10 @@ async function loadVehicle(id: number | string) {
 
 function mapVehicle(row: Record<string, unknown>) {
   const assignedTo = row.assigned_to != null ? Number(row.assigned_to) : null
+  const profile = mapVehicleProfile(row)
   return {
     id: Number(row.id),
+    asset_id: Number(row.id),
     vehicle_number: row.vehicle_number,
     name: row.name || null,
     model: row.model,
@@ -70,8 +106,11 @@ function mapVehicle(row: Record<string, unknown>) {
     captures_count: Number(row.captures_count || 0),
     maintenances_count: Number(row.maintenances_count || 0),
     last_captured_at: row.last_captured_at || null,
+    company_name: row.company_name || null,
+    legal_entity_name: row.legal_entity_name || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    ...profile,
   }
 }
 
@@ -253,6 +292,10 @@ router.get('/', async (req, res) => {
           SELECT TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))) FROM users u WHERE u.id = v.assigned_to)
         WHEN v.assigned_type = 'employee' THEN (
           SELECT TRIM(CONCAT(COALESCE(e.first_name,''),' ',COALESCE(e.last_name,''))) FROM employees e WHERE e.id = v.assigned_to)
+        WHEN v.assigned_type = 'driver' THEN (
+          SELECT TRIM(CONCAT(COALESCE(d.first_name,''),' ',COALESCE(d.last_name,''),
+            CASE WHEN d.driver_code IS NOT NULL AND d.driver_code <> '' THEN CONCAT(' (', d.driver_code, ')') ELSE '' END))
+          FROM vehicle_drivers d WHERE d.id = v.assigned_to)
         ELSE NULL
       END AS assigned_name
     FROM vehicles v
@@ -266,7 +309,7 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   const b = req.body || {}
   const vehicleNumber = String(b.vehicle_number || '').trim().toUpperCase()
-  if (!vehicleNumber) return fail(res, 'vehicle_number is required')
+  if (!vehicleNumber) return fail(res, 'vehicle_number (registration number) is required')
 
   let city: { city_id: number; location_name: string }
   let modelRow: { id: number; name: string; default_fuel_type: string; default_category: string | null }
@@ -278,7 +321,7 @@ router.post('/', async (req, res) => {
   }
 
   const exists = await get(`SELECT id FROM vehicles WHERE vehicle_number = ? AND deleted_at IS NULL`, [vehicleNumber])
-  if (exists) return fail(res, 'Vehicle number already exists', 409)
+  if (exists) return fail(res, 'Registration number already exists', 409)
 
   const category = String(b.category || modelRow.default_category || 'EV Vehicles').trim()
   const fuelType = String(b.fuel_type || modelRow.default_fuel_type || fuelFromCategory(category)).trim()
@@ -287,21 +330,51 @@ router.post('/', async (req, res) => {
   if (status === 'active') status = 'available'
   const ts = now()
 
+  const profile = pickVehicleProfile(b)
+  if (!profile.make && modelRow.name) {
+    // leave make null; form can set from model master make later
+  }
+  if (!profile.fleet_id) {
+    profile.fleet_id = `FLT-${vehicleNumber.replace(/\s+/g, '')}`
+  }
+  if (!profile.barcode) {
+    profile.barcode = `BC-${vehicleNumber.replace(/\s+/g, '')}`
+  }
+  if (!profile.powertrain_type && fuelType === 'EV') profile.powertrain_type = 'Electric'
+  if (!profile.vehicle_type) profile.vehicle_type = 'Passenger Car'
+
+  try {
+    await assertUniqueProfile(profile)
+  } catch (e) {
+    return fail(res, e instanceof Error ? e.message : 'Unique constraint failed', 409)
+  }
+
+  const profileCols = [...VEHICLE_PROFILE_KEYS]
+  const profileVals = profileCols.map((k) => profile[k] ?? null)
+
   const result = await run(`
     INSERT INTO vehicles (
       vehicle_number, name, model, model_id, location_name, city_id, category, fuel_type, status, notes,
       purchase_date, purchase_cost, order_number, supplier_name, warranty_months, vehicle_eol_date,
+      ${profileCols.join(', ')},
       created_by, updated_by, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${profileCols.map(() => '?').join(', ')}, ?, ?, ?, ?)
   `, [
     vehicleNumber, b.name || null, modelRow.name, modelRow.id, city.location_name, city.city_id,
     category, fuelType, status, b.notes || null,
     b.purchase_date || null, b.purchase_cost ?? null, b.order_number || null, b.supplier_name || null,
     b.warranty_months ?? null, b.vehicle_eol_date || null,
+    ...profileVals,
     req.user?.id || null, req.user?.id || null, ts, ts,
   ])
 
   const id = Number(result.insertId)
+  // Ensure unique fleet/barcode if clash on auto values
+  await run(
+    `UPDATE vehicles SET fleet_id = COALESCE(fleet_id, ?), barcode = COALESCE(barcode, ?) WHERE id = ?`,
+    [`FLT-${id}`, `BC-${id}`, id],
+  ).catch(() => undefined)
+
   await ensureVehicleQr(id).catch(() => undefined)
   await logAction({
     userId: req.user?.id,
@@ -328,7 +401,7 @@ router.put('/:id', async (req, res) => {
     const clash = await get(`SELECT id FROM vehicles WHERE vehicle_number = ? AND id <> ? AND deleted_at IS NULL`, [
       vehicleNumber, req.params.id,
     ])
-    if (clash) return fail(res, 'Vehicle number already exists', 409)
+    if (clash) return fail(res, 'Registration number already exists', 409)
   }
 
   let city: { city_id: number; location_name: string }
@@ -354,11 +427,22 @@ router.put('/:id', async (req, res) => {
   const fuelType = String(b.fuel_type ?? existing.fuel_type ?? modelRow.default_fuel_type).trim()
   const ts = now()
 
+  const profile = pickVehicleProfile(b, existing as Record<string, unknown>)
+  try {
+    await assertUniqueProfile(profile, req.params.id)
+  } catch (e) {
+    return fail(res, e instanceof Error ? e.message : 'Unique constraint failed', 409)
+  }
+
+  const profileSet = VEHICLE_PROFILE_KEYS.map((k) => `${k} = ?`).join(', ')
+  const profileVals = VEHICLE_PROFILE_KEYS.map((k) => profile[k] ?? null)
+
   await run(`
     UPDATE vehicles SET
       vehicle_number = ?, name = ?, model = ?, model_id = ?, location_name = ?, city_id = ?,
       category = ?, fuel_type = ?, status = ?, notes = ?, purchase_date = ?, purchase_cost = ?,
       order_number = ?, supplier_name = ?, warranty_months = ?, vehicle_eol_date = ?,
+      ${profileSet},
       updated_by = ?, updated_at = ?
     WHERE id = ?
   `, [
@@ -378,6 +462,7 @@ router.put('/:id', async (req, res) => {
     b.supplier_name !== undefined ? (b.supplier_name || null) : existing.supplier_name,
     b.warranty_months !== undefined ? (b.warranty_months ?? null) : existing.warranty_months,
     b.vehicle_eol_date !== undefined ? (b.vehicle_eol_date || null) : existing.vehicle_eol_date,
+    ...profileVals,
     req.user?.id || null,
     ts,
     req.params.id,
@@ -413,28 +498,71 @@ router.post('/:id/checkout', async (req, res) => {
   if (vehicle.assigned_to) return fail(res, 'Vehicle is already assigned. Unassign first.', 409)
 
   const b = req.body || {}
-  const assignedType = String(b.assigned_type || b.checkout_to_type || 'user')
-  const assignedTo = Number(b.assigned_to || b.assigned_user || b.assigned_employee)
+  const assignedType = String(b.assigned_type || b.checkout_to_type || 'driver')
+  const assignedTo = Number(b.assigned_to || b.assigned_user || b.assigned_employee || b.assigned_driver)
   const reason = String(b.reason || b.note || '').trim()
   if (!assignedTo) return fail(res, 'Assign target is required')
-  if (!['user', 'employee'].includes(assignedType)) return fail(res, 'assigned_type must be user or employee')
+  if (!['user', 'employee', 'driver'].includes(assignedType)) {
+    return fail(res, 'assigned_type must be driver, user, or employee')
+  }
+
+  let driverName: string | null = b.driver_name || null
+  let driverPhone: string | null = b.driver_phone || null
 
   if (assignedType === 'user') {
     const u = await get(`SELECT id FROM users WHERE id = ? AND deleted_at IS NULL`, [assignedTo])
     if (!u) return fail(res, 'User not found', 404)
-  } else {
+  } else if (assignedType === 'employee') {
     const e = await get(`SELECT id FROM employees WHERE id = ? AND deleted_at IS NULL`, [assignedTo]).catch(() => null)
     if (!e) return fail(res, 'Employee not found', 404)
+  } else {
+    const d = await get<{ id: number; first_name: string; last_name: string | null; phone: string | null; status: string }>(
+      `SELECT id, first_name, last_name, phone, status FROM vehicle_drivers WHERE id = ? AND deleted_at IS NULL`,
+      [assignedTo],
+    )
+    if (!d) return fail(res, 'Driver not found', 404)
+    if (d.status !== 'active') return fail(res, 'Driver is not active', 409)
+    if (!driverName) driverName = `${d.first_name} ${d.last_name || ''}`.trim()
+    if (!driverPhone) driverPhone = d.phone
   }
 
   const ts = now()
+  const kind = b.assignment_kind || (assignedType === 'driver' ? 'Driver' : 'Employee')
   await run(`
     UPDATE vehicles SET
       assigned_to = ?, assigned_type = ?, status = 'assigned',
+      assignment_kind = ?, driver_name = ?, driver_phone = ?,
+      assignment_status = ?, assignment_location = ?,
       expected_checkin = ?, last_checkout = ?,
       checkout_counter = checkout_counter + 1, updated_at = ?, updated_by = ?
     WHERE id = ?
-  `, [assignedTo, assignedType, b.expected_checkin || null, ts, ts, req.user?.id || null, id])
+  `, [
+    assignedTo,
+    assignedType,
+    kind,
+    driverName,
+    driverPhone,
+    b.assignment_status || 'Active',
+    b.assignment_location || null,
+    b.expected_checkin || null,
+    ts,
+    ts,
+    req.user?.id || null,
+    id,
+  ])
+
+  await run(`
+    INSERT INTO vehicle_assignments (
+      vehicle_id, assigned_to, assigned_type, assignment_kind, driver_name, driver_phone,
+      employee_code, assignment_status, assignment_location, assigned_at, expected_return_at,
+      assigned_by, assign_note, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [
+    id, assignedTo, assignedType, kind,
+    driverName, driverPhone, b.employee_code || null,
+    b.assignment_status || 'Active', b.assignment_location || null,
+    ts, b.expected_checkin || null, req.user?.id || null, reason || null, ts, ts,
+  ]).catch(() => undefined)
 
   await logAction({
     userId: req.user?.id,
@@ -463,10 +591,18 @@ router.post('/:id/checkin', async (req, res) => {
   await run(`
     UPDATE vehicles SET
       assigned_to = NULL, assigned_type = NULL, status = 'available',
+      assignment_kind = NULL, driver_name = NULL, driver_phone = NULL,
+      assignment_status = NULL, assignment_location = NULL,
       expected_checkin = NULL, last_checkin = ?,
       checkin_counter = checkin_counter + 1, updated_at = ?, updated_by = ?
     WHERE id = ?
   `, [ts, ts, req.user?.id || null, id])
+
+  await run(`
+    UPDATE vehicle_assignments
+    SET unassigned_at = ?, unassigned_by = ?, unassign_note = ?, updated_at = ?
+    WHERE vehicle_id = ? AND unassigned_at IS NULL
+  `, [ts, req.user?.id || null, reason, ts, id]).catch(() => undefined)
 
   await logAction({
     userId: req.user?.id,
@@ -478,6 +614,21 @@ router.post('/:id/checkin', async (req, res) => {
     note: reason,
   })
   return okMessage(res, 'Vehicle unassigned', mapVehicle((await loadVehicle(id))!))
+})
+
+router.get('/:id/assignments', async (req, res) => {
+  const vehicle = await get(`SELECT id FROM vehicles WHERE id = ? AND deleted_at IS NULL`, [req.params.id])
+  if (!vehicle) return fail(res, 'Vehicle not found', 404)
+  const rows = await all(`
+    SELECT va.*,
+      TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))) AS assigned_by_name
+    FROM vehicle_assignments va
+    LEFT JOIN users u ON u.id = va.assigned_by
+    WHERE va.vehicle_id = ?
+    ORDER BY va.assigned_at DESC, va.id DESC
+    LIMIT 200
+  `, [req.params.id]).catch(() => [])
+  return okList(res, rows || [], (rows || []).length)
 })
 
 router.get('/:id/history', async (req, res) => {
@@ -535,6 +686,15 @@ router.post('/:id/maintenances', async (req, res) => {
   const title = String(b.title || '').trim()
   if (!title) return fail(res, 'title is required')
   const maintenanceType = String(b.maintenance_type || 'Repair').trim()
+  const detail = String(b.parts_replaced || '').trim()
+  if (['Part Replacement', 'Upgrade', 'Other'].includes(maintenanceType) && !detail) {
+    const label = maintenanceType === 'Part Replacement'
+      ? 'parts_replaced'
+      : maintenanceType === 'Upgrade'
+        ? 'upgrade details (parts_replaced)'
+        : 'activity description (parts_replaced)'
+    return fail(res, `${label} is required for ${maintenanceType}`)
+  }
   const ts = now()
   const result = await run(`
     INSERT INTO vehicle_maintenances (

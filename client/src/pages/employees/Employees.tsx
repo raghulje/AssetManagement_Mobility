@@ -787,19 +787,18 @@ export function EmployeeForm() {
           <input className="form-control" value={form.work_mobile} onChange={(e) => set('work_mobile', e.target.value)} disabled={saving} />
         </Field>
         <Field label="Employment Status">
-          <select
-            className="form-control"
+          <AppSelect
             value={form.employment_status_description}
-            onChange={(e) => {
-              const desc = e.target.value
+            onChange={(desc) => {
               set('employment_status_description', desc)
               set('employment_status', desc === 'Active' ? '1' : '0')
             }}
             disabled={saving}
-          >
-            <option value="Active">Active</option>
-            <option value="Inactive">Inactive</option>
-          </select>
+            options={[
+              { value: 'Active', label: 'Active' },
+              { value: 'Inactive', label: 'Inactive' },
+            ]}
+          />
         </Field>
         <Field label="Notes">
           <textarea className="form-control" rows={3} value={form.notes} onChange={(e) => set('notes', e.target.value)} disabled={saving} />

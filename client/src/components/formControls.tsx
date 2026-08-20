@@ -50,7 +50,11 @@ function useFloatingStyle(
       const estimated = opts?.estimatedHeight ?? menuRef.current?.offsetHeight ?? 280
       const spaceBelow = vh - rect.bottom - gap
       const spaceAbove = rect.top - gap
-      const openUp = spaceBelow < estimated && spaceAbove > spaceBelow
+      // Prefer below; only flip up when below can't fit and above clearly can
+      const openUp =
+        spaceBelow < estimated &&
+        spaceAbove > spaceBelow &&
+        spaceAbove >= Math.min(estimated, spaceBelow + 40)
 
       const maxW = Math.min(opts?.maxWidth ?? 420, vw - pad * 2)
       const floor = opts?.minWidth ?? (opts?.matchTriggerWidth === false ? 280 : 160)
@@ -80,17 +84,49 @@ function useFloatingStyle(
       if (left < pad) left = pad
 
       setPlacement(openUp ? 'up' : 'down')
-      setStyle({
-        position: 'fixed',
-        left,
-        width,
-        minWidth: width,
-        maxWidth: width,
-        zIndex: 5600,
-        ...(openUp
-          ? { bottom: vh - rect.top + gap, top: 'auto' }
-          : { top: rect.bottom + gap, bottom: 'auto' }),
-      })
+      if (openUp) {
+        const projectedTop = rect.top - gap - estimated
+        if (projectedTop < pad) {
+          // Not enough room above — keep below and clamp into the viewport
+          setPlacement('down')
+          setStyle({
+            position: 'fixed',
+            left,
+            width,
+            minWidth: width,
+            maxWidth: width,
+            zIndex: 30100,
+            top: Math.min(rect.bottom + gap, Math.max(pad, vh - estimated - pad)),
+            bottom: 'auto',
+          })
+        } else {
+          setStyle({
+            position: 'fixed',
+            left,
+            width,
+            minWidth: width,
+            maxWidth: width,
+            zIndex: 30100,
+            bottom: vh - rect.top + gap,
+            top: 'auto',
+          })
+        }
+      } else {
+        let top = rect.bottom + gap
+        if (top + estimated > vh - pad) {
+          top = Math.max(pad, vh - estimated - pad)
+        }
+        setStyle({
+          position: 'fixed',
+          left,
+          width,
+          minWidth: width,
+          maxWidth: width,
+          zIndex: 30100,
+          top,
+          bottom: 'auto',
+        })
+      }
     }
 
     update(true)
@@ -171,7 +207,7 @@ export function AppSelect({
     maxWidth: 480,
     // Prefer trigger width, grow for long labels; width is locked while open
     matchTriggerWidth: true,
-    estimatedHeight: 260,
+    estimatedHeight: 220,
   })
 
   const selected = options.find((o) => o.value === value)
@@ -369,9 +405,10 @@ export function DateField({
   const selected = parseYmd(value)
   const [view, setView] = useState(() => selected || new Date())
   const { style: menuStyle, placement } = useFloatingStyle(open, triggerRef, menuRef, {
-    minWidth: 300,
+    minWidth: 268,
     matchTriggerWidth: false,
-    estimatedHeight: 340,
+    estimatedHeight: 268,
+    maxWidth: 280,
   })
 
   useEffect(() => {
@@ -505,20 +542,10 @@ export function DateField({
           </div>
 
           <div className="date-picker-footer">
-            <button
-              type="button"
-              className="btn btn-theme btn-sm"
-              onClick={() => {
-                onChange(today)
-                setOpen(false)
-              }}
-            >
-              Today
-            </button>
             {allowClear ? (
               <button
                 type="button"
-                className="btn btn-default btn-sm"
+                className="date-picker-clear"
                 onClick={() => {
                   onChange('')
                   setOpen(false)
@@ -526,7 +553,19 @@ export function DateField({
               >
                 Clear
               </button>
-            ) : null}
+            ) : (
+              <span />
+            )}
+            <button
+              type="button"
+              className="date-picker-today"
+              onClick={() => {
+                onChange(today)
+                setOpen(false)
+              }}
+            >
+              Today
+            </button>
           </div>
         </div>
       </FloatingPortal>

@@ -11,18 +11,24 @@ const QR_DIR = path.join(storageRoot, 'public/assets/qr')
  * Browser-facing origin for QR / email links.
  * Must be the proxied HTTPS domain — never container PORT (e.g. :3053).
  * Example: https://asset.refexone.com  (not https://asset.refexone.com:3053)
+ * Local Vite default: http://localhost:5173 (not bare http://localhost → port 80).
  */
 export function clientBase() {
   const fromEnv = (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || '').trim()
   let base = fromEnv
-    || String(process.env.CLIENT_ORIGIN || 'http://localhost:3001').split(',')[0].trim()
+    || String(process.env.CLIENT_ORIGIN || '').split(',')[0].trim()
+    || 'http://localhost:5173'
   base = base.replace(/\/$/, '')
 
   const listenPort = String(process.env.PORT || '').trim()
   try {
     const u = new URL(base)
-    // Drop mistaken ":3053" (or whatever PORT) — TLS proxy serves on 443 / default
+    // Drop mistaken API/container port from public links
     if (listenPort && u.port === listenPort) u.port = ''
+    // Bare localhost/127.0.0.1 without port resolves to :80 and breaks Vite apps
+    if ((u.hostname === 'localhost' || u.hostname === '127.0.0.1') && !u.port) {
+      u.port = '5173'
+    }
     // Prefer https public links when FORCE_HTTPS is on
     if (process.env.FORCE_HTTPS === 'true' && u.protocol === 'http:') u.protocol = 'https:'
     base = u.toString().replace(/\/$/, '')

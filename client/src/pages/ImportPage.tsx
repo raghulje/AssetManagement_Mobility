@@ -173,14 +173,16 @@ export function ImportPage() {
                   <tr key={f.key}>
                     <td>{f.label}{f.required ? ' *' : ''}</td>
                     <td>
-                      <select
-                        className="form-control"
+                      <AppSelect
                         value={mappings[f.key] || ''}
-                        onChange={(e) => setMappings((m) => ({ ...m, [f.key]: e.target.value }))}
-                      >
-                        <option value="">— skip —</option>
-                        {headers.map((h) => <option key={h} value={h}>{h}</option>)}
-                      </select>
+                        onChange={(v) => setMappings((m) => ({ ...m, [f.key]: v }))}
+                        searchable={headers.length > 8}
+                        placeholder="— skip —"
+                        options={[
+                          { value: '', label: '— skip —' },
+                          ...headers.map((h) => ({ value: h, label: h })),
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}

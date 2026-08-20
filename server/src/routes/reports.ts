@@ -2,7 +2,7 @@ import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import fs from 'node:fs'
 import path from 'node:path'
-import { all, get, run, now, limitSql } from '../db/index.js'
+import { all, get, run, now, limitSql, paginate } from '../db/index.js'
 import { fail, okItem, okList, okMessage } from '../utils/response.js'
 import { logAction } from '../services/actionLog.js'
 import { transformAsset } from '../services/transformers.js'
@@ -30,12 +30,19 @@ reportsRouter.get('/activity', async (req, res) => {
         WHEN al.item_type = 'asset' THEN (SELECT CONCAT(asset_tag, ' ', COALESCE(name,'')) FROM assets WHERE id = al.item_id)
         WHEN al.item_type = 'license' THEN (SELECT name FROM licenses WHERE id = al.item_id)
         WHEN al.item_type = 'user' THEN (SELECT CONCAT(first_name, ' ', last_name) FROM users WHERE id = al.item_id)
+        WHEN al.item_type = 'vehicle' THEN (SELECT vehicle_number FROM vehicles WHERE id = al.item_id)
+        WHEN al.item_type = 'driver' THEN (
+          SELECT TRIM(CONCAT(COALESCE(first_name,''),' ',COALESCE(last_name,''))) FROM vehicle_drivers WHERE id = al.item_id
+        )
         ELSE CONCAT(COALESCE(al.item_type,''), '#', COALESCE(al.item_id,''))
       END as item_name,
       CASE
         WHEN al.target_type = 'user' THEN (SELECT CONCAT(first_name, ' ', last_name) FROM users WHERE id = al.target_id)
         WHEN al.target_type = 'employee' THEN (
           SELECT TRIM(CONCAT(COALESCE(first_name,''), ' ', COALESCE(last_name,''))) FROM employees WHERE id = al.target_id
+        )
+        WHEN al.target_type = 'driver' THEN (
+          SELECT TRIM(CONCAT(COALESCE(first_name,''), ' ', COALESCE(last_name,''))) FROM vehicle_drivers WHERE id = al.target_id
         )
         WHEN al.target_type = 'location' THEN (SELECT name FROM locations WHERE id = al.target_id)
         ELSE NULL
@@ -47,6 +54,195 @@ reportsRouter.get('/activity', async (req, res) => {
     ${limitSql(limit, 0)}
   `, params)
   return okList(res, rows)
+})
+
+/** Fleet auditor view — vehicles + assignment + legal/insurance signals */
+reportsRouter.get('/fleet-audit', async (req, res) => {
+  const search = String(req.query.search || '').trim()
+  const city = String(req.query.city || '').trim()
+  const status = String(req.query.status || '').trim()
+  const fuel = String(req.query.fuel_type || '').trim()
+  const holding = String(req.query.holding || '').trim()
+  const from = String(req.query.from || '').trim()
+  const to = String(req.query.to || '').trim()
+  const limit = Math.min(Number(req.query.limit) || 500, 2000)
+  const offset = Math.max(Number(req.query.offset) || 0, 0)
+
+  const where = ['v.deleted_at IS NULL']
+  const params: unknown[] = []
+  if (search) {
+    where.push(`(
+      v.vehicle_number LIKE ? OR v.model LIKE ? OR v.fleet_id LIKE ? OR v.vin LIKE ?
+      OR v.assigned_name_proxy LIKE ? OR v.location_name LIKE ?
+    )`)
+    // assigned_name_proxy not a column — use OR on driver/user joins instead
+  }
+  // Rebuild search without fake column
+  const where2 = ['v.deleted_at IS NULL']
+  const params2: unknown[] = []
+  if (search) {
+    where2.push(`(
+      v.vehicle_number LIKE ? OR COALESCE(v.model,'') LIKE ? OR COALESCE(v.fleet_id,'') LIKE ?
+      OR COALESCE(v.vin,'') LIKE ? OR COALESCE(v.location_name,'') LIKE ?
+      OR COALESCE(v.driver_name,'') LIKE ?
+      OR EXISTS (
+        SELECT 1 FROM vehicle_drivers d
+        WHERE d.id = v.assigned_to AND v.assigned_type = 'driver' AND d.deleted_at IS NULL
+          AND (d.first_name LIKE ? OR d.last_name LIKE ? OR d.driver_code LIKE ?)
+      )
+    )`)
+    const q = `%${search}%`
+    params2.push(q, q, q, q, q, q, q, q, q)
+  }
+  if (city) { where2.push('v.location_name = ?'); params2.push(city) }
+  if (status) { where2.push('v.status = ?'); params2.push(status) }
+  if (fuel) { where2.push('v.fuel_type = ?'); params2.push(fuel) }
+  if (holding === 'assigned') where2.push('v.assigned_to IS NOT NULL')
+  if (holding === 'unassigned') where2.push('v.assigned_to IS NULL')
+  if (from) { where2.push('DATE(COALESCE(v.updated_at, v.created_at)) >= ?'); params2.push(from) }
+  if (to) { where2.push('DATE(COALESCE(v.updated_at, v.created_at)) <= ?'); params2.push(to) }
+
+  const sql = `
+    SELECT
+      v.id, v.vehicle_number, v.fleet_id, v.model, v.make, v.fuel_type, v.status,
+      v.location_name, v.category, v.vin, v.chassis_number,
+      v.assigned_to, v.assigned_type, v.driver_name, v.driver_phone,
+      v.assignment_kind, v.last_checkout, v.last_checkin,
+      v.purchase_date, v.purchase_cost, v.insurance_provider, v.insurance_policy_number,
+      v.insurance_expiry_date, v.registration_expiry, v.fitness_expiry_date,
+      v.puc_expiry_date, v.warranty_end_date, v.vehicle_eol_date,
+      v.current_odometer_km, v.battery_health_pct, v.created_at, v.updated_at,
+      CASE
+        WHEN v.assigned_type = 'driver' THEN (
+          SELECT TRIM(CONCAT(COALESCE(d.first_name,''),' ',COALESCE(d.last_name,'')))
+          FROM vehicle_drivers d WHERE d.id = v.assigned_to)
+        WHEN v.assigned_type = 'user' THEN (
+          SELECT TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,'')))
+          FROM users u WHERE u.id = v.assigned_to)
+        ELSE COALESCE(v.driver_name, NULL)
+      END AS holder_name,
+      (SELECT COUNT(*) FROM vehicle_captures c WHERE c.vehicle_id = v.id AND c.deleted_at IS NULL) AS photos_count,
+      (SELECT COUNT(*) FROM vehicle_maintenances m WHERE m.vehicle_id = v.id AND m.deleted_at IS NULL) AS maintenance_count
+    FROM vehicles v
+    WHERE ${where2.join(' AND ')}
+    ORDER BY v.vehicle_number ASC
+  `
+  // silence unused first where draft
+  void where
+  void params
+  const { rows, total } = await paginate(sql, params2, limit, offset)
+  return okList(res, rows, total)
+})
+
+reportsRouter.get('/fleet-audit/export', async (req, res) => {
+  // Reuse same filters as fleet-audit, return CSV
+  const search = String(req.query.search || '').trim()
+  const city = String(req.query.city || '').trim()
+  const status = String(req.query.status || '').trim()
+  const fuel = String(req.query.fuel_type || '').trim()
+  const holding = String(req.query.holding || '').trim()
+  const from = String(req.query.from || '').trim()
+  const to = String(req.query.to || '').trim()
+
+  const where2 = ['v.deleted_at IS NULL']
+  const params2: unknown[] = []
+  if (search) {
+    where2.push(`(
+      v.vehicle_number LIKE ? OR COALESCE(v.model,'') LIKE ? OR COALESCE(v.fleet_id,'') LIKE ?
+      OR COALESCE(v.vin,'') LIKE ? OR COALESCE(v.location_name,'') LIKE ?
+      OR COALESCE(v.driver_name,'') LIKE ?
+    )`)
+    const q = `%${search}%`
+    params2.push(q, q, q, q, q, q)
+  }
+  if (city) { where2.push('v.location_name = ?'); params2.push(city) }
+  if (status) { where2.push('v.status = ?'); params2.push(status) }
+  if (fuel) { where2.push('v.fuel_type = ?'); params2.push(fuel) }
+  if (holding === 'assigned') where2.push('v.assigned_to IS NOT NULL')
+  if (holding === 'unassigned') where2.push('v.assigned_to IS NULL')
+  if (from) { where2.push('DATE(COALESCE(v.updated_at, v.created_at)) >= ?'); params2.push(from) }
+  if (to) { where2.push('DATE(COALESCE(v.updated_at, v.created_at)) <= ?'); params2.push(to) }
+
+  const rows = await all<Record<string, unknown>>(`
+    SELECT
+      v.vehicle_number, v.fleet_id, v.make, v.model, v.fuel_type, v.status, v.location_name,
+      v.assigned_type, v.driver_name, v.driver_phone, v.last_checkout,
+      v.vin, v.insurance_policy_number, v.insurance_expiry_date,
+      v.registration_expiry, v.fitness_expiry_date, v.vehicle_eol_date,
+      v.purchase_date, v.purchase_cost, v.current_odometer_km, v.updated_at
+    FROM vehicles v
+    WHERE ${where2.join(' AND ')}
+    ORDER BY v.vehicle_number ASC
+    LIMIT 5000
+  `, params2)
+
+  const headers = [
+    'Registration', 'Fleet ID', 'Make', 'Model', 'Fuel', 'Status', 'City',
+    'Assigned type', 'Holder', 'Phone', 'Assigned since',
+    'VIN', 'Insurance policy', 'Insurance expiry', 'Reg expiry', 'Fitness expiry', 'EOL',
+    'Purchase date', 'Purchase cost', 'Odometer', 'Updated',
+  ]
+  const escape = (v: unknown) => {
+    const s = v == null ? '' : String(v)
+    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`
+    return s
+  }
+  const lines = [
+    headers.join(','),
+    ...rows.map((r) => [
+      r.vehicle_number, r.fleet_id, r.make, r.model, r.fuel_type, r.status, r.location_name,
+      r.assigned_type, r.driver_name, r.driver_phone, r.last_checkout,
+      r.vin, r.insurance_policy_number, r.insurance_expiry_date,
+      r.registration_expiry, r.fitness_expiry_date, r.vehicle_eol_date,
+      r.purchase_date, r.purchase_cost, r.current_odometer_km, r.updated_at,
+    ].map(escape).join(',')),
+  ]
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+  res.setHeader('Content-Disposition', 'attachment; filename="fleet-audit.csv"')
+  return res.send('\uFEFF' + lines.join('\n'))
+})
+
+/** Activity log CSV for auditors */
+reportsRouter.get('/activity/export', async (req, res) => {
+  const action = String(req.query.action_type || '')
+  const itemType = String(req.query.item_type || '') || 'vehicle'
+  const from = String(req.query.from || '')
+  const to = String(req.query.to || '')
+  const params: unknown[] = []
+  let where = 'WHERE al.deleted_at IS NULL'
+  if (action) { where += ' AND al.action_type = ?'; params.push(action) }
+  if (itemType) { where += ' AND al.item_type = ?'; params.push(itemType) }
+  if (from) { where += ' AND DATE(al.action_date) >= ?'; params.push(from) }
+  if (to) { where += ' AND DATE(al.action_date) <= ?'; params.push(to) }
+
+  const rows = await all<Record<string, unknown>>(`
+    SELECT al.action_date, al.action_type, al.item_type, al.item_id, al.target_type, al.target_id,
+      al.note, u.username AS admin,
+      CASE WHEN al.item_type = 'vehicle' THEN (SELECT vehicle_number FROM vehicles WHERE id = al.item_id)
+           WHEN al.item_type = 'driver' THEN (SELECT TRIM(CONCAT(COALESCE(first_name,''),' ',COALESCE(last_name,''))) FROM vehicle_drivers WHERE id = al.item_id)
+           ELSE CONCAT(al.item_type, '#', al.item_id) END AS item_name
+    FROM action_logs al
+    LEFT JOIN users u ON u.id = al.user_id
+    ${where}
+    ORDER BY al.action_date DESC, al.id DESC
+    LIMIT 10000
+  `, params)
+
+  const escape = (v: unknown) => {
+    const s = v == null ? '' : String(v)
+    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`
+    return s
+  }
+  const headers = ['Date', 'Admin', 'Action', 'Item type', 'Item', 'Target type', 'Target id', 'Note']
+  const lines = [
+    headers.join(','),
+    ...rows.map((r) => [
+      r.action_date, r.admin, r.action_type, r.item_type, r.item_name, r.target_type, r.target_id, r.note,
+    ].map(escape).join(',')),
+  ]
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+  res.setHeader('Content-Disposition', 'attachment; filename="fleet-activity.csv"')
+  return res.send('\uFEFF' + lines.join('\n'))
 })
 
 reportsRouter.get('/hub', async (_req, res) => {

@@ -114,7 +114,9 @@ export const dashboardApi = {
 }
 
 export const reportsApi = {
-  activity: () => api<ApiList<Record<string, unknown>>>('/reports/activity'),
+  activity: (qs = '') => api<ApiList<Record<string, unknown>>>(`/reports/activity${qs ? (qs.startsWith('?') ? qs : `?${qs}`) : ''}`),
+  activityFiltered: (qs: string) => api<ApiList<Record<string, unknown>>>(`/reports/activity?${qs}`),
+  fleetAudit: (qs: string) => api<ApiList<Record<string, unknown>>>(`/reports/fleet-audit?${qs}`),
 }
 
 export type SelectOption = { id: number; text: string; code?: string | null; company_id?: number }

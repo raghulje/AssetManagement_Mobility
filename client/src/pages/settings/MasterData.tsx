@@ -4,6 +4,7 @@ import AppLayout from '../../layout/AppLayout'
 import { Box, Field, PageForm, DataTable } from '../../components/ui'
 import { api, mastersApi, type SelectOption } from '../../api/client'
 import { useToast } from '../../components/Toast'
+import { AppSelect } from '../../components/formControls'
 
 type Row = Record<string, string | number | boolean>
 type MasterKind = 'companies' | 'departments' | 'locations'
@@ -248,10 +249,16 @@ function ApiMasterForm({ kind }: { kind: MasterKind }) {
         )}
         {(kind === 'departments' || kind === 'locations') && (
           <Field label="Company">
-            <select className="form-control" value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
-              <option value="">—</option>
-              {companies.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
-            </select>
+            <AppSelect
+              value={companyId}
+              onChange={setCompanyId}
+              searchable
+              placeholder="—"
+              options={[
+                { value: '', label: '—' },
+                ...companies.map((o) => ({ value: String(o.id), label: o.text })),
+              ]}
+            />
           </Field>
         )}
         {kind === 'locations' && (
@@ -483,15 +490,17 @@ function CrudResourceForm({
           if (f.type === 'select') {
             return (
               <Field key={f.key} label={f.label} required={f.required}>
-                <select
-                  className="form-control"
+                <AppSelect
                   value={String(values[f.key] ?? '')}
-                  onChange={(e) => set(f.key, e.target.value)}
+                  onChange={(v) => set(f.key, v)}
                   required={f.required}
-                >
-                  <option value="">—</option>
-                  {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
+                  searchable={f.options.length > 8}
+                  placeholder="—"
+                  options={[
+                    { value: '', label: '—' },
+                    ...f.options.map((o) => ({ value: o.value, label: o.label })),
+                  ]}
+                />
               </Field>
             )
           }
@@ -1011,16 +1020,28 @@ function ModelApiForm() {
           <input className="form-control" value={modelNumber} onChange={(e) => setModelNumber(e.target.value)} />
         </Field>
         <Field label="Category">
-          <select className="form-control" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-            <option value="">—</option>
-            {categories.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
-          </select>
+          <AppSelect
+            value={categoryId}
+            onChange={setCategoryId}
+            searchable
+            placeholder="—"
+            options={[
+              { value: '', label: '—' },
+              ...categories.map((o) => ({ value: String(o.id), label: o.text })),
+            ]}
+          />
         </Field>
         <Field label="Manufacturer">
-          <select className="form-control" value={manufacturerId} onChange={(e) => setManufacturerId(e.target.value)}>
-            <option value="">—</option>
-            {manufacturers.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
-          </select>
+          <AppSelect
+            value={manufacturerId}
+            onChange={setManufacturerId}
+            searchable
+            placeholder="—"
+            options={[
+              { value: '', label: '—' },
+              ...manufacturers.map((o) => ({ value: String(o.id), label: o.text })),
+            ]}
+          />
         </Field>
         <Field label="Notes">
           <textarea className="form-control" value={notes} onChange={(e) => setNotes(e.target.value)} />

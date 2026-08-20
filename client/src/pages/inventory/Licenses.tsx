@@ -904,16 +904,16 @@ export function LicenseForm() {
             value={empSearch}
             onChange={(e) => setEmpSearch(e.target.value)}
           />
-          <select
-            className="form-control"
+          <AppSelect
             value={form.requested_by_employee_id}
-            onChange={(e) => set('requested_by_employee_id', e.target.value)}
-          >
-            <option value="">— Select requester —</option>
-            {employees.map((o) => (
-              <option key={o.id} value={o.id}>{o.text}</option>
-            ))}
-          </select>
+            onChange={(v) => set('requested_by_employee_id', v)}
+            searchable={employees.length > 8}
+            placeholder="— Select requester —"
+            options={[
+              { value: '', label: '— Select requester —' },
+              ...employees.map((o) => ({ value: String(o.id), label: o.text })),
+            ]}
+          />
           <p className="help-block">HRMS employee who requested this license (e.g. for Cursor Pro)</p>
         </Field>
 
@@ -922,20 +922,20 @@ export function LicenseForm() {
         </Field>
 
         <Field label="Subscription period">
-          <select
-            className="form-control"
+          <AppSelect
             value={form.subscription_period}
-            onChange={(e) => {
-              const v = e.target.value as FormState['subscription_period']
-              set('subscription_period', v)
-              if (v !== 'none' && !form.is_recurring) set('is_recurring', true)
+            onChange={(v) => {
+              const period = v as FormState['subscription_period']
+              set('subscription_period', period)
+              if (period !== 'none' && !form.is_recurring) set('is_recurring', true)
             }}
-          >
-            <option value="none">One-time / no period</option>
-            <option value="monthly">Monthly (1 month)</option>
-            <option value="annual">Annual (1 year)</option>
-            <option value="custom">Custom days or months</option>
-          </select>
+            options={[
+              { value: 'none', label: 'One-time / no period' },
+              { value: 'monthly', label: 'Monthly (1 month)' },
+              { value: 'annual', label: 'Annual (1 year)' },
+              { value: 'custom', label: 'Custom days or months' },
+            ]}
+          />
         </Field>
 
         {form.subscription_period === 'custom' ? (
@@ -949,15 +949,16 @@ export function LicenseForm() {
                 value={form.subscription_custom_value}
                 onChange={(e) => set('subscription_custom_value', e.target.value)}
               />
-              <select
-                className="form-control"
-                style={{ maxWidth: 160 }}
-                value={form.subscription_custom_unit}
-                onChange={(e) => set('subscription_custom_unit', e.target.value as 'days' | 'months')}
-              >
-                <option value="months">Months</option>
-                <option value="days">Days</option>
-              </select>
+              <div style={{ maxWidth: 160, flex: 1 }}>
+                <AppSelect
+                  value={form.subscription_custom_unit}
+                  onChange={(v) => set('subscription_custom_unit', v as 'days' | 'months')}
+                  options={[
+                    { value: 'months', label: 'Months' },
+                    { value: 'days', label: 'Days' },
+                  ]}
+                />
+              </div>
             </div>
           </Field>
         ) : null}
@@ -1102,15 +1103,29 @@ export function LicenseCheckout() {
               ))}
             </div>
             {target === 'user' ? (
-              <select className="form-control" value={userId} onChange={(e) => setUserId(e.target.value)} required>
-                <option value="">Select user…</option>
-                {users.map((u) => <option key={u.id} value={u.id}>{u.text}</option>)}
-              </select>
+              <AppSelect
+                value={userId}
+                onChange={setUserId}
+                required
+                searchable={users.length > 8}
+                placeholder="Select user…"
+                options={[
+                  { value: '', label: 'Select user…' },
+                  ...users.map((u) => ({ value: String(u.id), label: u.text })),
+                ]}
+              />
             ) : (
-              <select className="form-control" value={assetId} onChange={(e) => setAssetId(e.target.value)} required>
-                <option value="">Select asset…</option>
-                {assets.map((a) => <option key={a.id} value={a.id}>{a.text}</option>)}
-              </select>
+              <AppSelect
+                value={assetId}
+                onChange={setAssetId}
+                required
+                searchable={assets.length > 8}
+                placeholder="Select asset…"
+                options={[
+                  { value: '', label: 'Select asset…' },
+                  ...assets.map((a) => ({ value: String(a.id), label: a.text })),
+                ]}
+              />
             )}
           </Field>
           <Field label="Notes"><textarea className="form-control" value={note} onChange={(e) => setNote(e.target.value)} /></Field>

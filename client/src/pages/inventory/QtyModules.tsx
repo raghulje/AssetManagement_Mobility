@@ -554,10 +554,17 @@ function QtyCheckout({
             <p className="help-block">Available: {String(item.remaining)}</p>
           </Field>
           <Field label={assignMode === 'user' ? 'Assign to App User' : 'Assign to Asset'} required>
-            <select className="form-control" value={targetId} onChange={(e) => setTargetId(e.target.value)} required>
-              <option value="">{assignMode === 'user' ? 'Select user…' : 'Select asset…'}</option>
-              {options.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
-            </select>
+            <AppSelect
+              value={targetId}
+              onChange={setTargetId}
+              required
+              searchable={options.length > 8}
+              placeholder={assignMode === 'user' ? 'Select user…' : 'Select asset…'}
+              options={[
+                { value: '', label: assignMode === 'user' ? 'Select user…' : 'Select asset…' },
+                ...options.map((o) => ({ value: String(o.id), label: o.text })),
+              ]}
+            />
           </Field>
           <Field label="Notes"><textarea className="form-control" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
           <button type="submit" className="btn btn-theme" disabled={busy}>{busy ? 'Assigning…' : 'Assign'}</button>{' '}
@@ -755,10 +762,17 @@ export function KitCheckout() {
           }}
         >
           <Field label="App User" required>
-            <select className="form-control" value={userId} onChange={(e) => setUserId(e.target.value)} required>
-              <option value="">Select user…</option>
-              {users.map((u) => <option key={u.id} value={u.id}>{u.text}</option>)}
-            </select>
+            <AppSelect
+              value={userId}
+              onChange={setUserId}
+              required
+              searchable={users.length > 8}
+              placeholder="Select user…"
+              options={[
+                { value: '', label: 'Select user…' },
+                ...users.map((u) => ({ value: String(u.id), label: u.text })),
+              ]}
+            />
           </Field>
           <button type="submit" className="btn btn-theme">Continue</button>{' '}
           <Link to="/kits" className="btn btn-default">Cancel</Link>

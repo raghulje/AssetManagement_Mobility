@@ -38,6 +38,7 @@ export const vehicleMastersApi = {
     id: number
     text: string
     name: string
+    make?: string | null
     default_fuel_type?: string
     default_category?: string | null
   }>>('/vehicle-masters/models/selectlist'),

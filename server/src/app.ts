@@ -29,6 +29,7 @@ import { groupsRouter } from './routes/groups.js'
 import { geoRouter } from './routes/geo.js'
 import vehiclesRouter from './routes/vehicles.js'
 import vehicleMastersRouter from './routes/vehicleMasters.js'
+import { driversRouter } from './routes/drivers.js'
 import { storageRoot } from './services/uploads.js'
 import { moduleGate, requirePerm } from './services/permissions.js'
 
@@ -109,6 +110,8 @@ export function createApp() {
   api.use('/groups', groupsRouter)
   api.use('/vehicles', vehiclesRouter)
   api.use('/vehicle-masters', vehicleMastersRouter)
+  api.use('/drivers', driversRouter)
+  // Legacy IT inventory APIs kept for data compatibility but not used by Mobility UI
   api.use('/hardware', moduleGate('assets'), hardwareRouter)
   api.use('/licenses', moduleGate('licenses'), licensesRouter)
   api.use('/accessories', moduleGate('accessories'), accessoriesRouter)
