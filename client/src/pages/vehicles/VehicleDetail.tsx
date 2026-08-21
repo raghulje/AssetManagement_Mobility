@@ -664,9 +664,24 @@ export default function VehicleDetail() {
 
   function focusAssignment() {
     setTab('overview')
-    requestAnimationFrame(() => {
-      assignRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    })
+    window.setTimeout(() => {
+      const el = assignRef.current
+      if (!el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.remove('vad-card--highlight')
+      // reflow so the highlight animation can replay
+      void el.offsetWidth
+      el.classList.add('vad-card--highlight')
+      window.setTimeout(() => el.classList.remove('vad-card--highlight'), 2400)
+    }, 60)
+  }
+
+  function openCaptureFromHero() {
+    autoCaptureStarted.current = false
+    const next = new URLSearchParams(params)
+    next.set('tab', 'captures')
+    next.set('capture', '1')
+    setParams(next)
   }
 
   function onQuick(action: 'service' | 'inspection' | 'map' | 'rc' | 'activity') {
@@ -705,6 +720,7 @@ export default function VehicleDetail() {
           imageUrl={heroImage}
           canEdit={canEdit}
           canDelete={canDelete}
+          onCapture={openCaptureFromHero}
           onTransfer={focusAssignment}
           onDelete={() => void removeVehicle()}
         />

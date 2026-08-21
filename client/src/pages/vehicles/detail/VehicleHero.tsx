@@ -3,6 +3,7 @@ import {
   Battery,
   Bolt,
   Car,
+  Camera,
   MapPin,
   Hash,
   Pencil,
@@ -19,6 +20,7 @@ type Props = {
   imageUrl: string | null
   canEdit: boolean
   canDelete: boolean
+  onCapture: () => void
   onTransfer: () => void
   onDelete: () => void
 }
@@ -28,6 +30,7 @@ export default function VehicleHero({
   imageUrl,
   canEdit,
   canDelete,
+  onCapture,
   onTransfer,
   onDelete,
 }: Props) {
@@ -79,6 +82,9 @@ export default function VehicleHero({
         <div className="vad-actions">
           <button type="button" className="btn btn-default" onClick={goBackToFleet}>
             <ArrowLeft size={15} /> Back
+          </button>
+          <button type="button" className="btn vad-btn-capture" onClick={onCapture}>
+            <Camera size={15} /> Capture vehicle
           </button>
           {canEdit ? (
             <Link to={`/vehicles/${vehicle.id}/edit`} className="btn vad-btn-edit">

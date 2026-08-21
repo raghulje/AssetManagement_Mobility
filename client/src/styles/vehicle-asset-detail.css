@@ -124,6 +124,14 @@
 
 .vad-btn-edit:hover { filter: brightness(1.05); }
 
+.vad-btn-capture {
+  background: #fff !important;
+  border: 1px solid #bae6fd !important;
+  color: #0369a1 !important;
+}
+
+.vad-btn-capture:hover { background: #f0f9ff !important; }
+
 .vad-btn-transfer {
   background: #fff !important;
   border: 1px solid var(--vad-border) !important;
@@ -139,6 +147,26 @@
 }
 
 .vad-btn-delete:hover { background: #fef2f2 !important; }
+
+.vad-card--highlight {
+  border-color: rgba(244, 85, 59, 0.55) !important;
+  animation: vad-assign-pulse 2.2s ease;
+  box-shadow:
+    0 0 0 3px rgba(244, 85, 59, 0.28),
+    0 14px 32px rgba(244, 85, 59, 0.14);
+}
+
+@keyframes vad-assign-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(244, 85, 59, 0.5), 0 8px 20px rgba(15, 23, 42, 0.06);
+  }
+  35% {
+    box-shadow: 0 0 0 8px rgba(244, 85, 59, 0.18), 0 14px 32px rgba(244, 85, 59, 0.16);
+  }
+  100% {
+    box-shadow: 0 0 0 3px rgba(244, 85, 59, 0.22), 0 10px 24px rgba(15, 23, 42, 0.06);
+  }
+}
 
 .vad-status {
   display: inline-flex;
