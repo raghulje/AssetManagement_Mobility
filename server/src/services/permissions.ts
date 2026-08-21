@@ -24,7 +24,7 @@ export type ActionKey = (typeof ACTIONS)[number]
 
 /** Actions that apply per module (checkout only for inventory-like modules). */
 export const MODULE_ACTIONS: Record<ModuleKey, ActionKey[]> = {
-  vehicles: ['view', 'create', 'edit', 'delete'],
+  vehicles: ['view', 'create', 'edit', 'delete', 'checkout'],
   drivers: ['view', 'create', 'edit', 'delete'],
   masters: ['view', 'create', 'edit', 'delete'],
   assets: ['view', 'create', 'edit', 'delete', 'checkout'],
@@ -83,9 +83,9 @@ export function allModulePerms(opts?: { notifyOps?: boolean; includeCheckout?: b
       out[`${mod}.${act}`] = '1'
     }
   }
-  // Always include checkout for inventory modules when full access
+  // Always include checkout for inventory + fleet assign/unassign when full access
   if (opts?.includeCheckout !== false) {
-    for (const mod of ['assets', 'licenses', 'accessories', 'consumables', 'components'] as ModuleKey[]) {
+    for (const mod of ['vehicles', 'assets', 'licenses', 'accessories', 'consumables', 'components'] as ModuleKey[]) {
       out[`${mod}.checkout`] = '1'
     }
   }
@@ -258,11 +258,35 @@ export async function ensureDefaultRoles() {
   }
 
   // Soft migrate built-in roles that predate Mobility module keys
-  await grantMissingPermsToRole('Superusers', mobilityFullPerms(), ts)
-  await grantMissingPermsToRole('Admin', mobilityFullPerms(), ts)
-  await grantMissingPermsToRole('Fleet Ops', { ...mobilityFullPerms(), 'settings.view': '1', 'settings.edit': '1' }, ts)
-  await grantMissingPermsToRole('IT Asset Manager', { ...mobilityFullPerms(), 'settings.view': '1', 'settings.edit': '1' }, ts)
+  await grantMissingPermsToRole('Superusers', { ...mobilityFullPerms(), 'vehicles.checkout': '1' }, ts)
+  await grantMissingPermsToRole('Admin', { ...mobilityFullPerms(), 'vehicles.checkout': '1' }, ts)
+  await grantMissingPermsToRole('Fleet Ops', { ...mobilityFullPerms(), 'settings.view': '1', 'settings.edit': '1', 'vehicles.checkout': '1' }, ts)
+  await grantMissingPermsToRole('IT Asset Manager', { ...mobilityFullPerms(), 'settings.view': '1', 'settings.edit': '1', 'vehicles.checkout': '1' }, ts)
   await grantMissingPermsToRole('Viewer', mobilityViewPerms(), ts)
+  await grantMissingPermsToRole('App Managers', { ...mobilityFullPerms(), 'vehicles.checkout': '1' }, ts)
+
+  // Any role that can edit vehicles should be able to assign/unassign
+  const editRoles = await all<{ id: number; permissions: unknown }>(`
+    SELECT id, permissions FROM permission_groups
+  `)
+  for (const role of editRoles) {
+    const p = parsePerms(role.permissions)
+    if (isTruthyPerm(p['vehicles.edit']) && !isTruthyPerm(p['vehicles.checkout'])) {
+      p['vehicles.checkout'] = '1'
+      await run(`UPDATE permission_groups SET permissions = ?, updated_at = ? WHERE id = ?`, [
+        JSON.stringify(mergePermissions(p)),
+        ts,
+        role.id,
+      ])
+      const members = await all<{ user_id: number }>(
+        `SELECT user_id FROM users_groups WHERE group_id = ?`,
+        [role.id],
+      )
+      for (const m of members) {
+        await syncUserPermissions(Number(m.user_id))
+      }
+    }
+  }
 
   const su = await get<{ id: number }>(`SELECT id FROM permission_groups WHERE name = 'Superusers' LIMIT 1`)
   const adminGroup = await get<{ id: number }>(`SELECT id FROM permission_groups WHERE name = 'Admin' LIMIT 1`)
@@ -330,6 +354,10 @@ export function moduleGate(module: ModuleKey) {
     const permission = `${module}.${action}`
     const perms = req.user?.permissions || {}
     if (hasPermission(perms, permission)) return next()
+    // Fleet assign/unassign: accept vehicles.edit until roles are re-synced with vehicles.checkout
+    if (module === 'vehicles' && action === 'checkout' && hasPermission(perms, 'vehicles.edit')) {
+      return next()
+    }
     return fail(res, `Forbidden: missing ${permission}`, 403)
   }
 }

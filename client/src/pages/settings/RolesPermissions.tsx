@@ -14,7 +14,7 @@ type Role = {
 }
 
 const MODULE_LABELS: Record<string, string> = {
-  vehicles: 'Vehicles',
+  vehicles: 'Vehicles (incl. assign / unassign)',
   drivers: 'Drivers',
   masters: 'Masters (cities / models)',
   people: 'App users',
