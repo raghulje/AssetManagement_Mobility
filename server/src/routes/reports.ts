@@ -836,7 +836,7 @@ settingsRouter.get('/saml', async (_req, res) => {
   return okItem(res, {
     enabled: samlEnabled(),
     idp_configured: idpConfigured(),
-    button_label: process.env.SAML_BUTTON_LABEL || 'RefexOne SSO',
+    button_label: process.env.SAML_BUTTON_LABEL || 'Refex Mobility SSO',
     ...samlSpConfig(),
     portal_fields: samlPortalFields(),
     env_hint: {
@@ -845,7 +845,7 @@ settingsRouter.get('/saml', async (_req, res) => {
       SAML_IDP_CERT: 'X.509 cert from RefexOne IdP metadata (PEM or base64)',
       SAML_IDP_SLO_URL: 'optional IdP logout URL',
       SAML_AUTO_PROVISION: 'false (set true to auto-create App Users on first SSO)',
-      PUBLIC_APP_URL: 'https://asset.refexone.com',
+      PUBLIC_APP_URL: 'https://mobility.refexone.com',
     },
   })
 })

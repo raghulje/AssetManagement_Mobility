@@ -30,6 +30,7 @@ type PendingCapture = {
   longitude: number | null
   address: string | null
   uploading?: boolean
+  statusText?: string
   error?: string
 }
 
@@ -63,7 +64,8 @@ export default function VehicleDetail() {
   const navigate = useNavigate()
   const toast = useToast()
   const { can, isAdmin } = useAuth()
-  const fileRef = useRef<HTMLInputElement>(null)
+  // Live capture only for GPS photos — gallery file upload kept commented for later.
+  // const fileRef = useRef<HTMLInputElement>(null)
   const attachRef = useRef<HTMLInputElement>(null)
   const assignRef = useRef<HTMLElement | null>(null)
 
@@ -163,25 +165,56 @@ export default function VehicleDetail() {
     return next
   }
 
-  async function processFile(file: File, knownPos?: PrecisePosition | null) {
+  async function processFile(file: File, knownPos?: PrecisePosition | null, opts?: { gpsAlreadyTried?: boolean }) {
     if (!id) return
     const capturedAtDate = knownPos?.capturedAt || new Date()
     const capturedAt = formatSqlDate(capturedAtDate)
     const previewUrl = URL.createObjectURL(file)
     const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-    setPending((p) => [{ localId, previewUrl, capturedAt, latitude: null, longitude: null, address: null, uploading: true }, ...p])
-    setBusy(true)
+    const gpsAlreadyTried = Boolean(opts?.gpsAlreadyTried)
+    setPending((p) => [{
+      localId,
+      previewUrl,
+      capturedAt,
+      latitude: knownPos?.latitude ?? null,
+      longitude: knownPos?.longitude ?? null,
+      address: null,
+      uploading: true,
+      statusText: knownPos ? 'Stamping GPS…' : (gpsAlreadyTried ? 'Saving photo…' : 'Getting GPS…'),
+    }, ...p])
+    // Do not lock the whole page — allow more live captures while this one uploads
     try {
-      const pos = knownPos ?? await readPrecisePosition({ targetAccuracyM: 25, timeoutMs: 18000 })
+      // Webcam already attempted GPS — don't block another ~18s before upload
+      const pos = gpsAlreadyTried
+        ? (knownPos ?? null)
+        : (knownPos ?? await readPrecisePosition({ targetAccuracyM: 25, timeoutMs: 12000 }))
       let address: string | null = null
       let localityHeader: string | null = null
       const latitude = pos?.latitude ?? null
       const longitude = pos?.longitude ?? null
       const accuracyM = pos?.accuracyM ?? null
       let mapImageUrl: string | null = null
+
+      setPending((list) => list.map((item) => (
+        item.localId === localId
+          ? {
+              ...item,
+              latitude,
+              longitude,
+              statusText: latitude != null ? 'Resolving address…' : 'Saving photo…',
+              address: latitude == null ? 'Location unavailable' : null,
+            }
+          : item
+      )))
+
       if (latitude != null && longitude != null) {
         try {
-          const geo = await vehiclesApi.reverseGeocode(latitude, longitude)
+          const geo = await Promise.race([
+            vehiclesApi.reverseGeocode(latitude, longitude),
+            new Promise<never>((_, reject) => {
+              window.setTimeout(() => reject(new Error('Geocode timeout')), 8000)
+            }),
+          ])
           address = (typeof geo.address === 'string' ? geo.address : null)
             || (typeof geo.formatted_address === 'string' ? geo.formatted_address : null)
             || null
@@ -189,8 +222,17 @@ export default function VehicleDetail() {
         } catch {
           address = `${latitude.toFixed(7)}, ${longitude.toFixed(7)}`
         }
-        mapImageUrl = await fetchGpsStaticMapUrl(latitude, longitude, 400)
+        mapImageUrl = await Promise.race([
+          fetchGpsStaticMapUrl(latitude, longitude, 400),
+          new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), 6000) }),
+        ])
       }
+
+      setPending((list) => list.map((item) => (
+        item.localId === localId
+          ? { ...item, address: address || (latitude == null ? 'Location unavailable' : item.address), statusText: 'Stamping photo…' }
+          : item
+      )))
 
       const stamped = await stampGpsOnImage(file, {
         capturedAt: capturedAtDate,
@@ -209,7 +251,7 @@ export default function VehicleDetail() {
 
       setPending((list) => list.map((item) => (
         item.localId === localId
-          ? { ...item, previewUrl: stampedPreview, latitude, longitude, address }
+          ? { ...item, previewUrl: stampedPreview, latitude, longitude, address: address || (latitude == null ? 'Location unavailable' : null), statusText: 'Uploading…' }
           : item
       )))
 
@@ -229,10 +271,12 @@ export default function VehicleDetail() {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Upload failed'
-      setPending((list) => list.map((item) => (item.localId === localId ? { ...item, uploading: false, error: msg } : item)))
+      setPending((list) => list.map((item) => (
+        item.localId === localId
+          ? { ...item, uploading: false, statusText: undefined, error: msg }
+          : item
+      )))
       toast.error(msg)
-    } finally {
-      setBusy(false)
     }
   }
 
@@ -488,40 +532,55 @@ export default function VehicleDetail() {
             <div className="vad-panel__bar">
               <h3>Photo captures</h3>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => setWebcamOpen(true)}>
-                  Webcam
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => setWebcamOpen(true)}>
+                  <i className="fas fa-camera" /> Take photo
                 </button>
+                {/* Gallery / phone file upload disabled — live camera only for GPS stamps.
                 <button type="button" className="btn btn-default btn-sm" disabled={busy} onClick={() => fileRef.current?.click()}>
                   Phone / file
                 </button>
+                */}
               </div>
             </div>
+            {/*
             <input ref={fileRef} type="file" accept="image/*" capture="environment" className="sr-only" onChange={(e) => {
               const f = e.target.files?.[0]
               e.target.value = ''
               if (f) void processFile(f)
             }} />
+            */}
             <VehicleWebcamCapture
               open={webcamOpen}
               vehicleLabel={v.vehicle_number}
               onClose={() => setWebcamOpen(false)}
-              onCapture={(file, position) => { void processFile(file, position) }}
+              onCapture={(file, position) => { void processFile(file, position, { gpsAlreadyTried: true }) }}
             />
             {captures.length === 0 && pending.length === 0 ? (
               <div className="vad-empty">
                 <strong>No photos yet</strong>
-                Capture a GPS-stamped inspection photo to start the gallery.
+                Use Take photo for a live GPS-stamped capture. You can take as many as you need — each one saves automatically.
               </div>
             ) : (
               <div className="vad-gallery">
-                <button type="button" className="vc-add-card" disabled={busy} onClick={() => setWebcamOpen(true)}>
-                  <i className="fas fa-video" /><span>Open webcam</span>
+                <button type="button" className="vc-add-card" onClick={() => setWebcamOpen(true)}>
+                  <i className="fas fa-camera" /><span>Take photo</span>
                 </button>
                 {pending.map((p) => (
                   <div key={p.localId} className="vc-pending-wrap">
                     <VehicleCaptureFrame photoUrl={p.previewUrl} capturedAt={p.capturedAt} latitude={p.latitude} longitude={p.longitude} address={p.address} />
-                    {p.uploading ? <div className="vc-pending-badge">Saving...</div> : null}
-                    {p.error ? <div className="vc-pending-badge vc-pending-badge--error">{p.error}</div> : null}
+                    {p.uploading ? <div className="vc-pending-badge">{p.statusText || 'Saving…'}</div> : null}
+                    {p.error ? (
+                      <div className="vc-pending-badge vc-pending-badge--error">
+                        <span>{p.error}</span>
+                        <button
+                          type="button"
+                          className="vc-pending-dismiss"
+                          onClick={() => setPending((list) => list.filter((x) => x.localId !== p.localId))}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ))}
                 {captures.map((c) => (
@@ -570,43 +629,75 @@ export default function VehicleDetail() {
                 Upload invoice, PO, RC, or other vehicle documents.
               </div>
             ) : (
-              <table className="vad-doc-table">
-                <thead>
-                  <tr>
-                    <th>Document</th>
-                    <th>Type</th>
-                    <th>Uploaded</th>
-                    <th>Status</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {files.map((f) => (
-                    <tr key={String(f.id)}>
-                      <td>
-                        <a href={String(f.url)} target="_blank" rel="noreferrer">
-                          {String(f.original_filename || f.filename)}
-                        </a>
-                      </td>
-                      <td>{String(f.kind)}</td>
-                      <td>{String(f.created_at || '-')}</td>
-                      <td><span className="vad-badge-soft">Uploaded</span></td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn btn-xs btn-danger"
-                          onClick={async () => {
-                            await vehiclesApi.deleteFile(String(f.id))
-                            setFiles((list) => list.filter((x) => x.id !== f.id))
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </td>
+              <>
+              <div className="table-responsive data-table-desktop">
+                <table className="vad-doc-table">
+                  <thead>
+                    <tr>
+                      <th>Document</th>
+                      <th>Type</th>
+                      <th>Uploaded</th>
+                      <th>Status</th>
+                      <th />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {files.map((f) => (
+                      <tr key={String(f.id)}>
+                        <td>
+                          <a href={String(f.url)} target="_blank" rel="noreferrer">
+                            {String(f.original_filename || f.filename)}
+                          </a>
+                        </td>
+                        <td>{String(f.kind)}</td>
+                        <td>{String(f.created_at || '-')}</td>
+                        <td><span className="vad-badge-soft">Uploaded</span></td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-danger"
+                            onClick={async () => {
+                              await vehiclesApi.deleteFile(String(f.id))
+                              setFiles((list) => list.filter((x) => x.id !== f.id))
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="data-table-mobile" aria-label="Documents">
+                {files.map((f) => (
+                  <article key={String(f.id)} className="data-card">
+                    <div className="data-card-title">
+                      <a href={String(f.url)} target="_blank" rel="noreferrer">
+                        {String(f.original_filename || f.filename)}
+                      </a>
+                    </div>
+                    <dl className="data-card-fields">
+                      <div className="data-card-field"><dt>Type</dt><dd>{String(f.kind)}</dd></div>
+                      <div className="data-card-field"><dt>Uploaded</dt><dd>{String(f.created_at || '-')}</dd></div>
+                      <div className="data-card-field"><dt>Status</dt><dd><span className="vad-badge-soft">Uploaded</span></dd></div>
+                    </dl>
+                    <div className="data-card-actions">
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-danger"
+                        onClick={async () => {
+                          await vehiclesApi.deleteFile(String(f.id))
+                          setFiles((list) => list.filter((x) => x.id !== f.id))
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              </>
             )}
           </div>
         ) : null}

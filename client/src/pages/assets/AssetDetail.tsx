@@ -481,7 +481,7 @@ export default function AssetDetail() {
                 <p className="mb-0">
                   Scan is queued, but this PC is <strong>not polling</strong> right now.
                   On <code>{String(agentStatus?.agent?.hostname || 'the device')}</code> open the agent EXE →
-                  confirm API <code>https://asset.refexone.com/api/v1</code> → click <strong>Install &amp; Start</strong>
+                  confirm API <code>https://mobility.refexone.com/api/v1</code> → click <strong>Install &amp; Start</strong>
                   (approve UAC). Within ~30 seconds the pending scan should move to done.
                 </p>
               </div>

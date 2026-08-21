@@ -33,7 +33,7 @@ router.get('/status', (_req, res) => {
   return okItem(res, {
     enabled: samlEnabled(),
     idp_configured: idpConfigured(),
-    label: process.env.SAML_BUTTON_LABEL || 'RefexOne SSO',
+    label: process.env.SAML_BUTTON_LABEL || 'Refex Mobility SSO',
     login_path: '/api/v1/auth/saml/login',
     home_url: sp.home_url,
   })

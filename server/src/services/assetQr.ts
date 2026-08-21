@@ -10,7 +10,7 @@ const QR_DIR = path.join(storageRoot, 'public/assets/qr')
 /**
  * Browser-facing origin for QR / email links.
  * Must be the proxied HTTPS domain — never container PORT (e.g. :3073).
- * Example: https://asset.refexone.com  (not https://asset.refexone.com:3073)
+ * Example: https://mobility.refexone.com  (not https://mobility.refexone.com:3073)
  * Local Vite default: http://localhost:5173 (not bare http://localhost → port 80).
  */
 export function clientBase() {

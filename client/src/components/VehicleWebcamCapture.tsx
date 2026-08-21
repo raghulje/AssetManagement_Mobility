@@ -21,7 +21,7 @@ export default function VehicleWebcamCapture({ open, vehicleLabel, onClose, onCa
   const [busy, setBusy] = useState(false)
   const [pos, setPos] = useState<PrecisePosition | null>(null)
   const [locStatus, setLocStatus] = useState('Acquiring GPS…')
-  const [facing, setFacing] = useState<'user' | 'environment'>('user')
+  const [facing, setFacing] = useState<'user' | 'environment'>('environment')
   const mirrored = facing === 'user'
 
   useEffect(() => {
@@ -75,6 +75,8 @@ export default function VehicleWebcamCapture({ open, vehicleLabel, onClose, onCa
     }
 
     void startCamera()
+
+    let watchId: number | null = null
     void readPrecisePosition({ targetAccuracyM: 25, timeoutMs: 16000 }).then((p) => {
       if (cancelled) return
       if (p) {
@@ -85,8 +87,30 @@ export default function VehicleWebcamCapture({ open, vehicleLabel, onClose, onCa
       }
     })
 
+    if (navigator.geolocation) {
+      watchId = navigator.geolocation.watchPosition(
+        (g) => {
+          if (cancelled) return
+          const next = {
+            latitude: g.coords.latitude,
+            longitude: g.coords.longitude,
+            accuracyM: g.coords.accuracy,
+            altitude: g.coords.altitude,
+            capturedAt: new Date(g.timestamp || Date.now()),
+          }
+          setPos((prev) => (!prev || next.accuracyM <= prev.accuracyM ? next : prev))
+          setLocStatus(`±${Math.round(g.coords.accuracy)} m`)
+        },
+        () => undefined,
+        { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 },
+      )
+    }
+
     return () => {
       cancelled = true
+      if (watchId != null) {
+        try { navigator.geolocation.clearWatch(watchId) } catch { /* ignore */ }
+      }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop())
         streamRef.current = null
@@ -136,7 +160,7 @@ export default function VehicleWebcamCapture({ open, vehicleLabel, onClose, onCa
       if (!blob) throw new Error('Could not encode photo')
       const file = new File([blob], `webcam-${Date.now()}.jpg`, { type: 'image/jpeg' })
       onCapture(file, usePos)
-      onClose()
+      // Keep camera open so the user can take more GPS photos in one session
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Capture failed')
     } finally {
@@ -192,12 +216,14 @@ export default function VehicleWebcamCapture({ open, vehicleLabel, onClose, onCa
             <i className="fas fa-sync-alt" /> Flip
           </button>
           <button type="button" className="btn btn-primary vc-webcam-shutter" disabled={!ready || busy} onClick={() => void snap()}>
-            {busy ? 'Capturing…' : 'Capture GPS photo'}
+            {busy ? 'Capturing…' : 'Take photo'}
           </button>
         </footer>
-        {!pos ? (
-          <p className="vc-webcam-hint">Tip: allow Location for this site so lat/lng and address are stamped.</p>
-        ) : null}
+        <p className="vc-webcam-hint">
+          {!pos
+            ? 'Allow Location so lat/lng and address are stamped. Tap Take photo again for more shots — each saves automatically.'
+            : 'Tap Take photo for another shot anytime. Close when you are done — each capture saves automatically.'}
+        </p>
       </div>
     </div>
   )

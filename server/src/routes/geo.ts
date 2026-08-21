@@ -15,7 +15,7 @@ const GOOGLE_DETAILS = 'https://maps.googleapis.com/maps/api/place/details/json'
 const GOOGLE_PLACES_NEARBY_NEW = 'https://places.googleapis.com/v1/places:searchNearby'
 const GOOGLE_STATIC_MAP = 'https://maps.googleapis.com/maps/api/staticmap'
 const UA = process.env.NOMINATIM_USER_AGENT
-  || `RefexITAM/1.0 (${process.env.PUBLIC_APP_URL || 'https://asset.refexone.com'}; itam@refex.co.in)`
+  || `RefexMobility/1.0 (${process.env.PUBLIC_APP_URL || 'https://mobility.refexone.com'}; mobility@refex.co.in)`
 
 function googleServerKey() {
   return String(process.env.GOOGLE_MAPS_API_KEY || '').trim()

@@ -169,7 +169,8 @@ export default function VehicleMastersPage() {
           {loading ? (
             <div className="rm-empty">Loading…</div>
           ) : tab === 'cities' ? (
-            <div className="table-responsive">
+            <>
+            <div className="table-responsive data-table-desktop">
               <table className="table table-hover" style={{ marginBottom: 0 }}>
                 <thead>
                   <tr>
@@ -212,8 +213,42 @@ export default function VehicleMastersPage() {
                 </tbody>
               </table>
             </div>
+            <div className="data-table-mobile" aria-label="Cities">
+              {!cities.length ? <p className="text-muted data-card-empty">No cities yet</p> : null}
+              {cities.map((c) => (
+                <article key={c.id} className="data-card">
+                  <div className="data-card-title">{c.name}</div>
+                  <dl className="data-card-fields">
+                    <div className="data-card-field"><dt>Code</dt><dd>{c.code || '—'}</dd></div>
+                    <div className="data-card-field"><dt>State</dt><dd>{c.state || '—'}</dd></div>
+                    <div className="data-card-field"><dt>Vehicles</dt><dd>{c.vehicles_count ?? 0}</dd></div>
+                  </dl>
+                  <div className="data-card-actions">
+                    <button type="button" className="btn btn-sm btn-default" onClick={() => openEditCity(c)}>Edit</button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-danger"
+                      onClick={async () => {
+                        if (!window.confirm(`Delete city ${c.name}?`)) return
+                        try {
+                          await vehicleMastersApi.deleteCity(c.id)
+                          toast.success('Deleted')
+                          await reload()
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : 'Delete failed')
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+            </>
           ) : (
-            <div className="table-responsive">
+            <>
+            <div className="table-responsive data-table-desktop">
               <table className="table table-hover" style={{ marginBottom: 0 }}>
                 <thead>
                   <tr>
@@ -266,6 +301,51 @@ export default function VehicleMastersPage() {
                 </tbody>
               </table>
             </div>
+            <div className="data-table-mobile" aria-label="Models">
+              {!models.length ? <p className="text-muted data-card-empty">No models yet</p> : null}
+              {models.map((m) => (
+                <article key={m.id} className="data-card">
+                  <div className="data-card-top">
+                    <div className="rm-fleet-thumb" style={{ width: 36, height: 36, fontSize: 14, flexShrink: 0 }}>
+                      <i className={m.default_fuel_type === 'EV' ? 'fas fa-bolt' : 'fas fa-car'} />
+                    </div>
+                    <div className="data-card-title">{m.name}</div>
+                  </div>
+                  <dl className="data-card-fields">
+                    <div className="data-card-field"><dt>Make</dt><dd>{m.make || '—'}</dd></div>
+                    <div className="data-card-field">
+                      <dt>Fuel</dt>
+                      <dd>
+                        <span className={`rm-status ${m.default_fuel_type === 'EV' ? 'rm-status--active' : ''}`}>
+                          {m.default_fuel_type || '—'}
+                        </span>
+                      </dd>
+                    </div>
+                    <div className="data-card-field"><dt>Fleet</dt><dd>{m.vehicles_count ?? 0}</dd></div>
+                  </dl>
+                  <div className="data-card-actions">
+                    <button type="button" className="btn btn-sm btn-default" onClick={() => openEditModel(m)}>Edit</button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-danger"
+                      onClick={async () => {
+                        if (!window.confirm(`Delete model ${m.name}?`)) return
+                        try {
+                          await vehicleMastersApi.deleteModel(m.id)
+                          toast.success('Deleted')
+                          await reload()
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : 'Delete failed')
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+            </>
           )}
         </div>
       </div>

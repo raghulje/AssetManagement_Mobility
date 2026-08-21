@@ -561,10 +561,11 @@ export function SettingsGeneral() {
         </Box>
       </form>
 
-      <Box title="SAML / RefexOne SSO" type="primary">
+      <Box title="SAML / Refex Mobility SSO" type="primary">
         <p className="help-block" style={{ marginTop: 0 }}>
-          Enter these values in the RefexOne portal SAML app registration. Set{' '}
-          <code>PUBLIC_APP_URL=https://asset.refexone.com</code> (no port), then{' '}
+          Paste these into the RefexOne portal SAML app for <strong>Refex Mobility</strong> (remove any old
+          Kissflow / Expense Management ACS values). Production uses{' '}
+          <code>PUBLIC_APP_URL=https://mobility.refexone.com</code> (no port). Then set{' '}
           <code>SAML_ENABLED=true</code> and paste IdP SSO URL + certificate into{' '}
           <code>server/.env</code>.
         </p>
@@ -684,7 +685,7 @@ export function SettingsGeneral() {
         <p className="help-block" style={{ marginTop: 0 }}>
           Clears every asset&apos;s QR token, public URL, image path, and printed-label counters, and deletes
           stored QR PNG files. Use after changing the public domain (e.g. to{' '}
-          <code>https://asset.refexone.com</code>) so Print Label mints fresh codes without{' '}
+          <code>https://mobility.refexone.com</code>) so Print Label mints fresh codes without{' '}
           <code>:3073</code>.
         </p>
         <button

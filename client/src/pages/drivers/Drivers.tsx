@@ -181,7 +181,7 @@ export function DriversPage() {
                 <i className="fas fa-plus" /> Add driver
               </button>
             </div>
-            <div className="rm-filters" style={{ gridTemplateColumns: '1.5fr 1fr 1fr' }}>
+            <div className="rm-filters rm-filters--stack">
               <input className="form-control" placeholder="Search name, code, phone, license…" value={search} onChange={(e) => setSearch(e.target.value)} />
               <AppSelect
                 value={status}
@@ -208,7 +208,8 @@ export function DriversPage() {
               />
             </div>
             {loading ? <div className="rm-empty">Loading…</div> : (
-              <div className="table-responsive">
+              <>
+              <div className="table-responsive data-table-desktop">
                 <table className="table table-hover" style={{ marginBottom: 0 }}>
                   <thead>
                     <tr>
@@ -248,6 +249,38 @@ export function DriversPage() {
                   </tbody>
                 </table>
               </div>
+              <div className="data-table-mobile" aria-label="Drivers">
+                {!rows.length ? <p className="text-muted data-card-empty">No drivers yet</p> : null}
+                {rows.map((d) => (
+                  <article key={d.id} className="data-card" onClick={() => openEdit(d)} style={{ cursor: 'pointer' }}>
+                    <div className="data-card-title">
+                      {d.name}
+                      <span className={`rm-status ${d.status === 'active' ? 'rm-status--active' : 'rm-status--inactive'}`} style={{ marginLeft: 8, fontSize: 11 }}>
+                        {d.status}
+                      </span>
+                    </div>
+                    <dl className="data-card-fields">
+                      <div className="data-card-field"><dt>Code</dt><dd>{d.driver_code || '—'}</dd></div>
+                      <div className="data-card-field"><dt>Phone</dt><dd>{d.phone || '—'}</dd></div>
+                      <div className="data-card-field"><dt>License</dt><dd>{d.license_number || '—'}</dd></div>
+                      <div className="data-card-field"><dt>City</dt><dd>{d.city_name || '—'}</dd></div>
+                      <div className="data-card-field">
+                        <dt>Vehicle</dt>
+                        <dd onClick={(e) => e.stopPropagation()}>
+                          {d.current_vehicle_id ? (
+                            <Link to={`/vehicles/${d.current_vehicle_id}`}>{d.current_vehicle_number} · {d.current_vehicle_model}</Link>
+                          ) : '—'}
+                        </dd>
+                      </div>
+                    </dl>
+                    <div className="data-card-actions" onClick={(e) => e.stopPropagation()}>
+                      <button type="button" className="btn btn-sm btn-default" onClick={() => openEdit(d)}>Edit</button>
+                      <Link className="btn btn-sm btn-default" to={`/drivers/${d.id}`}>History</Link>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              </>
             )}
           </div>
         ) : (
@@ -257,7 +290,8 @@ export function DriversPage() {
               <button type="button" className="btn btn-default btn-sm" onClick={exportHolding}>Export CSV</button>
             </div>
             {loading ? <div className="rm-empty">Loading…</div> : (
-              <div className="table-responsive">
+              <>
+              <div className="table-responsive data-table-desktop">
                 <table className="table table-hover" style={{ marginBottom: 0 }}>
                   <thead>
                     <tr>
@@ -279,7 +313,7 @@ export function DriversPage() {
                         <td>{String(r.driver_phone || '—')}</td>
                         <td><Link to={`/vehicles/${r.vehicle_id}`}>{String(r.vehicle_number)}</Link></td>
                         <td>{String(r.model || '—')}</td>
-                        <td>{String(r.location_name || '—')}</td>
+                        <td>{String(r.city_name || r.location_name || '—')}</td>
                         <td>{String(r.last_checkout || '—')}</td>
                       </tr>
                     ))}
@@ -287,6 +321,25 @@ export function DriversPage() {
                   </tbody>
                 </table>
               </div>
+              <div className="data-table-mobile" aria-label="Who holds what">
+                {!holdingRows.length ? <p className="text-muted data-card-empty">No active driver assignments</p> : null}
+                {holdingRows.map((r, i) => (
+                  <article key={`${r.driver_id}-${r.vehicle_id}-${i}`} className="data-card">
+                    <div className="data-card-title">
+                      <Link to={`/drivers/${r.driver_id}`}>{String(r.driver_name)}</Link>
+                      {r.driver_code ? <div className="rm-fleet-sub">{String(r.driver_code)}</div> : null}
+                    </div>
+                    <dl className="data-card-fields">
+                      <div className="data-card-field"><dt>Phone</dt><dd>{String(r.driver_phone || '—')}</dd></div>
+                      <div className="data-card-field"><dt>Vehicle</dt><dd><Link to={`/vehicles/${r.vehicle_id}`}>{String(r.vehicle_number)}</Link></dd></div>
+                      <div className="data-card-field"><dt>Model</dt><dd>{String(r.model || '—')}</dd></div>
+                      <div className="data-card-field"><dt>City</dt><dd>{String(r.city_name || r.location_name || '—')}</dd></div>
+                      <div className="data-card-field"><dt>Assigned since</dt><dd>{String(r.last_checkout || '—')}</dd></div>
+                    </dl>
+                  </article>
+                ))}
+              </div>
+              </>
             )}
           </div>
         )}

@@ -24,6 +24,8 @@ type Props = { children: ReactNode; title: string; subtitle?: string; dense?: bo
 type SectionTab = {
   to: string
   label: string
+  /** Shorter label on narrow screens */
+  shortLabel?: string
   /** Return true when this tab should look active */
   isActive: (pathname: string, search: string) => boolean
   /** Visual group: status filters vs tools (assets section) */
@@ -143,8 +145,8 @@ const SECTION_TABS: Record<SectionKey, SectionTab[]> = {
   ],
   settings: [
     { to: '/settings', label: 'General', isActive: (p) => p === '/settings' },
-    { to: '/settings/roles', label: 'Roles & permissions', isActive: (p) => p.startsWith('/settings/roles') },
-    { to: '/settings/notifications', label: 'Notifications', isActive: (p) => p.startsWith('/settings/notifications') },
+    { to: '/settings/roles', label: 'Roles & permissions', shortLabel: 'Roles', isActive: (p) => p.startsWith('/settings/roles') },
+    { to: '/settings/notifications', label: 'Notifications', shortLabel: 'Alerts', isActive: (p) => p.startsWith('/settings/notifications') },
   ],
   reports: [
     { to: '/audit', label: 'Fleet audit', isActive: (p) => p.startsWith('/audit') },
@@ -197,8 +199,16 @@ function SectionTabs({ section }: { section: SectionKey }) {
         to={tab.to}
         className={active ? 'active' : undefined}
         aria-current={active ? 'page' : undefined}
+        title={tab.label}
       >
-        {tab.label}
+        {tab.shortLabel ? (
+          <>
+            <span className="section-tab-full">{tab.label}</span>
+            <span className="section-tab-short">{tab.shortLabel}</span>
+          </>
+        ) : (
+          tab.label
+        )}
       </Link>
     )
   }

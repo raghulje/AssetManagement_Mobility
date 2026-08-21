@@ -327,12 +327,15 @@
 .vad-tabs {
   display: flex;
   gap: 4px;
+  max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
   border-bottom: 1px solid var(--vad-border);
   padding: 0 2px;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
 }
 
 .vad-tabs::-webkit-scrollbar {
@@ -352,6 +355,7 @@
   line-height: 1.25;
   cursor: pointer;
   white-space: nowrap;
+  flex: 0 0 auto;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   transition: color 140ms ease, border-color 140ms ease;
@@ -783,7 +787,7 @@
 
 .vad-gallery {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
   gap: 16px;
   align-items: stretch;
 }

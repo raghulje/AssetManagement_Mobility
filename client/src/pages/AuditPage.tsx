@@ -196,7 +196,7 @@ export default function AuditPage() {
             </div>
           </div>
 
-          <div className="rm-filters" style={{ gridTemplateColumns: tab === 'fleet' ? '1.5fr repeat(4, minmax(0, 1fr)) minmax(240px, 1.2fr)' : '1fr 1fr minmax(240px, 1.2fr)' }}>
+          <div className={`rm-filters rm-filters--stack ${tab === 'fleet' ? 'rm-filters--audit-fleet' : 'rm-filters--audit-activity'}`}>
             {tab === 'fleet' ? (
               <>
                 <input className="form-control" placeholder="Search plate, model, VIN, driver…" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -279,7 +279,8 @@ export default function AuditPage() {
           </div>
 
           {loading ? <div className="rm-empty">Loading audit data…</div> : tab === 'fleet' ? (
-            <div className="table-responsive">
+            <>
+            <div className="table-responsive data-table-desktop">
               <table className="table table-hover" style={{ marginBottom: 0, fontSize: 13 }}>
                 <thead>
                   <tr>
@@ -314,8 +315,33 @@ export default function AuditPage() {
                 </tbody>
               </table>
             </div>
+            <div className="data-table-mobile" aria-label="Fleet audit">
+              {!fleetRows.length ? <p className="text-muted data-card-empty">No vehicles match filters</p> : null}
+              {fleetRows.map((r) => (
+                <article key={String(r.id)} className="data-card">
+                  <div className="data-card-title">
+                    {String(r.vehicle_number)}
+                    <span className="rm-status" style={{ marginLeft: 8, fontSize: 11 }}>{String(r.status || '—')}</span>
+                  </div>
+                  <dl className="data-card-fields">
+                    <div className="data-card-field"><dt>Model</dt><dd>{[r.make, r.model].filter(Boolean).join(' ') || '—'}</dd></div>
+                    <div className="data-card-field"><dt>City</dt><dd>{String(r.location_name || '—')}</dd></div>
+                    <div className="data-card-field"><dt>Holder</dt><dd>{String(r.holder_name || r.driver_name || '—')}</dd></div>
+                    <div className="data-card-field"><dt>Insurance exp</dt><dd>{String(r.insurance_expiry_date || '—')}</dd></div>
+                    <div className="data-card-field"><dt>Reg exp</dt><dd>{String(r.registration_expiry || '—')}</dd></div>
+                    <div className="data-card-field"><dt>EOL</dt><dd>{String(r.vehicle_eol_date || '—')}</dd></div>
+                    <div className="data-card-field"><dt>Photos</dt><dd>{String(r.photos_count ?? 0)}</dd></div>
+                  </dl>
+                  <div className="data-card-actions">
+                    <Link className="btn btn-sm btn-primary" to={`/vehicles/${r.id}`}>Open</Link>
+                  </div>
+                </article>
+              ))}
+            </div>
+            </>
           ) : (
-            <div className="table-responsive">
+            <>
+            <div className="table-responsive data-table-desktop">
               <table className="table table-hover" style={{ marginBottom: 0, fontSize: 13 }}>
                 <thead>
                   <tr>
@@ -342,6 +368,22 @@ export default function AuditPage() {
                 </tbody>
               </table>
             </div>
+            <div className="data-table-mobile" aria-label="Activity audit">
+              {!activityRows.length ? <p className="text-muted data-card-empty">No activity in this period</p> : null}
+              {activityRows.map((r) => (
+                <article key={String(r.id)} className="data-card">
+                  <div className="data-card-title">{String(r.action_type || 'Action')}</div>
+                  <dl className="data-card-fields">
+                    <div className="data-card-field"><dt>When</dt><dd>{String(r.action_date || '—')}</dd></div>
+                    <div className="data-card-field"><dt>Admin</dt><dd>{String(r.admin || '—')}</dd></div>
+                    <div className="data-card-field"><dt>Item</dt><dd>{String(r.item_name || `${r.item_type}#${r.item_id}`)}</dd></div>
+                    <div className="data-card-field"><dt>Target</dt><dd>{String(r.target_name || '—')}</dd></div>
+                    <div className="data-card-field"><dt>Note</dt><dd>{String(r.note || '—')}</dd></div>
+                  </dl>
+                </article>
+              ))}
+            </div>
+            </>
           )}
         </div>
       </div>
