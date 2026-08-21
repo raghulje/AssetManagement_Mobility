@@ -576,8 +576,9 @@ export default function VehicleForm() {
     { id: 'identity', label: 'Identification' },
     { id: 'ev', label: 'EV details' },
     { id: 'legal', label: 'Registration' },
-    { id: 'ownership', label: 'Ownership' },
-    { id: 'location', label: 'Location' },
+    // Ownership + Location tabs hidden for now
+    // { id: 'ownership', label: 'Ownership' },
+    // { id: 'location', label: 'Location' },
     { id: 'purchase', label: 'Purchase' },
     { id: 'financial', label: 'Financial' },
     { id: 'insurance', label: 'Insurance' },
@@ -655,9 +656,11 @@ export default function VehicleForm() {
                       options={VEHICLE_TYPES.map((t) => ({ value: t, label: t }))}
                     />
                   </Field>
+                  {/* Hidden for now
                   <Field label="Vehicle sub-type">
                     <input className="form-control" value={form.vehicle_sub_type} onChange={(e) => set('vehicle_sub_type', e.target.value)} />
                   </Field>
+                  */}
                   <Field label="Make / manufacturer" required>
                     <input className="form-control" required value={form.make} onChange={(e) => set('make', e.target.value)} />
                   </Field>
@@ -743,9 +746,11 @@ export default function VehicleForm() {
                   <Field label="Vehicle identification number">
                     <input className="form-control" value={form.vehicle_id_number} onChange={(e) => set('vehicle_id_number', e.target.value)} />
                   </Field>
+                  {/* Hidden for now
                   <Field label="Key ID / key number">
                     <input className="form-control" value={form.key_id} onChange={(e) => set('key_id', e.target.value)} />
                   </Field>
+                  */}
                   <Field label="RFID / Tag ID">
                     <input className="form-control" value={form.rfid_tag} onChange={(e) => set('rfid_tag', e.target.value)} />
                   </Field>
@@ -851,6 +856,7 @@ export default function VehicleForm() {
                     <Field label="State of charge %">
                       <input type="number" step="0.01" className="form-control" value={form.state_of_charge_pct} onChange={(e) => set('state_of_charge_pct', e.target.value)} />
                     </Field>
+                    {/* Hidden for now
                     <Field label="Last charging date/time">
                       <input type="datetime-local" className="form-control" value={form.last_charging_at} onChange={(e) => set('last_charging_at', e.target.value)} />
                     </Field>
@@ -863,6 +869,7 @@ export default function VehicleForm() {
                     <Field label="Telematics device ID">
                       <input className="form-control" value={form.telematics_device_id} onChange={(e) => set('telematics_device_id', e.target.value)} />
                     </Field>
+                    */}
                   </>
                 ) : (
                   <p className="help-block">Switch fuel type to EV to edit EV-specific fields.</p>
@@ -913,7 +920,8 @@ export default function VehicleForm() {
                 </>
               ) : null}
 
-              {tab === 'ownership' ? (
+              {/* Ownership tab UI hidden — tab removed from nav above */}
+              {false && tab === 'ownership' ? (
                 <>
                   <div style={{ gridColumn: '1 / -1' }}>
                     <CompanyEntityFields
@@ -972,7 +980,8 @@ export default function VehicleForm() {
                 </>
               ) : null}
 
-              {tab === 'location' ? (
+              {/* Location tab UI hidden — tab removed from nav above */}
+              {false && tab === 'location' ? (
                 <>
                   <Field label="Location type">
                     <input className="form-control" value={form.location_type} onChange={(e) => set('location_type', e.target.value)} placeholder="Hub / Yard / Customer site" />

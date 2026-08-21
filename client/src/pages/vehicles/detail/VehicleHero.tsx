@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   Battery,
   Bolt,
@@ -6,6 +6,7 @@ import {
   MapPin,
   Hash,
   Pencil,
+  ArrowLeft,
   ArrowLeftRight,
   Trash2,
   Wrench,
@@ -30,6 +31,7 @@ export default function VehicleHero({
   onTransfer,
   onDelete,
 }: Props) {
+  const navigate = useNavigate()
   const tone = statusTone(vehicle)
   const statusClass =
     tone === 'maintenance' ? 'vad-status--maintenance'
@@ -42,9 +44,21 @@ export default function VehicleHero({
   const soh = vehicle.battery_health_pct
   const odo = vehicle.current_odometer_km
 
+  function goBackToFleet() {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      navigate(-1)
+      return
+    }
+    navigate('/vehicles')
+  }
+
   return (
     <>
       <div className="vad-crumb">
+        <button type="button" className="vad-back-btn" onClick={goBackToFleet}>
+          <ArrowLeft size={16} /> Back to fleet
+        </button>
+        <span className="vad-crumb__sep" aria-hidden>/</span>
         <Link to="/">Home</Link>
         <span className="vad-crumb__sep">›</span>
         <Link to="/vehicles">Vehicles</Link>
@@ -63,6 +77,9 @@ export default function VehicleHero({
           </p>
         </div>
         <div className="vad-actions">
+          <button type="button" className="btn btn-default" onClick={goBackToFleet}>
+            <ArrowLeft size={15} /> Back
+          </button>
           {canEdit ? (
             <Link to={`/vehicles/${vehicle.id}/edit`} className="btn vad-btn-edit">
               <Pencil size={15} /> Edit vehicle
@@ -122,9 +139,12 @@ export default function VehicleHero({
                   <span style={{ width: `${Math.max(0, Math.min(100, Number(soc)))}%` }} />
                 </div>
               ) : null}
+              <div className="vad-kpi__hint">From vehicle profile</div>
+              {/* Hidden for now: last charging
               <div className="vad-kpi__hint">
                 {vehicle.last_charging_at ? `Charged ${vehicle.last_charging_at}` : 'From vehicle profile'}
               </div>
+              */}
             </div>
 
             <div className="vad-kpi">

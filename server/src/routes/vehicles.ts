@@ -206,26 +206,76 @@ function fuelFromCategory(category: string): string {
   return 'OTHER'
 }
 
-router.get('/facets', async (_req, res) => {
+router.get('/facets', async (req, res) => {
+  const fuelType = String(req.query.fuel_type || '').trim()
+  const cityId = String(req.query.city_id || '').trim()
+  const location = String(req.query.location || '').trim()
+  const modelId = String(req.query.model_id || '').trim()
+  const model = String(req.query.model || '').trim()
+  const category = String(req.query.category || '').trim()
+  const status = String(req.query.status || '').trim()
+
+  /** Shared vehicle predicates for cascading facet counts (exclude the dimension being grouped). */
+  function vehiclePred(exclude: 'fuel' | 'city' | 'model' | 'category' | 'status' | null = null) {
+    const parts: string[] = ['v.deleted_at IS NULL']
+    const p: unknown[] = []
+    if (exclude !== 'fuel' && fuelType) { parts.push('v.fuel_type = ?'); p.push(fuelType) }
+    if (exclude !== 'city') {
+      if (cityId) { parts.push('v.city_id = ?'); p.push(Number(cityId)) }
+      else if (location) { parts.push('v.location_name = ?'); p.push(location) }
+    }
+    if (exclude !== 'model') {
+      if (modelId) { parts.push('v.model_id = ?'); p.push(Number(modelId)) }
+      else if (model) { parts.push('v.model = ?'); p.push(model) }
+    }
+    if (exclude !== 'category' && category) { parts.push('v.category = ?'); p.push(category) }
+    if (exclude !== 'status' && status) { parts.push('v.status = ?'); p.push(status) }
+    return { sql: parts.join(' AND '), params: p }
+  }
+
+  const locPred = vehiclePred('city')
+  const modelPred = vehiclePred('model')
+  const catPred = vehiclePred('category')
+  const fuelPred = vehiclePred('fuel')
+  const statusPred = vehiclePred('status')
+
   const [locations, models, categories, fuelTypes, statuses] = await Promise.all([
     all<{ value: string; c: number; id: number }>(`
       SELECT c.name AS value, c.id, COUNT(v.id) AS c
       FROM vehicle_cities c
-      LEFT JOIN vehicles v ON v.city_id = c.id AND v.deleted_at IS NULL
+      LEFT JOIN vehicles v ON v.city_id = c.id AND (${locPred.sql})
       WHERE c.deleted_at IS NULL AND c.is_active = 1
       GROUP BY c.id, c.name
-      ORDER BY c.name`),
+      HAVING COUNT(v.id) > 0
+      ORDER BY c.name`, locPred.params),
     all<{ value: string; c: number; id: number }>(`
       SELECT m.name AS value, m.id, COUNT(v.id) AS c
       FROM vehicle_models m
-      LEFT JOIN vehicles v ON v.model_id = m.id AND v.deleted_at IS NULL
+      LEFT JOIN vehicles v ON v.model_id = m.id AND (${modelPred.sql})
       WHERE m.deleted_at IS NULL AND m.is_active = 1
       GROUP BY m.id, m.name
-      ORDER BY m.name`),
-    all<{ value: string; c: number }>(`SELECT category AS value, COUNT(*) AS c FROM vehicles WHERE deleted_at IS NULL GROUP BY category ORDER BY category`),
-    all<{ value: string; c: number }>(`SELECT fuel_type AS value, COUNT(*) AS c FROM vehicles WHERE deleted_at IS NULL GROUP BY fuel_type ORDER BY fuel_type`),
-    all<{ value: string; c: number }>(`SELECT status AS value, COUNT(*) AS c FROM vehicles WHERE deleted_at IS NULL GROUP BY status ORDER BY status`),
+      HAVING COUNT(v.id) > 0
+      ORDER BY m.name`, modelPred.params),
+    all<{ value: string; c: number }>(`
+      SELECT v.category AS value, COUNT(*) AS c
+      FROM vehicles v
+      WHERE ${catPred.sql} AND v.category IS NOT NULL AND v.category <> ''
+      GROUP BY v.category
+      ORDER BY v.category`, catPred.params),
+    all<{ value: string; c: number }>(`
+      SELECT v.fuel_type AS value, COUNT(*) AS c
+      FROM vehicles v
+      WHERE ${fuelPred.sql} AND v.fuel_type IS NOT NULL AND v.fuel_type <> ''
+      GROUP BY v.fuel_type
+      ORDER BY v.fuel_type`, fuelPred.params),
+    all<{ value: string; c: number }>(`
+      SELECT v.status AS value, COUNT(*) AS c
+      FROM vehicles v
+      WHERE ${statusPred.sql} AND v.status IS NOT NULL AND v.status <> ''
+      GROUP BY v.status
+      ORDER BY v.status`, statusPred.params),
   ])
+
   return okItem(res, { locations, models, categories, fuel_types: fuelTypes, statuses })
 })
 
@@ -660,6 +710,20 @@ router.post('/:id/qr', async (req, res) => {
       itemId: Number(req.params.id),
     })
     return okItem(res, qr)
+  } catch (e) {
+    return fail(res, e instanceof Error ? e.message : 'QR failed', 404)
+  }
+})
+
+/** Stream QR PNG via API (works when /storage is not exposed on the public reverse proxy). */
+router.get('/:id/qr.png', async (req, res) => {
+  try {
+    const qr = await ensureVehicleQr(Number(req.params.id))
+    const disk = path.join(storageRoot, 'public/vehicles/qr', `${qr.qr_token}.png`)
+    if (!fs.existsSync(disk)) return fail(res, 'QR image missing', 404)
+    res.setHeader('Content-Type', 'image/png')
+    res.setHeader('Cache-Control', 'private, max-age=300')
+    return res.sendFile(disk)
   } catch (e) {
     return fail(res, e instanceof Error ? e.message : 'QR failed', 404)
   }

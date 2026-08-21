@@ -58,6 +58,12 @@ export function createApp() {
     },
   }))
 
+  // Helmet 8 no longer ships Permissions-Policy — set explicitly for mobile camera/GPS capture
+  app.use((_req, res, next) => {
+    res.setHeader('Permissions-Policy', 'camera=(self), geolocation=(self), microphone=()')
+    next()
+  })
+
   app.use(cors({
     origin(origin, cb) {
       if (!origin) return cb(null, true)

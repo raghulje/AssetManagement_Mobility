@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
-import { readPrecisePosition, type PrecisePosition } from '../lib/preciseLocation'
+import {
+  locationHelpMessage,
+  queryLocationPermission,
+  readPrecisePosition,
+  requestLocationAccess,
+  type PrecisePosition,
+} from '../lib/preciseLocation'
 
 type Props = {
   open: boolean
   vehicleLabel?: string
+  /** GPS acquired on the same user gesture that opened this dialog */
+  initialPos?: PrecisePosition | null
   onClose: () => void
   onCapture: (file: File, position: PrecisePosition | null) => void
 }
@@ -13,39 +21,63 @@ function formatCoord(n: number, kind: 'lat' | 'lng') {
   return `${Math.abs(n).toFixed(7)}° ${hemi}`
 }
 
-export default function VehicleWebcamCapture({ open, vehicleLabel, onClose, onCapture }: Props) {
+export default function VehicleWebcamCapture({
+  open,
+  vehicleLabel,
+  initialPos = null,
+  onClose,
+  onCapture,
+}: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const posRef = useRef<PrecisePosition | null>(initialPos)
   const [ready, setReady] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [pos, setPos] = useState<PrecisePosition | null>(null)
-  const [locStatus, setLocStatus] = useState('Acquiring GPS…')
+  const [pos, setPos] = useState<PrecisePosition | null>(initialPos)
+  const [locStatus, setLocStatus] = useState(initialPos ? `±${Math.round(initialPos.accuracyM)} m` : 'Acquiring GPS…')
   const [facing, setFacing] = useState<'user' | 'environment'>('environment')
   const mirrored = facing === 'user'
+
+  useEffect(() => {
+    posRef.current = pos
+  }, [pos])
 
   useEffect(() => {
     if (!open) return
     let cancelled = false
     setError('')
     setReady(false)
-    setPos(null)
-    setLocStatus('Acquiring GPS…')
+    setPos(initialPos ?? null)
+    posRef.current = initialPos ?? null
+    setLocStatus(initialPos ? `±${Math.round(initialPos.accuracyM)} m` : 'Acquiring GPS…')
 
     async function startCamera() {
       try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error('Camera API not available in this browser')
+        }
         if (streamRef.current) {
           streamRef.current.getTracks().forEach((t) => t.stop())
           streamRef.current = null
         }
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            facingMode: facing,
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-          },
-        })
+        // Prefer rear camera; fall back without ideal constraints on stubborn phones
+        let stream: MediaStream
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              facingMode: { ideal: facing },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+            },
+          })
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: true,
+          })
+        }
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop())
           return
@@ -53,6 +85,8 @@ export default function VehicleWebcamCapture({ open, vehicleLabel, onClose, onCa
         streamRef.current = stream
         const video = videoRef.current
         if (video) {
+          video.setAttribute('playsinline', 'true')
+          video.setAttribute('webkit-playsinline', 'true')
           video.srcObject = stream
           await new Promise<void>((resolve) => {
             if (video.readyState >= 2 && video.videoWidth > 0) {
@@ -77,32 +111,48 @@ export default function VehicleWebcamCapture({ open, vehicleLabel, onClose, onCa
     void startCamera()
 
     let watchId: number | null = null
-    void readPrecisePosition({ targetAccuracyM: 25, timeoutMs: 16000 }).then((p) => {
+
+    void (async () => {
+      const perm = await queryLocationPermission()
       if (cancelled) return
-      if (p) {
-        setPos(p)
-        setLocStatus(`±${Math.round(p.accuracyM)} m`)
-      } else {
-        setLocStatus('Allow location in browser')
+      if (perm === 'denied' || perm === 'insecure' || perm === 'unsupported') {
+        if (!posRef.current) setLocStatus(locationHelpMessage(perm))
+        return
       }
-    })
+      if (!posRef.current) {
+        const p = await readPrecisePosition({ targetAccuracyM: 40, timeoutMs: 20000, maximumAgeMs: 15_000 })
+        if (cancelled) return
+        if (p) {
+          setPos(p)
+          posRef.current = p
+          setLocStatus(`±${Math.round(p.accuracyM)} m`)
+        } else {
+          setLocStatus('Tap “Enable GPS” below, then take photo')
+        }
+      }
+    })()
 
     if (navigator.geolocation) {
       watchId = navigator.geolocation.watchPosition(
         (g) => {
           if (cancelled) return
-          const next = {
+          const next: PrecisePosition = {
             latitude: g.coords.latitude,
             longitude: g.coords.longitude,
             accuracyM: g.coords.accuracy,
             altitude: g.coords.altitude,
             capturedAt: new Date(g.timestamp || Date.now()),
+            source: 'device',
           }
-          setPos((prev) => (!prev || next.accuracyM <= prev.accuracyM ? next : prev))
+          setPos((prev) => {
+            const better = !prev || next.accuracyM <= prev.accuracyM
+            if (better) posRef.current = next
+            return better ? next : prev
+          })
           setLocStatus(`±${Math.round(g.coords.accuracy)} m`)
         },
         () => undefined,
-        { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 },
+        { enableHighAccuracy: true, maximumAge: 2000, timeout: 25000 },
       )
     }
 
@@ -116,27 +166,40 @@ export default function VehicleWebcamCapture({ open, vehicleLabel, onClose, onCa
         streamRef.current = null
       }
     }
+    // initialPos only used when opening — don't restart camera when GPS updates
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, facing])
 
   if (!open) return null
+
+  async function enableGps() {
+    setLocStatus('Requesting location…')
+    const res = await requestLocationAccess()
+    if (res.position) {
+      setPos(res.position)
+      posRef.current = res.position
+      setLocStatus(res.message)
+    } else {
+      setLocStatus(res.message)
+    }
+  }
 
   async function snap() {
     const video = videoRef.current
     if (!video || !ready || busy) return
     setBusy(true)
     try {
-      // Prefer already-locked GPS; quick refresh only if missing
-      let usePos = pos
+      let usePos = posRef.current
       if (!usePos) {
         setLocStatus('Getting GPS…')
-        usePos = await readPrecisePosition({ targetAccuracyM: 40, timeoutMs: 10000 })
+        usePos = await readPrecisePosition({ targetAccuracyM: 80, timeoutMs: 12000, maximumAgeMs: 60_000 })
         if (usePos) {
           setPos(usePos)
+          posRef.current = usePos
           setLocStatus(`±${Math.round(usePos.accuracyM)} m`)
         }
       }
 
-      // Wait one frame so dimensions are stable
       await new Promise((r) => requestAnimationFrame(() => r(undefined)))
 
       const w = video.videoWidth
@@ -149,18 +212,17 @@ export default function VehicleWebcamCapture({ open, vehicleLabel, onClose, onCa
       const ctx = canvas.getContext('2d')
       if (!ctx) throw new Error('Could not capture frame')
 
-      // Match what the user sees: mirror front camera in the saved photo too
       if (mirrored) {
         ctx.translate(w, 0)
         ctx.scale(-1, 1)
       }
       ctx.drawImage(video, 0, 0, w, h)
 
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.94))
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.92))
       if (!blob) throw new Error('Could not encode photo')
       const file = new File([blob], `webcam-${Date.now()}.jpg`, { type: 'image/jpeg' })
+      // Keep live camera open — parent saves in background
       onCapture(file, usePos)
-      // Keep camera open so the user can take more GPS photos in one session
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Capture failed')
     } finally {
@@ -191,7 +253,7 @@ export default function VehicleWebcamCapture({ open, vehicleLabel, onClose, onCa
             className={`vc-webcam-video${mirrored ? ' is-mirrored' : ''}`}
           />
           <div className="vc-webcam-hud">
-            <div className="vc-webcam-gps">
+            <div className={`vc-webcam-gps${pos ? ' is-locked' : ' is-missing'}`}>
               <i className="fas fa-crosshairs" />
               {pos ? (
                 <>
@@ -207,6 +269,11 @@ export default function VehicleWebcamCapture({ open, vehicleLabel, onClose, onCa
         </div>
 
         <footer className="vc-webcam-foot">
+          {!pos ? (
+            <button type="button" className="btn btn-warning btn-sm" disabled={busy} onClick={() => void enableGps()}>
+              <i className="fas fa-map-marker-alt" /> Enable GPS
+            </button>
+          ) : null}
           <button
             type="button"
             className="btn btn-default btn-sm"
@@ -221,8 +288,8 @@ export default function VehicleWebcamCapture({ open, vehicleLabel, onClose, onCa
         </footer>
         <p className="vc-webcam-hint">
           {!pos
-            ? 'Allow Location so lat/lng and address are stamped. Tap Take photo again for more shots — each saves automatically.'
-            : 'Tap Take photo for another shot anytime. Close when you are done — each capture saves automatically.'}
+            ? 'Allow Location first so lat/lng and address are stamped. Photos still save if GPS is missing, but try Enable GPS.'
+            : 'Each tap saves automatically — camera stays open for more shots. Close when done.'}
         </p>
       </div>
     </div>

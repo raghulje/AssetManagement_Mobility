@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { vehiclePublicScanUrl, vehicleQrDataUrl } from '../../lib/vehicleQrClient'
 
 type PublicVehicle = {
   vehicle_number: string
@@ -9,12 +10,15 @@ type PublicVehicle = {
   category: string
   fuel_type: string
   status: string
+  qr_token?: string | null
+  qr_url?: string | null
   qr_image_url?: string | null
 }
 
 export default function PublicVehicle() {
   const { token } = useParams()
   const [row, setRow] = useState<PublicVehicle | null>(null)
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -27,6 +31,27 @@ export default function PublicVehicle() {
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed'))
   }, [token])
+
+  useEffect(() => {
+    let cancelled = false
+    async function render() {
+      if (!token && !row?.qr_url) {
+        setQrDataUrl(null)
+        return
+      }
+      try {
+        const dataUrl = await vehicleQrDataUrl(
+          String(row?.qr_url || token || ''),
+          { storedUrl: row?.qr_url, width: 320 },
+        )
+        if (!cancelled) setQrDataUrl(dataUrl)
+      } catch {
+        if (!cancelled) setQrDataUrl(null)
+      }
+    }
+    void render()
+    return () => { cancelled = true }
+  }, [token, row?.qr_url])
 
   if (error) {
     return <div className="suite-page" style={{ padding: 40, textAlign: 'center' }}>{error}</div>
@@ -42,9 +67,12 @@ export default function PublicVehicle() {
         <h2 style={{ margin: '12px 0 4px' }}>Refex Mobility</h2>
         <p style={{ color: '#64748b' }}>Fleet vehicle</p>
       </div>
-      {row.qr_image_url ? (
+      {qrDataUrl ? (
         <div style={{ textAlign: 'center', marginBottom: 16 }}>
-          <img src={row.qr_image_url} alt="QR" style={{ width: 160, height: 160 }} />
+          <img src={qrDataUrl} alt="QR" style={{ width: 160, height: 160 }} />
+          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, wordBreak: 'break-all' }}>
+            {vehiclePublicScanUrl(String(token || row.qr_token || ''), row.qr_url)}
+          </div>
         </div>
       ) : null}
       <table className="table">

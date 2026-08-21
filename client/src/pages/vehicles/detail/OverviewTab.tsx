@@ -281,7 +281,8 @@ export default function OverviewTab(props: Props) {
               <Field label="Powertrain">{dash(vehicle.powertrain_type)}</Field>
             </dl>
           </article>
-        ) : (
+        ) : null}
+        {/* Home location card hidden for now (Location tab also hidden on vehicle form)
           <article className="vad-card">
             <div className="vad-card__head">
               <h3>Home location</h3>
@@ -297,7 +298,7 @@ export default function OverviewTab(props: Props) {
               <Field label="Address">{dash(vehicle.address)}</Field>
             </dl>
           </article>
-        )}
+        */}
       </div>
     </>
   )

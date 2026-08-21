@@ -226,7 +226,8 @@ function authHeaders() {
 export const vehiclesApi = {
   list: (params: Record<string, string | number | undefined | null> = {}) =>
     api<ApiList<Vehicle>>(`/vehicles${qs(params)}`),
-  facets: () => api<VehicleFacets>('/vehicles/facets'),
+  facets: (params: Record<string, string | number | undefined | null> = {}) =>
+    api<VehicleFacets>(`/vehicles/facets${qs(params)}`),
   eolDue: (search?: string) => api<ApiList<Record<string, unknown>>>(`/vehicles/eol/due${qs({ search })}`),
   get: (id: number | string) => api<Vehicle>(`/vehicles/${id}`),
   create: (body: Record<string, unknown>) =>

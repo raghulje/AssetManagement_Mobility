@@ -36,6 +36,9 @@ export default function VehiclesList() {
   const [page, setPage] = useState(0)
   const [rows, setRows] = useState<Vehicle[]>([])
   const [total, setTotal] = useState(0)
+  /** Unfiltered — KPI strip only */
+  const [kpiFacets, setKpiFacets] = useState<VehicleFacets | null>(null)
+  /** Cascading counts for chips / dropdowns under current filters */
   const [facets, setFacets] = useState<VehicleFacets | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -52,8 +55,24 @@ export default function VehiclesList() {
   }, [searchInput])
 
   useEffect(() => {
-    vehiclesApi.facets().then(setFacets).catch(() => undefined)
+    vehiclesApi.facets().then(setKpiFacets).catch(() => undefined)
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    vehiclesApi
+      .facets({
+        fuel_type: fuelType || undefined,
+        city_id: cityId || undefined,
+        location: cityId ? undefined : (location || undefined),
+        model_id: modelId || undefined,
+        model: modelId ? undefined : (model || undefined),
+        category: category || undefined,
+      })
+      .then((f) => { if (!cancelled) setFacets(f) })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [fuelType, cityId, location, modelId, model, category])
 
   useEffect(() => {
     setPage(0)
@@ -95,17 +114,17 @@ export default function VehiclesList() {
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   const fleetTotal = useMemo(() => {
-    if (!facets) return null
-    return facets.fuel_types.reduce((s, f) => s + Number(f.c || 0), 0)
-  }, [facets])
+    if (!kpiFacets) return null
+    return kpiFacets.fuel_types.reduce((s, f) => s + Number(f.c || 0), 0)
+  }, [kpiFacets])
 
   const evCount = useMemo(
-    () => facets?.fuel_types.find((f) => f.value === 'EV')?.c ?? null,
-    [facets],
+    () => kpiFacets?.fuel_types.find((f) => f.value === 'EV')?.c ?? null,
+    [kpiFacets],
   )
 
-  const cityCount = facets?.locations.length ?? null
-  const modelCount = facets?.models.length ?? null
+  const cityCount = kpiFacets?.locations.length ?? null
+  const modelCount = kpiFacets?.models.length ?? null
   const evShare = fleetTotal && evCount != null && fleetTotal > 0
     ? `${((evCount / fleetTotal) * 100).toFixed(1)}% of total fleet`
     : 'Electric vehicles in fleet'
@@ -122,10 +141,6 @@ export default function VehiclesList() {
     setDrill('none')
   }
 
-  const toggleDrill = (next: Drill) => {
-    setDrill((d) => (d === next ? 'none' : next))
-  }
-
   const selectCity = (id: number | undefined, name: string) => {
     if (id != null && String(id) === cityId) {
       setCityId('')
@@ -139,6 +154,7 @@ export default function VehiclesList() {
       setCityId('')
       setLocation(name)
     }
+    setDrill('none')
   }
 
   const selectModel = (id: number | undefined, name: string) => {
@@ -154,16 +170,44 @@ export default function VehiclesList() {
       setModelId('')
       setModel(name)
     }
+    // Next step in cascade: pick a city within fuel + model
+    setDrill('cities')
   }
 
   const selectFuel = (value: string) => {
-    setFuelType((prev) => (prev === value ? '' : value))
+    setFuelType((prev) => {
+      const next = prev === value ? '' : value
+      if (next) {
+        // Cascade: fuel → models available for that fuel
+        setDrill('models')
+      }
+      return next
+    })
   }
 
+  const activateEvFleet = () => {
+    if (fuelType === 'EV' && drill === 'models') {
+      setDrill('none')
+      return
+    }
+    setFuelType('EV')
+    setDrill('models')
+  }
+
+  const chipFacets = facets || kpiFacets
+
   const activeCityLabel =
-    (facets?.locations || []).find((o) => String(o.id) === cityId || o.value === location)?.value
+    (chipFacets?.locations || []).find((o) => String(o.id) === cityId || o.value === location)?.value
+    || (kpiFacets?.locations || []).find((o) => String(o.id) === cityId || o.value === location)?.value
   const activeModelLabel =
-    (facets?.models || []).find((o) => String(o.id) === modelId || o.value === model)?.value
+    (chipFacets?.models || []).find((o) => String(o.id) === modelId || o.value === model)?.value
+    || (kpiFacets?.models || []).find((o) => String(o.id) === modelId || o.value === model)?.value
+
+  const filterSummary = [
+    fuelType ? `${fuelType} fleet` : null,
+    activeModelLabel ? `model ${activeModelLabel}` : null,
+    activeCityLabel ? `in ${activeCityLabel}` : null,
+  ].filter(Boolean).join(' · ')
 
   return (
     <AppLayout title="Vehicles" subtitle="Manage and monitor your Refex Mobility fleet">
@@ -182,15 +226,8 @@ export default function VehiclesList() {
 
           <button
             type="button"
-            className={`rm-kpi rm-kpi--green${drill === 'fuel' || fuelType ? ' is-active' : ''}`}
-            onClick={() => {
-              if (drill !== 'fuel' && !fuelType) {
-                setFuelType('EV')
-                setDrill('fuel')
-                return
-              }
-              toggleDrill('fuel')
-            }}
+            className={`rm-kpi rm-kpi--green${fuelType === 'EV' || drill === 'fuel' ? ' is-active' : ''}`}
+            onClick={activateEvFleet}
           >
             <span className="rm-kpi__label">EV fleet</span>
             <span className="rm-kpi__value">{fmt(evCount)}</span>
@@ -201,29 +238,39 @@ export default function VehiclesList() {
           <button
             type="button"
             className={`rm-kpi rm-kpi--orange${drill === 'cities' || cityId || location ? ' is-active' : ''}`}
-            onClick={() => toggleDrill('cities')}
+            onClick={() => setDrill((d) => (d === 'cities' ? 'none' : 'cities'))}
           >
             <span className="rm-kpi__label">Cities</span>
             <span className="rm-kpi__value">{fmt(cityCount)}</span>
-            <span className="rm-kpi__hint">Active operating locations</span>
+            <span className="rm-kpi__hint">
+              {fuelType || modelId || model
+                ? `${fmt(chipFacets?.locations?.length)} with current filters`
+                : 'Active operating locations'}
+            </span>
             <span className="rm-kpi__icon" aria-hidden><i className="fas fa-map-marker-alt" /></span>
           </button>
 
           <button
             type="button"
             className={`rm-kpi rm-kpi--slate${drill === 'models' || modelId || model ? ' is-active' : ''}`}
-            onClick={() => toggleDrill('models')}
+            onClick={() => setDrill((d) => (d === 'models' ? 'none' : 'models'))}
           >
             <span className="rm-kpi__label">Models</span>
             <span className="rm-kpi__value">{fmt(modelCount)}</span>
-            <span className="rm-kpi__hint">Platforms in operation</span>
+            <span className="rm-kpi__hint">
+              {fuelType || cityId || location
+                ? `${fmt(chipFacets?.models?.length)} with current filters`
+                : 'Platforms in operation'}
+            </span>
             <span className="rm-kpi__icon" aria-hidden><i className="fas fa-car-side" /></span>
           </button>
         </div>
 
         {drill === 'cities' ? (
           <div className="rm-chip-row" style={{ paddingTop: 0 }}>
-            {(facets?.locations || []).map((o) => {
+            {(chipFacets?.locations || []).length === 0 ? (
+              <span className="text-muted" style={{ fontSize: 13 }}>No cities match the current filters</span>
+            ) : (chipFacets?.locations || []).map((o) => {
               const active = (o.id != null && String(o.id) === cityId) || (!cityId && o.value === location)
               return (
                 <button
@@ -242,7 +289,11 @@ export default function VehiclesList() {
 
         {drill === 'models' ? (
           <div className="rm-chip-row" style={{ paddingTop: 0 }}>
-            {(facets?.models || []).map((o) => {
+            {(chipFacets?.models || []).length === 0 ? (
+              <span className="text-muted" style={{ fontSize: 13 }}>
+                {fuelType ? `No models with ${fuelType} vehicles` : 'No models match the current filters'}
+              </span>
+            ) : (chipFacets?.models || []).map((o) => {
               const active = (o.id != null && String(o.id) === modelId) || (!modelId && o.value === model)
               return (
                 <button
@@ -261,7 +312,7 @@ export default function VehiclesList() {
 
         {drill === 'fuel' ? (
           <div className="rm-chip-row" style={{ paddingTop: 0 }}>
-            {(facets?.fuel_types || []).map((o) => (
+            {(chipFacets?.fuel_types || []).map((o) => (
               <button
                 key={o.value}
                 type="button"
@@ -272,7 +323,7 @@ export default function VehiclesList() {
                 <b>{o.c}</b>
               </button>
             ))}
-            {(facets?.categories || []).map((o) => (
+            {(chipFacets?.categories || []).map((o) => (
               <button
                 key={`cat-${o.value}`}
                 type="button"
@@ -289,18 +340,26 @@ export default function VehiclesList() {
         {hasActiveFilter ? (
           <div className="rm-active-filters">
             <span>Filtered</span>
-            {activeCityLabel ? <span className="rm-pill">City · {activeCityLabel}</span> : null}
-            {activeModelLabel ? <span className="rm-pill">Model · {activeModelLabel}</span> : null}
             {fuelType ? <span className="rm-pill">Fuel · {fuelType}</span> : null}
+            {activeModelLabel ? <span className="rm-pill">Model · {activeModelLabel}</span> : null}
+            {activeCityLabel ? <span className="rm-pill">City · {activeCityLabel}</span> : null}
             {category ? <span className="rm-pill">Category · {category}</span> : null}
             <button type="button" className="btn btn-default btn-xs" onClick={clearFilters}>Reset</button>
-            <em style={{ fontStyle: 'normal', marginLeft: 'auto' }}>{fmt(total)} matches</em>
+            <em style={{ fontStyle: 'normal', marginLeft: 'auto' }}>
+              {fmt(total)} matches{filterSummary ? ` · ${filterSummary}` : ''}
+            </em>
           </div>
         ) : null}
 
         <div className="rm-panel">
           <div className="rm-panel__bar">
-            <h2>Fleet <span>{fmt(total)} vehicles</span></h2>
+            <h2>
+              Fleet{' '}
+              <span>
+                {fmt(total)} vehicles
+                {filterSummary ? ` · ${filterSummary}` : ''}
+              </span>
+            </h2>
             <div className="rm-page-actions">
               <Link className="btn btn-primary btn-sm" to="/vehicles/create">
                 <i className="fas fa-plus" /> Add vehicle
@@ -321,13 +380,13 @@ export default function VehiclesList() {
               placeholder="All cities"
               options={[
                 { value: '', label: 'All cities' },
-                ...(facets?.locations || []).map((o) => ({
+                ...(chipFacets?.locations || []).map((o) => ({
                   value: o.id != null ? String(o.id) : o.value,
                   label: `${o.value} (${o.c})`,
                 })),
               ]}
               onChange={(val) => {
-                const hit = (facets?.locations || []).find((o) => String(o.id) === val || o.value === val)
+                const hit = (chipFacets?.locations || []).find((o) => String(o.id) === val || o.value === val)
                 if (hit?.id != null) {
                   setCityId(String(hit.id))
                   setLocation('')
@@ -343,13 +402,13 @@ export default function VehiclesList() {
               placeholder="All models"
               options={[
                 { value: '', label: 'All models' },
-                ...(facets?.models || []).map((o) => ({
+                ...(chipFacets?.models || []).map((o) => ({
                   value: o.id != null ? String(o.id) : o.value,
                   label: `${o.value} (${o.c})`,
                 })),
               ]}
               onChange={(val) => {
-                const hit = (facets?.models || []).find((o) => String(o.id) === val || o.value === val)
+                const hit = (chipFacets?.models || []).find((o) => String(o.id) === val || o.value === val)
                 if (hit?.id != null) {
                   setModelId(String(hit.id))
                   setModel('')
@@ -366,17 +425,23 @@ export default function VehiclesList() {
               placeholder="All categories"
               options={[
                 { value: '', label: 'All categories' },
-                ...(facets?.categories || []).map((o) => ({ value: o.value, label: `${o.value} (${o.c})` })),
+                ...(chipFacets?.categories || []).map((o) => ({ value: o.value, label: `${o.value} (${o.c})` })),
               ]}
             />
             <AppSelect
               value={fuelType}
-              onChange={setFuelType}
+              onChange={(v) => {
+                setFuelType(v)
+                if (v) setDrill('models')
+              }}
               searchable={false}
               placeholder="All fuel types"
               options={[
                 { value: '', label: 'All fuel types' },
-                ...(facets?.fuel_types || []).map((o) => ({ value: o.value, label: `${o.value} (${o.c})` })),
+                ...((kpiFacets || chipFacets)?.fuel_types || []).map((o) => ({
+                  value: o.value,
+                  label: `${o.value} (${o.c})`,
+                })),
               ]}
             />
           </div>
@@ -390,23 +455,26 @@ export default function VehiclesList() {
             <span>Status</span>
             <span>Assigned</span>
             <span>Photos</span>
-            <span />
+            <span>Actions</span>
           </div>
 
           <div className="rm-fleet-list">
             {loading ? (
               <div className="rm-empty">Loading fleet…</div>
             ) : rows.length === 0 ? (
-              <div className="rm-empty">No vehicles found</div>
+              <div className="rm-empty">
+                No vehicles found
+                {filterSummary ? ` for ${filterSummary}` : ''}. Try Reset or pick another model/city.
+              </div>
             ) : rows.map((v) => (
-              <Link key={v.id} to={`/vehicles/${v.id}`} className="rm-fleet-row">
-                <div className="rm-fleet-thumb" aria-hidden>
+              <div key={v.id} className="rm-fleet-row">
+                <Link to={`/vehicles/${v.id}`} className="rm-fleet-thumb" aria-hidden tabIndex={-1}>
                   <i className={v.fuel_type === 'EV' ? 'fas fa-bolt' : 'fas fa-car'} />
-                </div>
-                <div>
+                </Link>
+                <Link to={`/vehicles/${v.id}`} className="rm-fleet-identity">
                   <div className="rm-fleet-plate">{v.vehicle_number}</div>
                   <div className="rm-fleet-sub">{v.model}{v.fuel_type ? ` · ${v.fuel_type}` : ''}</div>
-                </div>
+                </Link>
                 <div className="rm-fleet-meta">
                   <i className="fas fa-map-marker-alt" style={{ opacity: 0.55, fontSize: 11 }} />
                   {v.location_name || '—'}
@@ -416,8 +484,33 @@ export default function VehiclesList() {
                 </div>
                 <div className="rm-fleet-meta">{v.assigned_name || 'Unassigned'}</div>
                 <div className="rm-fleet-meta">{v.captures_count ?? 0}</div>
-                <div className="rm-fleet-open">Open →</div>
-              </Link>
+                <div className="rm-fleet-actions" onClick={(e) => e.stopPropagation()}>
+                  <Link
+                    to={`/vehicles/${v.id}?tab=captures`}
+                    className="icon-btn icon-btn-solid icon-btn-photo"
+                    title="Photo capture"
+                    aria-label={`Photos for ${v.vehicle_number}`}
+                  >
+                    <i className="fas fa-camera" />
+                  </Link>
+                  <Link
+                    to={`/vehicles/${v.id}`}
+                    className="icon-btn icon-btn-solid icon-btn-view"
+                    title="View"
+                    aria-label={`View ${v.vehicle_number}`}
+                  >
+                    <i className="fas fa-eye" />
+                  </Link>
+                  <Link
+                    to={`/vehicles/${v.id}/edit`}
+                    className="icon-btn icon-btn-solid icon-btn-edit"
+                    title="Edit"
+                    aria-label={`Edit ${v.vehicle_number}`}
+                  >
+                    <i className="fas fa-pencil-alt" />
+                  </Link>
+                </div>
+              </div>
             ))}
           </div>
 

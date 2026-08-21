@@ -4641,6 +4641,63 @@ table.table tr.is-selected td { background: rgba(255, 107, 74, 0.08); }
   color: #a7f3d0;
 }
 
+.vc-webcam-gps.is-missing {
+  border-color: rgba(251, 146, 60, 0.55);
+  color: #fdba74;
+}
+
+.vc-webcam-gps.is-locked {
+  border-color: rgba(52, 211, 153, 0.45);
+}
+
+.vc-native-arm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid #ffd8d0;
+  background: #fff5f3;
+}
+
+.vc-native-arm strong {
+  display: block;
+  font-size: 15px;
+  color: #0f172a;
+  margin-bottom: 4px;
+}
+
+.vc-native-arm p {
+  margin: 0;
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.4;
+  max-width: 42rem;
+}
+
+.vc-native-arm__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .vc-native-arm {
+    flex-direction: column;
+  }
+  .vc-native-arm__actions {
+    width: 100%;
+  }
+  .vc-native-arm__actions .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+
 .vc-webcam-gps i { color: #fb923c; }
 .vc-webcam-gps em {
   font-style: normal;

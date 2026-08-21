@@ -5,7 +5,14 @@ import { useToast } from '../../components/Toast'
 import { VehicleCaptureFrame, captureToFrameProps } from '../../components/VehicleCaptureFrame'
 import VehicleWebcamCapture from '../../components/VehicleWebcamCapture'
 import { stampGpsOnImage, fetchGpsStaticMapUrl } from '../../lib/stampGpsOnImage'
-import { readPrecisePosition, type PrecisePosition } from '../../lib/preciseLocation'
+import { readGpsFromImageFile } from '../../lib/imageGps'
+import {
+  preferNativePhoneCamera,
+  requestLocationAccess,
+  resolveCapturePosition,
+  type PrecisePosition,
+} from '../../lib/preciseLocation'
+import { vehiclePublicScanUrl, vehicleQrDataUrl } from '../../lib/vehicleQrClient'
 import { assetImageSrc } from '../../api/baseUrl'
 import {
   vehiclesApi,
@@ -64,8 +71,8 @@ export default function VehicleDetail() {
   const navigate = useNavigate()
   const toast = useToast()
   const { can, isAdmin } = useAuth()
-  // Live capture only for GPS photos — gallery file upload kept commented for later.
-  // const fileRef = useRef<HTMLInputElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const heldGpsRef = useRef<PrecisePosition | null>(null)
   const attachRef = useRef<HTMLInputElement>(null)
   const assignRef = useRef<HTMLElement | null>(null)
 
@@ -74,6 +81,11 @@ export default function VehicleDetail() {
   const [pending, setPending] = useState<PendingCapture[]>([])
   const [sessionId, setSessionId] = useState<number | null>(null)
   const [webcamOpen, setWebcamOpen] = useState(false)
+  const [captureGps, setCaptureGps] = useState<PrecisePosition | null>(null)
+  const [gpsBusy, setGpsBusy] = useState(false)
+  const [nativeCamArmed, setNativeCamArmed] = useState(false)
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+  const [qrBusy, setQrBusy] = useState(false)
   const [files, setFiles] = useState<Record<string, unknown>[]>([])
   const [maintenances, setMaintenances] = useState<VehicleMaintenance[]>([])
   const [history, setHistory] = useState<Record<string, unknown>[]>([])
@@ -125,6 +137,29 @@ export default function VehicleDetail() {
   useEffect(() => { void load() }, [load])
 
   useEffect(() => {
+    let cancelled = false
+    async function renderQr() {
+      const token = vehicle?.qr_token ? String(vehicle.qr_token) : ''
+      const url = vehicle?.qr_url ? String(vehicle.qr_url) : ''
+      if (!token && !url) {
+        setQrDataUrl(null)
+        return
+      }
+      setQrBusy(true)
+      try {
+        const dataUrl = await vehicleQrDataUrl(url || token, { storedUrl: url })
+        if (!cancelled) setQrDataUrl(dataUrl)
+      } catch {
+        if (!cancelled) setQrDataUrl(null)
+      } finally {
+        if (!cancelled) setQrBusy(false)
+      }
+    }
+    void renderQr()
+    return () => { cancelled = true }
+  }, [vehicle?.qr_token, vehicle?.qr_url])
+
+  useEffect(() => {
     if (!id || !vehicle) return
     if (tab === 'captures' || tab === 'overview') {
       vehiclesApi.captures(id).then((r) => setCaptures(r.rows || [])).catch(() => undefined)
@@ -165,13 +200,12 @@ export default function VehicleDetail() {
     return next
   }
 
-  async function processFile(file: File, knownPos?: PrecisePosition | null, opts?: { gpsAlreadyTried?: boolean }) {
+  async function processFile(file: File, knownPos?: PrecisePosition | null) {
     if (!id) return
     const capturedAtDate = knownPos?.capturedAt || new Date()
     const capturedAt = formatSqlDate(capturedAtDate)
     const previewUrl = URL.createObjectURL(file)
     const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-    const gpsAlreadyTried = Boolean(opts?.gpsAlreadyTried)
     setPending((p) => [{
       localId,
       previewUrl,
@@ -180,20 +214,30 @@ export default function VehicleDetail() {
       longitude: knownPos?.longitude ?? null,
       address: null,
       uploading: true,
-      statusText: knownPos ? 'Stamping GPS…' : (gpsAlreadyTried ? 'Saving photo…' : 'Getting GPS…'),
+      statusText: knownPos ? 'Stamping GPS…' : 'Getting GPS…',
     }, ...p])
-    // Do not lock the whole page — allow more live captures while this one uploads
     try {
-      // Webcam already attempted GPS — don't block another ~18s before upload
-      const pos = gpsAlreadyTried
-        ? (knownPos ?? null)
-        : (knownPos ?? await readPrecisePosition({ targetAccuracyM: 25, timeoutMs: 12000 }))
+      // Device GPS (held / live) → fresh read → EXIF from phone camera (after native tick)
+      let pos = await resolveCapturePosition(knownPos ?? heldGpsRef.current, {
+        targetAccuracyM: 80,
+        timeoutMs: 12000,
+        maximumAgeMs: 60_000,
+      })
+      if (!pos) {
+        setPending((list) => list.map((item) => (
+          item.localId === localId ? { ...item, statusText: 'Reading photo GPS…' } : item
+        )))
+        pos = await readGpsFromImageFile(file)
+      }
+
       let address: string | null = null
       let localityHeader: string | null = null
       const latitude = pos?.latitude ?? null
       const longitude = pos?.longitude ?? null
       const accuracyM = pos?.accuracyM ?? null
       let mapImageUrl: string | null = null
+
+      if (pos) heldGpsRef.current = pos
 
       setPending((list) => list.map((item) => (
         item.localId === localId
@@ -265,9 +309,10 @@ export default function VehicleDetail() {
       setCaptures((list) => [uploaded.payload, ...list])
       setVehicle((v) => (v ? { ...v, captures_count: (v.captures_count || 0) + 1 } : v))
       if (latitude == null) {
-        toast.error('Photo saved, but location was missing. Allow Location and capture again.')
+        toast.error('Photo saved, but GPS was missing. Allow Location (HTTPS) and capture again.')
       } else {
-        toast.success(accuracyM != null ? `GPS photo saved (±${Math.round(accuracyM)} m)` : 'GPS photo saved')
+        const via = pos?.source === 'exif' ? ' from photo' : ''
+        toast.success(accuracyM != null ? `GPS photo saved${via} (±${Math.round(accuracyM)} m)` : `GPS photo saved${via}`)
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Upload failed'
@@ -278,6 +323,53 @@ export default function VehicleDetail() {
       )))
       toast.error(msg)
     }
+  }
+
+  async function startCapture() {
+    setGpsBusy(true)
+    setNativeCamArmed(false)
+    try {
+      const loc = await requestLocationAccess()
+      if (loc.position) {
+        heldGpsRef.current = loc.position
+        setCaptureGps(loc.position)
+        toast.success(loc.message)
+      } else {
+        heldGpsRef.current = null
+        setCaptureGps(null)
+        toast.error(loc.message)
+      }
+
+      // Phones leave the browser for the system camera (tick UI). Opening <input>
+      // must be a fresh user tap after the async GPS prompt — arm a confirm button.
+      if (preferNativePhoneCamera()) {
+        setNativeCamArmed(true)
+        return
+      }
+      setWebcamOpen(true)
+    } finally {
+      setGpsBusy(false)
+    }
+  }
+
+  function openNativeCameraNow() {
+    // Synchronous with this tap — required on iOS/Android after GPS await
+    setNativeCamArmed(false)
+    fileRef.current?.click()
+  }
+
+  async function onNativeCameraFile(file: File) {
+    // After native tick, page is foreground again — refresh GPS if needed, then EXIF
+    let pos = heldGpsRef.current
+    if (!pos) {
+      pos = await resolveCapturePosition(null, { targetAccuracyM: 100, timeoutMs: 10000, maximumAgeMs: 120_000 })
+    }
+    if (!pos) pos = await readGpsFromImageFile(file)
+    if (pos) {
+      heldGpsRef.current = pos
+      setCaptureGps(pos)
+    }
+    await processFile(file, pos)
   }
 
   async function onAssign() {
@@ -364,20 +456,93 @@ export default function VehicleDetail() {
   async function refreshQr() {
     if (!id) return
     setBusy(true)
+    setQrBusy(true)
     try {
       const qr = await vehiclesApi.ensureQr(id)
+      const token = String(qr.qr_token || '')
+      const publicUrl = String(qr.public_url || '')
       setVehicle((v) => (v ? {
         ...v,
-        qr_token: String(qr.qr_token || v.qr_token),
-        qr_url: String(qr.public_url || v.qr_url),
+        qr_token: token || v.qr_token,
+        qr_url: publicUrl || v.qr_url,
         qr_image_url: String(qr.image_url || v.qr_image_url),
       } : v))
+      if (token || publicUrl) {
+        const dataUrl = await vehicleQrDataUrl(publicUrl || token, { storedUrl: publicUrl })
+        setQrDataUrl(dataUrl)
+      }
       toast.success('QR ready')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'QR failed')
     } finally {
       setBusy(false)
+      setQrBusy(false)
     }
+  }
+
+  function printVehicleQr() {
+    const plate = vehicle?.vehicle_number || 'Vehicle'
+    const src = qrDataUrl
+    if (!src) {
+      toast.error('Generate the QR first')
+      return
+    }
+    const meta = [
+      vehicle?.id != null ? `Asset ID ${vehicle.id}` : '',
+      vehicle?.fleet_id ? `Fleet ${vehicle.fleet_id}` : '',
+    ].filter(Boolean).join(' · ')
+    const scanUrl = vehicle?.qr_token
+      ? vehiclePublicScanUrl(String(vehicle.qr_token), vehicle.qr_url)
+      : (vehicle?.qr_url || '')
+    const w = window.open('', '_blank', 'noopener,noreferrer,width=520,height=720')
+    if (!w) {
+      toast.error('Pop-up blocked — allow pop-ups to print QR')
+      return
+    }
+    w.document.write(`<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8" />
+<title>${plate} — QR label</title>
+<style>
+  @page { margin: 12mm; size: auto; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: #0b1f44;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+  }
+  .label {
+    width: 320px;
+    text-align: center;
+    padding: 20px 16px;
+    border: 2px solid #0b1f44;
+    border-radius: 12px;
+  }
+  .brand { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; margin-bottom: 10px; }
+  img { width: 240px; height: 240px; display: block; margin: 0 auto 12px; }
+  .plate { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+  .meta { margin-top: 6px; font-size: 12px; color: #64748b; }
+  .url { margin-top: 10px; font-size: 10px; word-break: break-all; color: #94a3b8; }
+</style>
+</head><body>
+  <div class="label">
+    <div class="brand">Refex Mobility</div>
+    <img src="${src}" alt="QR" />
+    <div class="plate">${plate.replace(/</g, '')}</div>
+    ${meta ? `<div class="meta">${meta.replace(/</g, '')}</div>` : ''}
+    ${scanUrl ? `<div class="url">${scanUrl.replace(/</g, '')}</div>` : ''}
+  </div>
+  <script>
+    window.onload = function () {
+      setTimeout(function () { window.focus(); window.print(); }, 200);
+    };
+  </script>
+</body></html>`)
+    w.document.close()
   }
 
   async function removeVehicle() {
@@ -532,38 +697,64 @@ export default function VehicleDetail() {
             <div className="vad-panel__bar">
               <h3>Photo captures</h3>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" className="btn btn-primary btn-sm" onClick={() => setWebcamOpen(true)}>
-                  <i className="fas fa-camera" /> Take photo
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={gpsBusy}
+                  onClick={() => void startCapture()}
+                >
+                  <i className="fas fa-camera" /> {gpsBusy ? 'Getting GPS…' : 'Take photo'}
                 </button>
-                {/* Gallery / phone file upload disabled — live camera only for GPS stamps.
-                <button type="button" className="btn btn-default btn-sm" disabled={busy} onClick={() => fileRef.current?.click()}>
-                  Phone / file
-                </button>
-                */}
               </div>
             </div>
-            {/*
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" className="sr-only" onChange={(e) => {
-              const f = e.target.files?.[0]
-              e.target.value = ''
-              if (f) void processFile(f)
-            }} />
-            */}
+            {nativeCamArmed ? (
+              <div className="vc-native-arm" role="status">
+                <div>
+                  <strong>{captureGps ? 'GPS ready' : 'Continue without GPS?'}</strong>
+                  <p>
+                    {captureGps
+                      ? `Location locked (±${Math.round(captureGps.accuracyM)} m). Tap Open camera, shoot, then tap the tick — we stamp this GPS on the photo.`
+                      : 'Location was not available. You can still open the camera; we will try GPS/EXIF when you return.'}
+                  </p>
+                </div>
+                <div className="vc-native-arm__actions">
+                  <button type="button" className="btn btn-primary" onClick={openNativeCameraNow}>
+                    <i className="fas fa-camera" /> Open camera
+                  </button>
+                  <button type="button" className="btn btn-default" onClick={() => setNativeCamArmed(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="sr-only"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                e.target.value = ''
+                if (f) void onNativeCameraFile(f)
+              }}
+            />
             <VehicleWebcamCapture
               open={webcamOpen}
               vehicleLabel={v.vehicle_number}
+              initialPos={captureGps}
               onClose={() => setWebcamOpen(false)}
-              onCapture={(file, position) => { void processFile(file, position, { gpsAlreadyTried: true }) }}
+              onCapture={(file, position) => { void processFile(file, position) }}
             />
-            {captures.length === 0 && pending.length === 0 ? (
+            {captures.length === 0 && pending.length === 0 && !nativeCamArmed ? (
               <div className="vad-empty">
                 <strong>No photos yet</strong>
-                Use Take photo for a live GPS-stamped capture. You can take as many as you need — each one saves automatically.
+                Tap Take photo — we ask for Location first, then open the camera. On phones the system camera opens; tap the tick to keep the shot (GPS is saved with it).
               </div>
             ) : (
               <div className="vad-gallery">
-                <button type="button" className="vc-add-card" onClick={() => setWebcamOpen(true)}>
-                  <i className="fas fa-camera" /><span>Take photo</span>
+                <button type="button" className="vc-add-card" disabled={gpsBusy} onClick={() => void startCapture()}>
+                  <i className="fas fa-camera" /><span>{gpsBusy ? 'Getting GPS…' : 'Take photo'}</span>
                 </button>
                 {pending.map((p) => (
                   <div key={p.localId} className="vc-pending-wrap">
@@ -833,20 +1024,39 @@ export default function VehicleDetail() {
           <div className="vad-panel">
             <div className="vad-panel__bar">
               <h3>QR / Tags</h3>
-              <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void refreshQr()}>
-                Generate / refresh
+              <button type="button" className="btn btn-primary btn-sm" disabled={busy || qrBusy} onClick={() => void refreshQr()}>
+                {busy || qrBusy ? 'Working…' : 'Generate / refresh'}
               </button>
             </div>
-            {v.qr_image_url ? (
-              <div className="rm-qr">
-                <img src={v.qr_image_url} alt="Vehicle QR" />
+            {(v.qr_token || v.qr_url || qrDataUrl) ? (
+              <div className="rm-qr" id="vehicle-qr-print">
+                {qrDataUrl ? (
+                  <img src={qrDataUrl} alt="Vehicle QR" />
+                ) : (
+                  <div className="rm-qr__skeleton" aria-busy="true">
+                    {qrBusy ? 'Building QR…' : 'QR unavailable — tap Generate / refresh'}
+                  </div>
+                )}
                 <div className="rm-qr__plate">{v.vehicle_number}</div>
                 <div className="rm-qr__model">
                   Asset ID {v.id}
                   {v.fleet_id ? ` · Fleet ${v.fleet_id}` : ''}
                 </div>
-                <div className="rm-page-actions" style={{ justifyContent: 'center' }}>
-                  <a className="btn btn-default btn-sm" href={v.qr_image_url} download={`${v.vehicle_number}-qr.png`}>
+                <div className="rm-qr__hint no-print">
+                  Scan opens {v.qr_token ? vehiclePublicScanUrl(String(v.qr_token), v.qr_url) : (v.qr_url || 'public vehicle page')}
+                </div>
+                <div className="rm-page-actions no-print" style={{ justifyContent: 'center' }}>
+                  <a
+                    className="btn btn-default btn-sm"
+                    href={qrDataUrl || '#'}
+                    download={`${v.vehicle_number || 'vehicle'}-qr.png`}
+                    onClick={(e) => {
+                      if (!qrDataUrl) {
+                        e.preventDefault()
+                        toast.error('Generate the QR first')
+                      }
+                    }}
+                  >
                     Download QR
                   </a>
                   <button
@@ -864,7 +1074,8 @@ export default function VehicleDetail() {
                   <button
                     type="button"
                     className="btn btn-default btn-sm"
-                    onClick={() => window.print()}
+                    onClick={printVehicleQr}
+                    disabled={!qrDataUrl}
                   >
                     Print QR
                   </button>
