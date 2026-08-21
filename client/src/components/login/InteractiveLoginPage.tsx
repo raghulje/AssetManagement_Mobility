@@ -85,7 +85,7 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
               <img className="em-card-logo" src="/mobility_logo.png" alt="Refex Mobility" />
               <div>
                 <h2>Welcome back!</h2>
-                <p>Sign in to your EV asset workspace.</p>
+                <p>Sign in to your EV fleet workspace.</p>
               </div>
             </div>
 
@@ -176,7 +176,7 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
 
       <footer className="em-foot">
         <Zap size={12} />
-        Refex Mobility · EV Asset Management
+        Refex Mobility · EV Fleet Management
       </footer>
     </div>
   )

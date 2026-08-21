@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import {
   CalendarClock,
   ClipboardCheck,
-  MapPinned,
   FileDown,
   History,
   Zap,
@@ -30,7 +29,7 @@ type Props = {
   busy: boolean
   onAssign: () => void
   onUnassign: () => void
-  onQuick: (action: 'service' | 'inspection' | 'map' | 'rc' | 'activity') => void
+  onQuick: (action: 'service' | 'inspection' | 'rc' | 'activity') => void
 }
 
 export default function OverviewTab(props: Props) {
@@ -217,9 +216,6 @@ export default function OverviewTab(props: Props) {
             </button>
             <button type="button" onClick={() => onQuick('inspection')}>
               <ClipboardCheck /> Log inspection
-            </button>
-            <button type="button" onClick={() => onQuick('map')}>
-              <MapPinned /> View on map
             </button>
             <button type="button" onClick={() => onQuick('rc')}>
               <FileDown /> Download RC

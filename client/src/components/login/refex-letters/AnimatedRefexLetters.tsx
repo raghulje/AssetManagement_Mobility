@@ -29,7 +29,7 @@ const POKE_REACTIONS = [
   { id: "hurt", line: "Don't audit me!", duration: 1800 },
   { id: "cry", line: "Please assign…", duration: 2200 },
   { id: "plead", line: "Spare the wipe!", duration: 2000 },
-  { id: "hello", line: "Asset online!", duration: 1800 },
+  { id: "hello", line: "Fleet online!", duration: 1800 },
   { id: "refexian", line: "Hey Refexian!", duration: 2200 },
   { id: "wave", line: "Tag secured!", duration: 1800 },
 ];

@@ -684,7 +684,7 @@ export default function VehicleDetail() {
     setParams(next)
   }
 
-  function onQuick(action: 'service' | 'inspection' | 'map' | 'rc' | 'activity') {
+  function onQuick(action: 'service' | 'inspection' | 'rc' | 'activity') {
     if (action === 'service' || action === 'inspection') {
       setMaintForm((f) => ({
         ...f,
@@ -696,14 +696,6 @@ export default function VehicleDetail() {
     }
     if (action === 'activity') {
       setTab('assignments')
-      return
-    }
-    if (action === 'map') {
-      if (v.latitude != null && v.longitude != null) {
-        window.open(`https://www.google.com/maps?q=${v.latitude},${v.longitude}`, '_blank', 'noopener,noreferrer')
-      } else {
-        toast.error('No coordinates on this vehicle')
-      }
       return
     }
     if (action === 'rc') {
