@@ -466,8 +466,11 @@ body::before { opacity: 0.2 !important; }
 .rm-fleet-identity {
   display: block;
   min-width: 0;
+  overflow: hidden;
   text-decoration: none !important;
   color: inherit;
+  position: relative;
+  z-index: 0;
 }
 
 .rm-fleet-identity:hover .rm-fleet-plate {
@@ -484,6 +487,9 @@ a.rm-fleet-thumb {
   justify-content: flex-end;
   gap: 6px;
   flex-wrap: nowrap;
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
 }
 
 .rm-fleet-actions .icon-btn-solid {

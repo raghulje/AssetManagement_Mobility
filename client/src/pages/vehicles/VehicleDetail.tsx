@@ -1,5 +1,6 @@
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import AppLayout from '../../layout/AppLayout'
 import { useToast } from '../../components/Toast'
 import { VehicleCaptureFrame, captureToFrameProps } from '../../components/VehicleCaptureFrame'
@@ -67,7 +68,15 @@ function maintDetailHint(type: string) {
 export default function VehicleDetail() {
   const { id } = useParams()
   const [params, setParams] = useSearchParams()
-  const tab = (params.get('tab') as Tab) || 'overview'
+  const rawTab = params.get('tab')
+  const tab: Tab = (
+    rawTab === 'captures'
+    || rawTab === 'attachments'
+    || rawTab === 'maintenance'
+    || rawTab === 'history'
+    || rawTab === 'qr'
+  ) ? rawTab : 'overview'
+  const autoCapture = params.get('capture') === '1'
   const navigate = useNavigate()
   const toast = useToast()
   const { can } = useAuth()
@@ -75,6 +84,7 @@ export default function VehicleDetail() {
   const heldGpsRef = useRef<PrecisePosition | null>(null)
   const attachRef = useRef<HTMLInputElement>(null)
   const assignRef = useRef<HTMLElement | null>(null)
+  const autoCaptureStarted = useRef(false)
 
   const [vehicle, setVehicle] = useState<Vehicle | null>(null)
   const [captures, setCaptures] = useState<VehicleCapture[]>([])
@@ -88,6 +98,7 @@ export default function VehicleDetail() {
   const [qrBusy, setQrBusy] = useState(false)
   const [files, setFiles] = useState<Record<string, unknown>[]>([])
   const [maintenances, setMaintenances] = useState<VehicleMaintenance[]>([])
+  const [viewingMaint, setViewingMaint] = useState<VehicleMaintenance | null>(null)
   const [history, setHistory] = useState<Record<string, unknown>[]>([])
   const [users, setUsers] = useState<Array<{ id: number; text?: string; name?: string }>>([])
   const [drivers, setDrivers] = useState<Array<{ id: number; text: string; name?: string; phone?: string | null }>>([])
@@ -351,6 +362,21 @@ export default function VehicleDetail() {
       setGpsBusy(false)
     }
   }
+
+  // Fleet list camera icon → open Photos tab and start capture immediately
+  useEffect(() => {
+    if (!autoCapture || loading || !vehicle || autoCaptureStarted.current) return
+    autoCaptureStarted.current = true
+    const next = new URLSearchParams(params)
+    next.delete('capture')
+    if (next.get('tab') !== 'captures') next.set('tab', 'captures')
+    setParams(next, { replace: true })
+    void startCapture()
+  }, [autoCapture, loading, vehicle])
+
+  useEffect(() => {
+    autoCaptureStarted.current = false
+  }, [id])
 
   function openNativeCameraNow() {
     // Synchronous with this tap — required on iOS/Android after GPS await
@@ -975,17 +1001,27 @@ export default function VehicleDetail() {
                       <div className="vad-timeline__time">
                         <div>{m.start_date || m.created_at || '-'}</div>
                         <div>{m.cost != null ? `\u20B9${Number(m.cost).toLocaleString('en-IN')}` : ''}</div>
-                        <button
-                          type="button"
-                          className="btn btn-xs btn-danger"
-                          style={{ marginTop: 4 }}
-                          onClick={async () => {
-                            await vehiclesApi.deleteMaintenance(id!, m.id)
-                            setMaintenances((list) => list.filter((x) => x.id !== m.id))
-                          }}
-                        >
-                          Delete
-                        </button>
+                        <div className="vad-timeline__actions">
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-default"
+                            onClick={() => setViewingMaint(m)}
+                          >
+                            View
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-danger"
+                            onClick={async () => {
+                              if (!window.confirm('Delete this maintenance record?')) return
+                              await vehiclesApi.deleteMaintenance(id!, m.id)
+                              setMaintenances((list) => list.filter((x) => x.id !== m.id))
+                              if (viewingMaint?.id === m.id) setViewingMaint(null)
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
                     </li>
                   ))}
@@ -993,6 +1029,99 @@ export default function VehicleDetail() {
               )}
             </div>
           </div>
+        ) : null}
+
+        {viewingMaint ? createPortal(
+          <div className="rm-modal-overlay" role="presentation" onClick={() => setViewingMaint(null)}>
+            <div
+              className="rm-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="maint-view-title"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="rm-modal__head">
+                <h3 id="maint-view-title">{viewingMaint.title || 'Service record'}</h3>
+                <button type="button" className="rm-modal__close" onClick={() => setViewingMaint(null)} aria-label="Close">×</button>
+              </div>
+              <div className="vad-maint-detail">
+                <div className="vad-maint-detail__row">
+                  <span>Type</span>
+                  <strong>{viewingMaint.maintenance_type || '—'}</strong>
+                </div>
+                <div className="vad-maint-detail__row">
+                  <span>Start date</span>
+                  <strong>{viewingMaint.start_date || '—'}</strong>
+                </div>
+                <div className="vad-maint-detail__row">
+                  <span>Completion</span>
+                  <strong>{viewingMaint.completion_date || '—'}</strong>
+                </div>
+                <div className="vad-maint-detail__row">
+                  <span>Cost</span>
+                  <strong>
+                    {viewingMaint.cost != null
+                      ? `\u20B9${Number(viewingMaint.cost).toLocaleString('en-IN')}`
+                      : '—'}
+                  </strong>
+                </div>
+                <div className="vad-maint-detail__row">
+                  <span>Odometer</span>
+                  <strong>
+                    {viewingMaint.odometer_km != null
+                      ? `${Number(viewingMaint.odometer_km).toLocaleString('en-IN')} km`
+                      : '—'}
+                  </strong>
+                </div>
+                <div className="vad-maint-detail__row">
+                  <span>Vendor</span>
+                  <strong>{viewingMaint.vendor_name || '—'}</strong>
+                </div>
+                <div className="vad-maint-detail__row">
+                  <span>Warranty</span>
+                  <strong>{viewingMaint.is_warranty ? 'Yes' : 'No'}</strong>
+                </div>
+                {viewingMaint.parts_replaced ? (
+                  <div className="vad-maint-detail__block">
+                    <span>Parts / details</span>
+                    <p>{viewingMaint.parts_replaced}</p>
+                  </div>
+                ) : null}
+                {viewingMaint.note ? (
+                  <div className="vad-maint-detail__block">
+                    <span>Notes</span>
+                    <p>{viewingMaint.note}</p>
+                  </div>
+                ) : null}
+                <div className="vad-maint-detail__row">
+                  <span>Logged by</span>
+                  <strong>{viewingMaint.created_by_name || '—'}</strong>
+                </div>
+                <div className="vad-maint-detail__row">
+                  <span>Logged at</span>
+                  <strong>{viewingMaint.created_at || '—'}</strong>
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+                <button type="button" className="btn btn-default" onClick={() => setViewingMaint(null)}>
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={async () => {
+                    if (!id || !window.confirm('Delete this maintenance record?')) return
+                    await vehiclesApi.deleteMaintenance(id, viewingMaint.id)
+                    setMaintenances((list) => list.filter((x) => x.id !== viewingMaint.id))
+                    setViewingMaint(null)
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
         ) : null}
 
         {tab === 'history' ? (

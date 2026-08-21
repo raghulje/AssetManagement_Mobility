@@ -486,12 +486,12 @@ export default function VehiclesList() {
                 <div className="rm-fleet-meta">{v.captures_count ?? 0}</div>
                 <div className="rm-fleet-actions" onClick={(e) => e.stopPropagation()}>
                   <Link
-                    to={`/vehicles/${v.id}?tab=captures`}
+                    to={`/vehicles/${v.id}?tab=captures&capture=1`}
                     className="icon-btn icon-btn-solid icon-btn-photo"
-                    title="Photo capture"
-                    aria-label={`Photos for ${v.vehicle_number}`}
+                    title="Open camera"
+                    aria-label={`Open camera for ${v.vehicle_number}`}
                   >
-                    <i className="fas fa-camera" />
+                    <i className="fas fa-camera" aria-hidden />
                   </Link>
                   <Link
                     to={`/vehicles/${v.id}`}
@@ -499,7 +499,7 @@ export default function VehiclesList() {
                     title="View"
                     aria-label={`View ${v.vehicle_number}`}
                   >
-                    <i className="fas fa-eye" />
+                    <i className="fas fa-eye" aria-hidden />
                   </Link>
                   <Link
                     to={`/vehicles/${v.id}/edit`}
@@ -507,7 +507,7 @@ export default function VehiclesList() {
                     title="Edit"
                     aria-label={`Edit ${v.vehicle_number}`}
                   >
-                    <i className="fas fa-pencil-alt" />
+                    <i className="fas fa-pencil-alt" aria-hidden />
                   </Link>
                 </div>
               </div>
