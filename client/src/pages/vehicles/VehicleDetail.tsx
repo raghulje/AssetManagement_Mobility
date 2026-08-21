@@ -28,7 +28,7 @@ import VehicleHero from './detail/VehicleHero'
 import OverviewTab from './detail/OverviewTab'
 import { AppSelect, DateField } from '../../components/formControls'
 
-type Tab = 'overview' | 'captures' | 'attachments' | 'maintenance' | 'history' | 'qr'
+type Tab = 'overview' | 'captures' | 'attachments' | 'maintenance' | 'assignments' | 'history' | 'qr'
 
 type PendingCapture = {
   localId: string
@@ -65,6 +65,20 @@ function maintDetailHint(type: string) {
   return ''
 }
 
+function formatVehicleAction(action: string) {
+  const key = String(action || '').toLowerCase()
+  if (key === 'checkout' || key === 'assigned') return 'Assigned'
+  if (key === 'checkin' || key === 'unassigned') return 'Unassigned'
+  if (key === 'create') return 'Created'
+  if (key === 'update') return 'Updated'
+  if (key === 'delete') return 'Deleted'
+  if (key === 'maintenance') return 'Maintenance logged'
+  if (key === 'uploaded') return 'File uploaded'
+  if (key === 'label_printed') return 'QR printed'
+  if (!key) return 'Activity'
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 export default function VehicleDetail() {
   const { id } = useParams()
   const [params, setParams] = useSearchParams()
@@ -73,6 +87,7 @@ export default function VehicleDetail() {
     rawTab === 'captures'
     || rawTab === 'attachments'
     || rawTab === 'maintenance'
+    || rawTab === 'assignments'
     || rawTab === 'history'
     || rawTab === 'qr'
   ) ? rawTab : 'overview'
@@ -100,6 +115,7 @@ export default function VehicleDetail() {
   const [maintenances, setMaintenances] = useState<VehicleMaintenance[]>([])
   const [viewingMaint, setViewingMaint] = useState<VehicleMaintenance | null>(null)
   const [history, setHistory] = useState<Record<string, unknown>[]>([])
+  const [assignments, setAssignments] = useState<Record<string, unknown>[]>([])
   const [users, setUsers] = useState<Array<{ id: number; text?: string; name?: string }>>([])
   const [drivers, setDrivers] = useState<Array<{ id: number; text: string; name?: string; phone?: string | null }>>([])
   const [assignTargetType, setAssignTargetType] = useState<'driver' | 'user'>('driver')
@@ -180,6 +196,9 @@ export default function VehicleDetail() {
     }
     if (tab === 'maintenance') {
       vehiclesApi.maintenances(id).then((r) => setMaintenances(r.rows || [])).catch(() => undefined)
+    }
+    if (tab === 'assignments') {
+      vehiclesApi.assignments(id).then((r) => setAssignments(r.rows || [])).catch(() => undefined)
     }
     if (tab === 'history') {
       vehiclesApi.history(id).then((r) => setHistory(r.rows || [])).catch(() => undefined)
@@ -412,7 +431,10 @@ export default function VehicleDetail() {
       })
       setVehicle(res.payload)
       setAssignReason('')
+      setAssignUserId('')
+      setAssignDriverId('')
       toast.success('Vehicle assigned')
+      void vehiclesApi.assignments(id).then((r) => setAssignments(r.rows || [])).catch(() => undefined)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Assign failed')
     } finally {
@@ -429,6 +451,7 @@ export default function VehicleDetail() {
       setVehicle(res.payload)
       setUnassignReason('')
       toast.success('Vehicle unassigned')
+      void vehiclesApi.assignments(id).then((r) => setAssignments(r.rows || [])).catch(() => undefined)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Unassign failed')
     } finally {
@@ -621,6 +644,7 @@ export default function VehicleDetail() {
     { id: 'captures', label: 'Photos', count: v.captures_count || captures.length || 0 },
     { id: 'attachments', label: 'Documents', count: files.length || undefined },
     { id: 'maintenance', label: 'Maintenance', count: v.maintenances_count || maintenances.length || 0 },
+    { id: 'assignments', label: 'Assignments', count: assignments.length || undefined },
     { id: 'history', label: 'Activity' },
     { id: 'qr', label: 'QR / Tags' },
   ]
@@ -650,7 +674,7 @@ export default function VehicleDetail() {
       return
     }
     if (action === 'activity') {
-      setTab('history')
+      setTab('assignments')
       return
     }
     if (action === 'map') {
@@ -1124,13 +1148,69 @@ export default function VehicleDetail() {
           document.body,
         ) : null}
 
+        {tab === 'assignments' ? (
+          <div className="vad-panel">
+            <div className="vad-panel__bar">
+              <h3>Assign / unassign history</h3>
+              <button type="button" className="btn btn-default btn-sm" onClick={focusAssignment}>
+                Current assignment
+              </button>
+            </div>
+            {assignments.length === 0 ? (
+              <div className="vad-empty">
+                <strong>No assignment records yet</strong>
+                Assign or unassign this vehicle from Overview — entries appear here only.
+              </div>
+            ) : (
+              <ul className="vad-timeline">
+                {assignments.map((a) => {
+                  const assignee = String(a.assignee_name || a.driver_name || '—')
+                  const kind = String(a.assignment_kind || a.assigned_type || 'Assignee')
+                  const open = !a.unassigned_at
+                  return (
+                    <li key={String(a.id)}>
+                      <span className={`vad-timeline__dot${open ? '' : ' vad-timeline__dot--muted'}`} />
+                      <div className="vad-timeline__body">
+                        <strong>{open ? 'Assigned' : 'Unassigned'}</strong>
+                        <span>
+                          {assignee}
+                          {kind ? ` · ${kind}` : ''}
+                          {a.assign_note ? ` · ${String(a.assign_note)}` : ''}
+                          {!open && a.unassign_note ? ` · Unassign: ${String(a.unassign_note)}` : ''}
+                        </span>
+                        <span className="vad-timeline__meta">
+                          Assigned {String(a.assigned_at || '—')}
+                          {a.assigned_by_name ? ` by ${String(a.assigned_by_name)}` : ''}
+                          {!open ? (
+                            <>
+                              {' · '}Unassigned {String(a.unassigned_at)}
+                              {a.unassigned_by_name ? ` by ${String(a.unassigned_by_name)}` : ''}
+                            </>
+                          ) : (
+                            ' · Currently assigned'
+                          )}
+                        </span>
+                      </div>
+                      <div className="vad-timeline__time">
+                        <span className={`vad-assign-pill${open ? ' vad-assign-pill--open' : ''}`}>
+                          {open ? 'Active' : 'Closed'}
+                        </span>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        ) : null}
+
         {tab === 'history' ? (
           <div className="vad-panel">
             <div className="vad-panel__bar"><h3>Activity</h3></div>
             {history.length === 0 ? (
               <div className="vad-empty">
-                <strong>No activity yet</strong>
-                Assignments, uploads, and maintenance will appear here.
+                <strong>No other activity yet</strong>
+                Uploads, maintenance, and QR events appear here. Assign / unassign is under the Assignments tab.
               </div>
             ) : (
               <ul className="vad-timeline">
@@ -1138,7 +1218,7 @@ export default function VehicleDetail() {
                   <li key={String(h.id)}>
                     <span className="vad-timeline__dot" />
                     <div className="vad-timeline__body">
-                      <strong>{String(h.action_type || 'Activity')}</strong>
+                      <strong>{formatVehicleAction(String(h.action_type || 'Activity'))}</strong>
                       <span>{String(h.actor_name || 'System')}{h.note ? ` · ${String(h.note)}` : ''}</span>
                     </div>
                     <div className="vad-timeline__time">{String(h.action_date || h.created_at || '')}</div>

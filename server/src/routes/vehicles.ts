@@ -616,7 +616,7 @@ router.post('/:id/checkout', async (req, res) => {
 
   await logAction({
     userId: req.user?.id,
-    actionType: 'checkout',
+    actionType: 'assigned',
     itemType: 'vehicle',
     itemId: id,
     targetType: assignedType,
@@ -656,7 +656,7 @@ router.post('/:id/checkin', async (req, res) => {
 
   await logAction({
     userId: req.user?.id,
-    actionType: 'checkin',
+    actionType: 'unassigned',
     itemType: 'vehicle',
     itemId: id,
     targetType: prevType,
@@ -671,9 +671,23 @@ router.get('/:id/assignments', async (req, res) => {
   if (!vehicle) return fail(res, 'Vehicle not found', 404)
   const rows = await all(`
     SELECT va.*,
-      TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))) AS assigned_by_name
+      TRIM(CONCAT(COALESCE(ab.first_name,''),' ',COALESCE(ab.last_name,''))) AS assigned_by_name,
+      TRIM(CONCAT(COALESCE(ub.first_name,''),' ',COALESCE(ub.last_name,''))) AS unassigned_by_name,
+      CASE
+        WHEN va.assigned_type = 'user' THEN (
+          SELECT TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,'')))
+          FROM users u WHERE u.id = va.assigned_to)
+        WHEN va.assigned_type = 'employee' THEN (
+          SELECT TRIM(CONCAT(COALESCE(e.first_name,''),' ',COALESCE(e.last_name,'')))
+          FROM employees e WHERE e.id = va.assigned_to)
+        WHEN va.assigned_type = 'driver' THEN (
+          SELECT TRIM(CONCAT(COALESCE(d.first_name,''),' ',COALESCE(d.last_name,'')))
+          FROM vehicle_drivers d WHERE d.id = va.assigned_to)
+        ELSE NULL
+      END AS assignee_name
     FROM vehicle_assignments va
-    LEFT JOIN users u ON u.id = va.assigned_by
+    LEFT JOIN users ab ON ab.id = va.assigned_by
+    LEFT JOIN users ub ON ub.id = va.unassigned_by
     WHERE va.vehicle_id = ?
     ORDER BY va.assigned_at DESC, va.id DESC
     LIMIT 200
@@ -690,6 +704,7 @@ router.get('/:id/history', async (req, res) => {
     FROM action_logs al
     LEFT JOIN users u ON u.id = al.user_id
     WHERE al.item_type = 'vehicle' AND al.item_id = ?
+      AND COALESCE(al.action_type, '') NOT IN ('checkout', 'checkin', 'assigned', 'unassigned')
     ORDER BY al.action_date DESC, al.id DESC
     LIMIT 200
   `, [req.params.id])

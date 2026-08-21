@@ -126,7 +126,7 @@ export default function OverviewTab(props: Props) {
                 ) : null}
               </dl>
               <button type="button" className="vad-link-btn" onClick={() => onQuick('activity')}>
-                View assignment history
+                View assign / unassign history
               </button>
               <div className="vad-assign-actions">
                 <input
