@@ -536,6 +536,11 @@ export default function VehicleDetail() {
       toast.error('Generate the QR first')
       return
     }
+    const esc = (s: string) => String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
     const meta = [
       vehicle?.id != null ? `Asset ID ${vehicle.id}` : '',
       vehicle?.fleet_id ? `Fleet ${vehicle.fleet_id}` : '',
@@ -543,15 +548,11 @@ export default function VehicleDetail() {
     const scanUrl = vehicle?.qr_token
       ? vehiclePublicScanUrl(String(vehicle.qr_token), vehicle.qr_url)
       : (vehicle?.qr_url || '')
-    const w = window.open('', '_blank', 'noopener,noreferrer,width=520,height=720')
-    if (!w) {
-      toast.error('Pop-up blocked — allow pop-ups to print QR')
-      return
-    }
-    w.document.write(`<!DOCTYPE html>
+    // Blob URL avoids about:blank — window.open(..., 'noopener') cannot document.write
+    const html = `<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8" />
-<title>${plate} — QR label</title>
+<title>${esc(plate)} — QR label</title>
 <style>
   @page { margin: 12mm; size: auto; }
   * { box-sizing: border-box; }
@@ -563,6 +564,7 @@ export default function VehicleDetail() {
     align-items: center;
     justify-content: center;
     min-height: 100vh;
+    background: #fff;
   }
   .label {
     width: 320px;
@@ -581,17 +583,26 @@ export default function VehicleDetail() {
   <div class="label">
     <div class="brand">Refex Mobility</div>
     <img src="${src}" alt="QR" />
-    <div class="plate">${plate.replace(/</g, '')}</div>
-    ${meta ? `<div class="meta">${meta.replace(/</g, '')}</div>` : ''}
-    ${scanUrl ? `<div class="url">${scanUrl.replace(/</g, '')}</div>` : ''}
+    <div class="plate">${esc(plate)}</div>
+    ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}
+    ${scanUrl ? `<div class="url">${esc(scanUrl)}</div>` : ''}
   </div>
   <script>
-    window.onload = function () {
-      setTimeout(function () { window.focus(); window.print(); }, 200);
-    };
+    window.addEventListener('load', function () {
+      setTimeout(function () { window.focus(); window.print(); }, 250);
+    });
   </script>
-</body></html>`)
-    w.document.close()
+</body></html>`
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const w = window.open(url, '_blank', 'width=520,height=720')
+    if (!w) {
+      URL.revokeObjectURL(url)
+      toast.error('Pop-up blocked — allow pop-ups to print QR')
+      return
+    }
+    // Revoke after the print window has loaded the blob
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
   }
 
   async function removeVehicle() {
