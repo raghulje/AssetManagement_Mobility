@@ -11,13 +11,15 @@ type Snapshot = {
   smtp_configured: boolean
   smtp_hint: string
   alert_email: string | null
+  public_app_url?: string | null
   config: {
     email_notifications: Record<string, boolean>
     extra_ops_emails: string
     eol_to_it_asset_manager: boolean
     workflow_to_ops_roles: boolean
   }
-  it_asset_managers: Array<{ id: number; name: string; email: string | null }>
+  fleet_ops_members?: Array<{ id: number; name: string; email: string | null }>
+  it_asset_managers?: Array<{ id: number; name: string; email: string | null }>
   resolved_ops_emails: string[]
   resolved_eol_emails: string[]
   categories: Category[]
@@ -25,12 +27,8 @@ type Snapshot = {
 
 const emptyCfg = {
   email_notifications: {
-    custody: true,
-    maintenance: true,
-    inventory: true,
-    crud: true,
     eol_warranty: true,
-    license_renewal: true,
+    maintenance: true,
   } as Record<string, boolean>,
   extra_ops_emails: '',
   eol_to_it_asset_manager: true,
@@ -44,15 +42,15 @@ export default function NotificationsSettings() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [digestBusy, setDigestBusy] = useState(false)
-  const [licDigestBusy, setLicDigestBusy] = useState(false)
   const [error, setError] = useState('')
   const [okMsg, setOkMsg] = useState('')
   const [smtpHint, setSmtpHint] = useState('')
   const [smtpOk, setSmtpOk] = useState(false)
+  const [publicUrl, setPublicUrl] = useState<string | null>(null)
   const [alertEmail, setAlertEmail] = useState('')
   const [cfg, setCfg] = useState(emptyCfg)
   const [categories, setCategories] = useState<Category[]>([])
-  const [itam, setItam] = useState<Snapshot['it_asset_managers']>([])
+  const [fleetOps, setFleetOps] = useState<Array<{ id: number; name: string; email: string | null }>>([])
   const [resolvedOps, setResolvedOps] = useState<string[]>([])
   const [resolvedEol, setResolvedEol] = useState<string[]>([])
 
@@ -62,6 +60,7 @@ export default function NotificationsSettings() {
       .then((s) => {
         setSmtpOk(Boolean(s.smtp_configured))
         setSmtpHint(String(s.smtp_hint || ''))
+        setPublicUrl(s.public_app_url || null)
         setAlertEmail(String(s.alert_email || ''))
         setCfg({
           email_notifications: { ...emptyCfg.email_notifications, ...(s.config?.email_notifications || {}) },
@@ -70,7 +69,7 @@ export default function NotificationsSettings() {
           workflow_to_ops_roles: s.config?.workflow_to_ops_roles !== false,
         })
         setCategories(s.categories || [])
-        setItam(s.it_asset_managers || [])
+        setFleetOps(s.fleet_ops_members || s.it_asset_managers || [])
         setResolvedOps(s.resolved_ops_emails || [])
         setResolvedEol(s.resolved_eol_emails || [])
       })
@@ -101,7 +100,7 @@ export default function NotificationsSettings() {
       if (s) {
         setResolvedOps(s.resolved_ops_emails || [])
         setResolvedEol(s.resolved_eol_emails || [])
-        setItam(s.it_asset_managers || [])
+        setFleetOps(s.fleet_ops_members || s.it_asset_managers || [])
       }
       setOkMsg('Notification settings saved')
       toast.success('Notification settings saved')
@@ -117,7 +116,7 @@ export default function NotificationsSettings() {
   }
 
   return (
-    <AppLayout title="Notifications" subtitle="Email recipients & alert categories (Biogas-style)">
+    <AppLayout title="Notifications" subtitle="Fleet email alerts — vehicle EOL, warranty, and maintenance">
       {error ? <div className="callout callout-danger"><p>{error}</p></div> : null}
       {okMsg ? <div className="callout callout-success"><p>{okMsg}</p></div> : null}
 
@@ -130,9 +129,17 @@ export default function NotificationsSettings() {
                   {smtpHint}
                 </p>
                 <span className="help-block">
-                  Host/user/password live in <code>server/.env</code> (same pattern as Biogas SMTP tab, env-backed here).
+                  Host/user/password live in <code>server/.env</code> (
+                  <code>SMTP_HOST</code>, <code>SMTP_USER</code>, <code>SMTP_PASS</code>).
                 </span>
               </Field>
+
+              {publicUrl ? (
+                <Field label="Public app URL">
+                  <code>{publicUrl}</code>
+                  <span className="help-block">Used in alert links and vehicle QR pages.</span>
+                </Field>
+              ) : null}
 
               <Field label="Fallback alert email">
                 <input
@@ -143,7 +150,7 @@ export default function NotificationsSettings() {
                   onChange={(e) => setAlertEmail(e.target.value)}
                   placeholder="ops@refex.co.in"
                 />
-                <span className="help-block">Always included when set (EOL digests + workflow ops mail).</span>
+                <span className="help-block">Always included when set (EOL digests + ops mail).</span>
               </Field>
 
               <Field label="Extra ops emails">
@@ -166,7 +173,7 @@ export default function NotificationsSettings() {
                     checked={cfg.workflow_to_ops_roles}
                     onChange={(e) => setCfg((c) => ({ ...c, workflow_to_ops_roles: e.target.checked }))}
                   />
-                  {' '}Send workflow emails to Admin / Superuser / roles with “Receive ops emails”
+                  {' '}Send ops emails to Admin / Superuser / roles with “Receive ops emails”
                 </label>
                 <label className="checkbox" style={{ display: 'block' }}>
                   <input
@@ -175,7 +182,7 @@ export default function NotificationsSettings() {
                     checked={cfg.eol_to_it_asset_manager}
                     onChange={(e) => setCfg((c) => ({ ...c, eol_to_it_asset_manager: e.target.checked }))}
                   />
-                  {' '}Send EOL & warranty prior alerts to <strong>IT Asset Manager</strong> role members
+                  {' '}Send vehicle EOL &amp; warranty alerts to <strong>Fleet Ops</strong> role members
                 </label>
               </Field>
 
@@ -212,15 +219,15 @@ export default function NotificationsSettings() {
                   setDigestBusy(true)
                   setError('')
                   setOkMsg('')
-                  api<{ messages?: string[]; payload?: { skippedReason?: string; sent?: boolean; emailedTo?: string } }>(
-                    '/notifications/eol/run',
+                  api<{ messages?: string[]; payload?: { skippedReason?: string; sent?: boolean; sentCount?: number } }>(
+                    '/notifications/vehicles/eol/run',
                     { method: 'POST' },
                   )
                     .then((res) => {
                       const p = res.payload
                       setOkMsg(
                         p?.sent
-                          ? `EOL/warranty prior alerts sent${p.emailedTo ? ` → ${p.emailedTo}` : ''}`
+                          ? `Vehicle EOL/warranty alerts sent (${p.sentCount || 0})`
                           : (p?.skippedReason || 'Skipped'),
                       )
                     })
@@ -228,50 +235,23 @@ export default function NotificationsSettings() {
                     .finally(() => setDigestBusy(false))
                 }}
               >
-                {digestBusy ? 'Running…' : 'Run EOL/warranty alerts now'}
-              </button>
-              {' '}
-              <button
-                type="button"
-                className="btn btn-default"
-                disabled={licDigestBusy || !smtpOk}
-                onClick={() => {
-                  setLicDigestBusy(true)
-                  setError('')
-                  setOkMsg('')
-                  api<{ messages?: string[]; payload?: { skippedReason?: string; sent?: boolean; emailedTo?: string } }>(
-                    '/notifications/licenses/run',
-                    { method: 'POST' },
-                  )
-                    .then((res) => {
-                      const p = res.payload
-                      setOkMsg(
-                        p?.sent
-                          ? `License renewal alerts sent${p.emailedTo ? ` → ${p.emailedTo}` : ''}`
-                          : (p?.skippedReason || 'Skipped'),
-                      )
-                    })
-                    .catch((err: Error) => setError(err.message))
-                    .finally(() => setLicDigestBusy(false))
-                }}
-              >
-                {licDigestBusy ? 'Running…' : 'Run license renewal alerts now'}
+                {digestBusy ? 'Running…' : 'Run vehicle EOL alerts now'}
               </button>
             </form>
           </Box>
         </div>
 
         <div className="col-md-5">
-          <Box title="IT Asset Manager members" type="default">
+          <Box title="Fleet Ops members" type="default">
             <p className="help-block">
               Manage who is in this role under{' '}
               <Link to="/settings/roles">Settings → Roles & permissions</Link>.
             </p>
-            {itam.length === 0 ? (
-              <p className="text-muted">No users in IT Asset Manager yet.</p>
+            {fleetOps.length === 0 ? (
+              <p className="text-muted">No users in Fleet Ops yet.</p>
             ) : (
               <ul className="list-unstyled" style={{ marginBottom: 0 }}>
-                {itam.map((u) => (
+                {fleetOps.map((u) => (
                   <li key={u.id} style={{ marginBottom: 6 }}>
                     <strong>{u.name}</strong>
                     <br />
@@ -289,7 +269,7 @@ export default function NotificationsSettings() {
             ) : (
               <p className="text-muted">None yet — assign roles or set alert email.</p>
             )}
-            <h5>EOL & warranty</h5>
+            <h5>Vehicle EOL &amp; warranty</h5>
             {resolvedEol.length ? (
               <ul>{resolvedEol.map((e) => <li key={`e-${e}`}>{e}</li>)}</ul>
             ) : (

@@ -244,6 +244,17 @@ export default function AppLayout({ children, title, subtitle, dense, hideHeader
   const { user, logout, can, isAdmin } = useAuth()
   const displayName = user ? `${user.first_name} ${user.last_name}` : 'Admin User'
   const path = location.pathname + location.search
+  const canVehicles = can('vehicles.view')
+  const canDrivers = can('drivers.view')
+  const canMasters = can('masters.view')
+  const canEol = canVehicles && can('reports.view')
+  const canAudit = can('reports.view')
+  const canPeople = can('people.view')
+  const canCreateVehicle = can('vehicles.create')
+  const canCreateDriver = can('drivers.create')
+  const canCreateMaster = can('masters.create')
+  const canCreateUser = can('people.create')
+  const showCreateMenu = canCreateVehicle || canCreateDriver || canCreateMaster || canCreateUser
   const section = resolveSection(location.pathname, location.search)
   const showSectionTabs = Boolean(
     section
@@ -309,21 +320,23 @@ export default function AppLayout({ children, title, subtitle, dense, hideHeader
           </form>
           <div className="navbar-custom-menu">
             <ul className="navbar-nav">
-              <li><NavLink to="/vehicles" title="Vehicles"><i className="fas fa-car" /></NavLink></li>
-              <li><NavLink to="/drivers" title="Drivers"><i className="fas fa-id-card" /></NavLink></li>
-              <li><NavLink to="/audit" title="Audit"><i className="fas fa-clipboard-list" /></NavLink></li>
-              <li><NavLink to="/users" title="App users"><i className="fas fa-user-shield" /></NavLink></li>
-              <li className={`dropdown ${createOpen ? 'open' : ''}`}>
-                <button type="button" className="nav-icon-btn" onClick={() => setCreateOpen((o) => !o)}>
-                  <i className="fas fa-plus" />
-                </button>
-                <div className="dropdown-menu">
-                  <NavLink to="/vehicles/create" onClick={() => setCreateOpen(false)}>Vehicle</NavLink>
-                  <NavLink to="/drivers" onClick={() => setCreateOpen(false)}>Driver</NavLink>
-                  <NavLink to="/masters" onClick={() => setCreateOpen(false)}>City / Model</NavLink>
-                  <NavLink to="/users/create" onClick={() => setCreateOpen(false)}>App user</NavLink>
-                </div>
-              </li>
+              {canVehicles ? <li><NavLink to="/vehicles" title="Vehicles"><i className="fas fa-car" /></NavLink></li> : null}
+              {canDrivers ? <li><NavLink to="/drivers" title="Drivers"><i className="fas fa-id-card" /></NavLink></li> : null}
+              {canAudit ? <li><NavLink to="/audit" title="Audit"><i className="fas fa-clipboard-list" /></NavLink></li> : null}
+              {canPeople ? <li><NavLink to="/users" title="App users"><i className="fas fa-user-shield" /></NavLink></li> : null}
+              {showCreateMenu ? (
+                <li className={`dropdown ${createOpen ? 'open' : ''}`}>
+                  <button type="button" className="nav-icon-btn" onClick={() => setCreateOpen((o) => !o)}>
+                    <i className="fas fa-plus" />
+                  </button>
+                  <div className="dropdown-menu">
+                    {canCreateVehicle ? <NavLink to="/vehicles/create" onClick={() => setCreateOpen(false)}>Vehicle</NavLink> : null}
+                    {canCreateDriver ? <NavLink to="/drivers" onClick={() => setCreateOpen(false)}>Driver</NavLink> : null}
+                    {canCreateMaster ? <NavLink to="/masters" onClick={() => setCreateOpen(false)}>City / Model</NavLink> : null}
+                    {canCreateUser ? <NavLink to="/users/create" onClick={() => setCreateOpen(false)}>App user</NavLink> : null}
+                  </div>
+                </li>
+              ) : null}
               {isAdmin ? <li><NavLink to="/settings" title="Settings"><i className="fas fa-cog" /></NavLink></li> : null}
               <li className={`dropdown ${userOpen ? 'open' : ''}`}>
                 <button type="button" className="nav-icon-btn nav-user-btn" onClick={() => setUserOpen((o) => !o)}>
@@ -344,24 +357,36 @@ export default function AppLayout({ children, title, subtitle, dense, hideHeader
 
       <aside className="main-sidebar" aria-hidden={isNarrow && collapsed}>
         <ul className="sidebar-menu">
-          <li className={path === '/' || (path.startsWith('/vehicles') && !path.includes('/eol')) ? 'active' : ''}>
-            <NavLink to="/vehicles" onClick={closeDrawer}><i className="fas fa-car fa-fw" /><span>Vehicles</span></NavLink>
-          </li>
-          <li className={path.startsWith('/drivers') ? 'active' : ''}>
-            <NavLink to="/drivers" onClick={closeDrawer}><i className="fas fa-id-card fa-fw" /><span>Drivers</span></NavLink>
-          </li>
-          <li className={path.startsWith('/vehicles/eol') ? 'active' : ''}>
-            <NavLink to="/vehicles/eol/due" onClick={closeDrawer}><i className="fas fa-hourglass-half fa-fw" /><span>EOL / Warranty</span></NavLink>
-          </li>
-          <li className={path.startsWith('/masters') ? 'active' : ''}>
-            <NavLink to="/masters" onClick={closeDrawer}><i className="fas fa-database fa-fw" /><span>Masters</span></NavLink>
-          </li>
-          <li className={path.startsWith('/audit') ? 'active' : ''}>
-            <NavLink to="/audit" onClick={closeDrawer}><i className="fas fa-clipboard-list fa-fw" /><span>Audit</span></NavLink>
-          </li>
-          <li className={path.startsWith('/users') ? 'active' : ''}>
-            <NavLink to="/users" onClick={closeDrawer}><i className="fas fa-user-shield fa-fw" /><span>App users</span></NavLink>
-          </li>
+          {canVehicles ? (
+            <li className={path === '/' || (path.startsWith('/vehicles') && !path.includes('/eol')) ? 'active' : ''}>
+              <NavLink to="/vehicles" onClick={closeDrawer}><i className="fas fa-car fa-fw" /><span>Vehicles</span></NavLink>
+            </li>
+          ) : null}
+          {canDrivers ? (
+            <li className={path.startsWith('/drivers') ? 'active' : ''}>
+              <NavLink to="/drivers" onClick={closeDrawer}><i className="fas fa-id-card fa-fw" /><span>Drivers</span></NavLink>
+            </li>
+          ) : null}
+          {canEol ? (
+            <li className={path.startsWith('/vehicles/eol') ? 'active' : ''}>
+              <NavLink to="/vehicles/eol/due" onClick={closeDrawer}><i className="fas fa-hourglass-half fa-fw" /><span>EOL / Warranty</span></NavLink>
+            </li>
+          ) : null}
+          {canMasters ? (
+            <li className={path.startsWith('/masters') ? 'active' : ''}>
+              <NavLink to="/masters" onClick={closeDrawer}><i className="fas fa-database fa-fw" /><span>Masters</span></NavLink>
+            </li>
+          ) : null}
+          {canAudit ? (
+            <li className={path.startsWith('/audit') ? 'active' : ''}>
+              <NavLink to="/audit" onClick={closeDrawer}><i className="fas fa-clipboard-list fa-fw" /><span>Audit</span></NavLink>
+            </li>
+          ) : null}
+          {canPeople ? (
+            <li className={path.startsWith('/users') ? 'active' : ''}>
+              <NavLink to="/users" onClick={closeDrawer}><i className="fas fa-user-shield fa-fw" /><span>App users</span></NavLink>
+            </li>
+          ) : null}
           {isAdmin ? (
             <li className={path.startsWith('/settings') ? 'active' : ''}>
               <NavLink to="/settings" onClick={closeDrawer}><i className="fas fa-cog fa-fw" /><span>Settings</span></NavLink>

@@ -669,7 +669,8 @@ export function UserForm() {
             ]}
           />
           <span className="help-block">
-            Module access comes from the role. Manage the matrix under{' '}
+            Pick a role such as <strong>App Managers</strong> (Vehicles, Drivers, Masters only).
+            Fine-tune the matrix under{' '}
             <Link to="/settings/roles">Settings → Roles & permissions</Link>.
           </span>
         </Field>

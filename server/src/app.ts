@@ -114,9 +114,9 @@ export function createApp() {
   api.use(authRequired)
 
   api.use('/groups', groupsRouter)
-  api.use('/vehicles', vehiclesRouter)
-  api.use('/vehicle-masters', vehicleMastersRouter)
-  api.use('/drivers', driversRouter)
+  api.use('/vehicles', moduleGate('vehicles'), vehiclesRouter)
+  api.use('/vehicle-masters', moduleGate('masters'), vehicleMastersRouter)
+  api.use('/drivers', moduleGate('drivers'), driversRouter)
   // Legacy IT inventory APIs kept for data compatibility but not used by Mobility UI
   api.use('/hardware', moduleGate('assets'), hardwareRouter)
   api.use('/licenses', moduleGate('licenses'), licensesRouter)
@@ -144,27 +144,35 @@ export function createApp() {
   api.use('/account', accountRouter)
   api.use('/requests', moduleGate('assets'), requestsRouter)
   api.post('/notifications/eol/run', requirePerm('settings.edit'), async (_req, res) => {
-    const { runEolAlertDigest } = await import('./services/eolAlerts.js')
+    const { runVehicleEolAlertDigest } = await import('./services/vehicleEolAlerts.js')
     const { okMessage, fail: failRes } = await import('./utils/response.js')
     try {
-      const result = await runEolAlertDigest()
-      return okMessage(res, result.sent ? 'EOL digest sent' : (result.skippedReason || 'Skipped'), result)
-    } catch (e) {
-      return failRes(res, e instanceof Error ? e.message : 'EOL digest failed', 500)
-    }
-  })
-  api.post('/notifications/licenses/run', requirePerm('settings.edit'), async (_req, res) => {
-    const { runLicenseRenewalDigest } = await import('./services/licenseAlerts.js')
-    const { okMessage, fail: failRes } = await import('./utils/response.js')
-    try {
-      const result = await runLicenseRenewalDigest()
+      const result = await runVehicleEolAlertDigest()
       return okMessage(
         res,
-        result.sent ? 'License renewal digest sent' : (result.skippedReason || 'Skipped'),
+        result.sent
+          ? `Vehicle EOL digest sent (${result.sentCount || 0} alert(s))`
+          : (result.skippedReason || 'Skipped'),
         result,
       )
     } catch (e) {
-      return failRes(res, e instanceof Error ? e.message : 'License renewal digest failed', 500)
+      return failRes(res, e instanceof Error ? e.message : 'Vehicle EOL digest failed', 500)
+    }
+  })
+  api.post('/notifications/vehicles/eol/run', requirePerm('settings.edit'), async (_req, res) => {
+    const { runVehicleEolAlertDigest } = await import('./services/vehicleEolAlerts.js')
+    const { okMessage, fail: failRes } = await import('./utils/response.js')
+    try {
+      const result = await runVehicleEolAlertDigest()
+      return okMessage(
+        res,
+        result.sent
+          ? `Vehicle EOL digest sent (${result.sentCount || 0} alert(s))`
+          : (result.skippedReason || 'Skipped'),
+        result,
+      )
+    } catch (e) {
+      return failRes(res, e instanceof Error ? e.message : 'Vehicle EOL digest failed', 500)
     }
   })
   api.use('/imports', requirePerm('settings.edit'), importsRouter)

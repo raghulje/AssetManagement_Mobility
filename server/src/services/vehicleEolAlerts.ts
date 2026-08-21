@@ -96,8 +96,8 @@ async function alreadySent(kind: string, vehicleId: number) {
 
 export async function runVehicleEolAlertDigest() {
   if (!mailConfigured()) return { sent: false, skippedReason: 'SMTP not configured' }
-  if (!(await isEmailCategoryEnabled('eol'))) {
-    return { sent: false, skippedReason: 'EOL emails disabled' }
+  if (!(await isEmailCategoryEnabled('eol_warranty'))) {
+    return { sent: false, skippedReason: 'Vehicle EOL emails disabled' }
   }
 
   const due = await listEolDueVehicles()
@@ -114,7 +114,7 @@ export async function runVehicleEolAlertDigest() {
       if (await alreadySent(kind, row.id)) continue
 
       const subject = `Vehicle ${t.label} reminder: ${row.vehicle_number}`
-      const html = brandedEmail({
+      const mail = brandedEmail({
         title: `Vehicle lifecycle reminder (${t.label})`,
         intro: 'A fleet vehicle is approaching end-of-life or warranty expiry.',
         fields: [
@@ -127,7 +127,12 @@ export async function runVehicleEolAlertDigest() {
         ctaUrl: `${appBase()}/vehicles/${row.id}`,
         ctaLabel: 'Open vehicle',
       })
-      await sendMail({ to: recipients, subject, html })
+      await sendMail({
+        to: recipients.join(', '),
+        subject,
+        text: mail.text,
+        html: mail.html,
+      })
       await run(`
         INSERT INTO notification_log (kind, item_type, item_id, notified_on, created_at)
         VALUES (?, 'vehicle', ?, CURDATE(), ?)

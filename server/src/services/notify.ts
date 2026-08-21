@@ -3,7 +3,7 @@ import { sendMail } from './mail.js'
 import { isEmailCategoryEnabled, resolveWorkflowRecipients } from './notificationConfig.js'
 
 function appBase() {
-  return (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'http://localhost:3001').replace(/\/$/, '')
+  return (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'http://localhost:3073').replace(/\/$/, '')
 }
 
 function escapeHtml(s: string) {
@@ -35,8 +35,8 @@ export function brandedEmail(opts: {
 
   const cta = opts.ctaUrl
     ? `<p style="margin:24px 0 8px;">
-        <a href="${escapeHtml(opts.ctaUrl)}" style="display:inline-block;background:#0b6e66;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;font-size:14px;">
-          ${escapeHtml(opts.ctaLabel || 'Open in Refex ITAM')}
+        <a href="${escapeHtml(opts.ctaUrl)}" style="display:inline-block;background:#f4553b;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;font-size:14px;">
+          ${escapeHtml(opts.ctaLabel || 'Open in Refex Mobility')}
         </a>
       </p>`
     : ''
@@ -46,8 +46,8 @@ export function brandedEmail(opts: {
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f7f8;padding:28px 12px;">
     <tr><td align="center">
       <table role="presentation" width="100%" style="max-width:620px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e2e8f0;">
-        <tr><td style="background:linear-gradient(135deg,#0b6e66,#0f766e);padding:22px 24px;color:#fff;">
-          <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.85;">Refex IT Asset Management</div>
+        <tr><td style="background:linear-gradient(135deg,#f4553b,#e03e28);padding:22px 24px;color:#fff;">
+          <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.85;">Refex Mobility</div>
           <div style="font-size:22px;font-weight:750;margin-top:6px;">${escapeHtml(opts.title)}</div>
         </td></tr>
         <tr><td style="padding:22px 24px 8px;color:#334155;font-size:15px;line-height:1.55;">
@@ -59,7 +59,7 @@ export function brandedEmail(opts: {
           </table>
           ${cta}
           <p style="margin:18px 0 0;color:#94a3b8;font-size:12px;line-height:1.5;">
-            ${escapeHtml(opts.footerNote || 'You received this because of your role in Refex IT Asset Management.')}
+            ${escapeHtml(opts.footerNote || 'You received this because of your role in Refex Mobility.')}
           </p>
         </td></tr>
         <tr><td style="padding:16px 24px 22px;color:#94a3b8;font-size:11px;">

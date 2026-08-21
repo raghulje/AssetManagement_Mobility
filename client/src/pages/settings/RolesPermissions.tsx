@@ -14,16 +14,16 @@ type Role = {
 }
 
 const MODULE_LABELS: Record<string, string> = {
-  assets: 'Assets',
-  licenses: 'Licenses',
-  accessories: 'Accessories',
-  consumables: 'Consumables',
-  components: 'Components',
-  people: 'People',
-  reports: 'Reports',
+  vehicles: 'Vehicles',
+  drivers: 'Drivers',
+  masters: 'Masters (cities / models)',
+  people: 'App users',
+  reports: 'Reports / Audit / EOL',
   settings: 'Settings',
-  maintenance: 'Maintenance',
 }
+
+/** Modules shown in Mobility Settings → Roles (hide legacy IT inventory modules). */
+const MOBILITY_MODULES = new Set(['vehicles', 'drivers', 'masters', 'people', 'reports', 'settings'])
 
 const ACTION_LABELS: Record<string, string> = {
   view: 'View',
@@ -33,7 +33,16 @@ const ACTION_LABELS: Record<string, string> = {
   checkout: 'Assign / Unassign',
 }
 
-const BUILTIN = new Set(['Superusers', 'Admin', 'IT Asset Manager', 'Viewer'])
+const BUILTIN = new Set(['Superusers', 'Admin', 'Fleet Ops', 'IT Asset Manager', 'Viewer', 'App Managers'])
+
+const ROLE_BLURBS: Record<string, string> = {
+  Superusers: 'Full bypass — entire Mobility app including Settings.',
+  Admin: 'Full access — fleet, users, audit, and Settings.',
+  'Fleet Ops': 'Fleet operations — vehicles, drivers, masters, and alerts.',
+  'IT Asset Manager': 'Legacy name — renamed to Fleet Ops on next server start.',
+  Viewer: 'Read-only across Mobility modules.',
+  'App Managers': 'Vehicles, Drivers, and Masters only (no App users / Audit / Settings).',
+}
 const ACTIONS = ['view', 'create', 'edit', 'delete', 'checkout'] as const
 
 function userCountLabel(n: number) {
@@ -184,7 +193,7 @@ export default function RolesPermissions() {
     if (!canEdit || !newRoleName.trim()) return
     setBusy(true)
     try {
-      const res = await groupsApi.create({ name: newRoleName.trim(), permissions: { 'assets.view': '1' } })
+      const res = await groupsApi.create({ name: newRoleName.trim(), permissions: { 'vehicles.view': '1' } })
       const id = Number(res.payload?.id)
       setNewRoleName('')
       await loadRoles()
@@ -213,7 +222,7 @@ export default function RolesPermissions() {
     }
   }
 
-  const modules = Object.keys(moduleActions)
+  const modules = Object.keys(moduleActions).filter((mod) => MOBILITY_MODULES.has(mod))
   const filteredUsers = useMemo(() => {
     const q = memberFilter.trim().toLowerCase()
     if (!q) return allUsers
@@ -221,7 +230,7 @@ export default function RolesPermissions() {
   }, [allUsers, memberFilter])
 
   return (
-    <AppLayout title="Roles & permissions" subtitle="Choose a role, tick module permissions, then Save">
+    <AppLayout title="Roles & permissions" subtitle="Mobility access — Vehicles, Drivers, Masters, App users, Audit, Settings">
       {error ? <div className="callout callout-danger"><p>{error}</p></div> : null}
 
       <div className="roles-layout">
@@ -316,7 +325,9 @@ export default function RolesPermissions() {
                     onChange={(e) => setName(e.target.value)}
                   />
                   {BUILTIN.has(selected.name) ? (
-                    <p className="help-block" style={{ marginBottom: 0 }}>Built-in role name is fixed — module permissions below are fully editable.</p>
+                    <p className="help-block" style={{ marginBottom: 0 }}>
+                      {ROLE_BLURBS[selected.name] || 'Built-in role — module permissions below are editable.'}
+                    </p>
                   ) : null}
                 </div>
                 <div className="roles-detail-stat">
@@ -332,7 +343,7 @@ export default function RolesPermissions() {
                   disabled={!canEdit}
                   onChange={() => toggle('notify.ops')}
                 />
-                {' '}Receive ops workflow emails (assign, maintenance, inventory alerts)
+                {' '}Receive fleet ops emails (EOL digests and workflow alerts)
               </label>
 
               <div className="roles-perm-head">

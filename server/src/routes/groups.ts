@@ -141,7 +141,7 @@ groupsRouter.delete('/:id', requirePerm('settings.edit'), async (req, res) => {
   const id = Number(req.params.id)
   const row = await get<{ name: string }>(`SELECT name FROM permission_groups WHERE id = ?`, [id])
   if (!row) return fail(res, 'Role not found', 404)
-  if (['Superusers', 'Admin', 'IT Asset Manager', 'Viewer'].includes(String(row.name))) {
+  if (['Superusers', 'Admin', 'Fleet Ops', 'IT Asset Manager', 'Viewer', 'App Managers'].includes(String(row.name))) {
     return fail(res, 'Built-in roles cannot be deleted', 422)
   }
   const members = await all<{ user_id: number }>(`SELECT user_id FROM users_groups WHERE group_id = ?`, [id])

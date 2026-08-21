@@ -3,6 +3,9 @@ import { all, get, run, now } from '../db/index.js'
 import { fail } from '../utils/response.js'
 
 export const MODULES = [
+  'vehicles',
+  'drivers',
+  'masters',
   'assets',
   'licenses',
   'accessories',
@@ -21,6 +24,9 @@ export type ActionKey = (typeof ACTIONS)[number]
 
 /** Actions that apply per module (checkout only for inventory-like modules). */
 export const MODULE_ACTIONS: Record<ModuleKey, ActionKey[]> = {
+  vehicles: ['view', 'create', 'edit', 'delete'],
+  drivers: ['view', 'create', 'edit', 'delete'],
+  masters: ['view', 'create', 'edit', 'delete'],
   assets: ['view', 'create', 'edit', 'delete', 'checkout'],
   licenses: ['view', 'create', 'edit', 'delete', 'checkout'],
   accessories: ['view', 'create', 'edit', 'delete', 'checkout'],
@@ -30,6 +36,27 @@ export const MODULE_ACTIONS: Record<ModuleKey, ActionKey[]> = {
   reports: ['view'],
   settings: ['view', 'edit'],
   maintenance: ['view', 'create', 'edit', 'delete'],
+}
+
+/** Fleet modules shown in Mobility sidebar (Vehicles / Drivers / Masters). */
+export const MOBILITY_MODULES = ['vehicles', 'drivers', 'masters'] as const
+
+export function mobilityFullPerms(): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const mod of MOBILITY_MODULES) {
+    for (const act of MODULE_ACTIONS[mod]) {
+      out[`${mod}.${act}`] = '1'
+    }
+  }
+  return out
+}
+
+export function mobilityViewPerms(): Record<string, string> {
+  return {
+    'vehicles.view': '1',
+    'drivers.view': '1',
+    'masters.view': '1',
+  }
 }
 
 export function permissionCatalog() {
@@ -67,11 +94,16 @@ export function allModulePerms(opts?: { notifyOps?: boolean; includeCheckout?: b
 }
 
 export function viewerPerms(): Record<string, string> {
-  const out: Record<string, string> = {}
+  const out: Record<string, string> = { ...mobilityViewPerms() }
   for (const mod of ['assets', 'licenses', 'accessories', 'consumables', 'components', 'people', 'reports', 'maintenance'] as ModuleKey[]) {
     out[`${mod}.view`] = '1'
   }
   return out
+}
+
+export function appManagerPerms(): Record<string, string> {
+  // Vehicles, Drivers, Masters only — no people/reports/settings/admin
+  return mobilityFullPerms()
 }
 
 export function itAssetManagerPerms(): Record<string, string> {
@@ -157,14 +189,62 @@ export async function setUserGroups(userId: number, groupIds: number[]) {
   return syncUserPermissions(userId, extras)
 }
 
+async function grantMissingPermsToRole(
+  roleName: string,
+  grant: Record<string, string>,
+  ts: string,
+) {
+  const row = await get<{ id: number; permissions: unknown }>(
+    `SELECT id, permissions FROM permission_groups WHERE name = ? LIMIT 1`,
+    [roleName],
+  )
+  if (!row) return
+  const p = parsePerms(row.permissions)
+  let changed = false
+  for (const [k, v] of Object.entries(grant)) {
+    if (!isTruthyPerm(p[k])) {
+      p[k] = v
+      changed = true
+    }
+  }
+  if (!changed) return
+  await run(`UPDATE permission_groups SET permissions = ?, updated_at = ? WHERE id = ?`, [
+    JSON.stringify(mergePermissions(p)),
+    ts,
+    row.id,
+  ])
+  const members = await all<{ user_id: number }>(
+    `SELECT user_id FROM users_groups WHERE group_id = ?`,
+    [row.id],
+  )
+  for (const m of members) {
+    await syncUserPermissions(Number(m.user_id))
+  }
+}
+
 export async function ensureDefaultRoles() {
   const ts = now()
   const defaults: { name: string; permissions: Record<string, string> }[] = [
     { name: 'Superusers', permissions: { superuser: '1', admin: '1', ...allModulePerms({ notifyOps: true }) } },
     { name: 'Admin', permissions: { admin: '1', ...allModulePerms({ notifyOps: true }) } },
-    { name: 'IT Asset Manager', permissions: itAssetManagerPerms() },
+    { name: 'Fleet Ops', permissions: itAssetManagerPerms() },
     { name: 'Viewer', permissions: viewerPerms() },
+    { name: 'App Managers', permissions: appManagerPerms() },
   ]
+
+  // Soft rename legacy IT Asset Manager → Fleet Ops (Mobility)
+  const legacyItam = await get<{ id: number }>(
+    `SELECT id FROM permission_groups WHERE name = 'IT Asset Manager' LIMIT 1`,
+  )
+  const fleetOpsExisting = await get<{ id: number }>(
+    `SELECT id FROM permission_groups WHERE name = 'Fleet Ops' LIMIT 1`,
+  )
+  if (legacyItam && !fleetOpsExisting) {
+    await run(`UPDATE permission_groups SET name = 'Fleet Ops', updated_at = ? WHERE id = ?`, [
+      ts,
+      legacyItam.id,
+    ])
+  }
 
   for (const d of defaults) {
     const existing = await get<{ id: number }>(`SELECT id FROM permission_groups WHERE name = ?`, [d.name])
@@ -177,29 +257,12 @@ export async function ensureDefaultRoles() {
     }
   }
 
-  // One-time grant: ensure IT Asset Manager has settings.edit if role already existed without it
-  const itam = await get<{ id: number; permissions: unknown }>(
-    `SELECT id, permissions FROM permission_groups WHERE name = 'IT Asset Manager' LIMIT 1`,
-  )
-  if (itam) {
-    const p = parsePerms(itam.permissions)
-    if (!isTruthyPerm(p['settings.edit'])) {
-      p['settings.edit'] = '1'
-      p['settings.view'] = '1'
-      await run(`UPDATE permission_groups SET permissions = ?, updated_at = ? WHERE id = ?`, [
-        JSON.stringify(mergePermissions(p)),
-        ts,
-        itam.id,
-      ])
-      const members = await all<{ user_id: number }>(
-        `SELECT user_id FROM users_groups WHERE group_id = ?`,
-        [itam.id],
-      )
-      for (const m of members) {
-        await syncUserPermissions(Number(m.user_id))
-      }
-    }
-  }
+  // Soft migrate built-in roles that predate Mobility module keys
+  await grantMissingPermsToRole('Superusers', mobilityFullPerms(), ts)
+  await grantMissingPermsToRole('Admin', mobilityFullPerms(), ts)
+  await grantMissingPermsToRole('Fleet Ops', { ...mobilityFullPerms(), 'settings.view': '1', 'settings.edit': '1' }, ts)
+  await grantMissingPermsToRole('IT Asset Manager', { ...mobilityFullPerms(), 'settings.view': '1', 'settings.edit': '1' }, ts)
+  await grantMissingPermsToRole('Viewer', mobilityViewPerms(), ts)
 
   const su = await get<{ id: number }>(`SELECT id FROM permission_groups WHERE name = 'Superusers' LIMIT 1`)
   const adminGroup = await get<{ id: number }>(`SELECT id FROM permission_groups WHERE name = 'Admin' LIMIT 1`)
@@ -278,7 +341,7 @@ export function requirePerm(permission: string) {
   }
 }
 
-/** Activated users who belong to a named permission group (e.g. IT Asset Manager). */
+/** Activated users who belong to a named permission group (e.g. Fleet Ops). */
 export async function listRoleRecipientEmails(roleName: string): Promise<string[]> {
   const rows = await all<{ email: string | null }>(`
     SELECT DISTINCT u.email

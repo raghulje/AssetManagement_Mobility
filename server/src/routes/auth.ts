@@ -93,11 +93,11 @@ router.post('/password/forgot', async (req, res) => {
     const name = user.first_name || 'there'
     await sendMail({
       to: String(user.email),
-      subject: 'Reset your Refex IT Asset password',
+      subject: 'Reset your Refex Mobility password',
       text: [
         `Hi ${name},`,
         '',
-        'We received a request to reset your password for Refex IT Asset Management.',
+        'We received a request to reset your password for Refex Mobility.',
         'Open this link to choose a new password (valid for 1 hour):',
         '',
         link,
@@ -106,8 +106,8 @@ router.post('/password/forgot', async (req, res) => {
       ].join('\n'),
       html: `
         <p>Hi ${name},</p>
-        <p>We received a request to reset your password for <strong>Refex IT Asset Management</strong>.</p>
-        <p><a href="${link}" style="display:inline-block;padding:10px 16px;background:#0b6e66;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">Reset password</a></p>
+        <p>We received a request to reset your password for <strong>Refex Mobility</strong>.</p>
+        <p><a href="${link}" style="display:inline-block;padding:10px 16px;background:#f4553b;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">Reset password</a></p>
         <p style="color:#64748b;font-size:13px">Or copy this link:<br/><a href="${link}">${link}</a></p>
         <p style="color:#64748b;font-size:13px">This link expires in 1 hour. If you did not request this, ignore this email.</p>
       `,

@@ -898,25 +898,25 @@ settingsRouter.post('/migrate-asset-tags', async (req, res) => {
   }
 })
 
-/** Clear all asset QR tokens/URLs/images so Print Label remints against current PUBLIC_APP_URL. */
-settingsRouter.post('/reset-qr', async (req, res) => {
+/** Clear all vehicle QR tokens/URLs/images so Print QR remints against current PUBLIC_APP_URL. */
+settingsRouter.post('/reset-vehicle-qr', async (req, res) => {
   try {
-    const { resetAllAssetQr } = await import('../services/assetQr.js')
-    const result = await resetAllAssetQr()
+    const { resetAllVehicleQr } = await import('../services/vehicleQr.js')
+    const result = await resetAllVehicleQr()
     await logAction({
       userId: req.user?.id,
-      actionType: 'reset_qr',
+      actionType: 'reset_vehicle_qr',
       itemType: 'settings',
       itemId: 1,
-      note: `Cleared QR on ${result.cleared} asset(s); removed ${result.files_removed} file(s)`,
+      note: `Cleared QR on ${result.cleared} vehicle(s); removed ${result.files_removed} file(s)`,
     })
     return okMessage(
       res,
-      `QR reset complete — ${result.cleared} asset(s) cleared, ${result.files_removed} file(s) removed. Print Label again to mint new codes.`,
+      `Vehicle QR reset complete — ${result.cleared} vehicle(s) cleared, ${result.files_removed} file(s) removed. Open a vehicle → QR / Tags to mint new codes.`,
       result,
     )
   } catch (e) {
-    return fail(res, e instanceof Error ? e.message : 'QR reset failed', 500)
+    return fail(res, e instanceof Error ? e.message : 'Vehicle QR reset failed', 500)
   }
 })
 

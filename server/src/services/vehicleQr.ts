@@ -78,3 +78,41 @@ export async function ensureVehicleQr(vehicleId: number, opts?: { refreshImage?:
     image_url: `/storage/vehicles/qr/${token}.png`,
   }
 }
+
+/**
+ * Clear all vehicle QR tokens/URLs/images so Print QR regenerates against current PUBLIC_APP_URL.
+ */
+export async function resetAllVehicleQr(): Promise<{ cleared: number; files_removed: number }> {
+  const before = await get<{ c: number }>(`
+    SELECT COUNT(*) AS c FROM vehicles
+    WHERE deleted_at IS NULL AND (
+      qr_token IS NOT NULL OR qr_url IS NOT NULL OR qr_image_path IS NOT NULL
+    )
+  `)
+  const cleared = Number(before?.c || 0)
+
+  await run(`
+    UPDATE vehicles SET
+      qr_token = NULL,
+      qr_url = NULL,
+      qr_image_path = NULL,
+      updated_at = ?
+    WHERE deleted_at IS NULL AND (
+      qr_token IS NOT NULL OR qr_url IS NOT NULL OR qr_image_path IS NOT NULL
+    )
+  `, [now()])
+
+  let files_removed = 0
+  try {
+    await fs.promises.mkdir(QR_DIR, { recursive: true })
+    const entries = await fs.promises.readdir(QR_DIR)
+    for (const name of entries) {
+      try {
+        await fs.promises.unlink(path.join(QR_DIR, name))
+        files_removed += 1
+      } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
+
+  return { cleared, files_removed }
+}

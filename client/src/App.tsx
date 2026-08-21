@@ -39,6 +39,30 @@ function RequireAdmin({ children }: { children: ReactNode }) {
   return children
 }
 
+function RequirePerm({ permission, children }: { permission: string; children: ReactNode }) {
+  const { can, loading } = useAuth()
+  if (loading) return <div className="suite-page"><p style={{ padding: 40, textAlign: 'center' }}>Loading…</p></div>
+  if (!can(permission)) {
+    return (
+      <div className="suite-page">
+        <p style={{ padding: 40, textAlign: 'center' }}>You do not have access to this page.</p>
+      </div>
+    )
+  }
+  return children
+}
+
+function HomeRedirect() {
+  const { can, loading } = useAuth()
+  if (loading) return <div className="suite-page"><p style={{ padding: 40, textAlign: 'center' }}>Loading…</p></div>
+  if (can('vehicles.view')) return <Navigate to="/vehicles" replace />
+  if (can('drivers.view')) return <Navigate to="/drivers" replace />
+  if (can('masters.view')) return <Navigate to="/masters" replace />
+  if (can('people.view')) return <Navigate to="/users" replace />
+  if (can('reports.view')) return <Navigate to="/audit" replace />
+  return <Navigate to="/account/profile" replace />
+}
+
 export default function App() {
   return (
     <AuthProvider>
@@ -53,26 +77,26 @@ export default function App() {
             <Route path="/*" element={
               <RequireAuth>
                 <Routes>
-                  <Route path="/" element={<Navigate to="/vehicles" replace />} />
-                  <Route path="/vehicles" element={<VehiclesList />} />
-                  <Route path="/vehicles/create" element={<VehicleForm />} />
-                  <Route path="/vehicles/eol/due" element={<VehicleEolDue />} />
-                  <Route path="/vehicles/:id/edit" element={<VehicleForm />} />
-                  <Route path="/vehicles/:id" element={<VehicleDetail />} />
-                  <Route path="/masters" element={<VehicleMastersPage />} />
-                  <Route path="/drivers" element={<DriversPage />} />
-                  <Route path="/drivers/:id" element={<DriverDetailPage />} />
-                  <Route path="/audit" element={<AuditPage />} />
-                  <Route path="/users" element={<UsersList />} />
-                  <Route path="/users/create" element={<UserForm />} />
-                  <Route path="/users/:id" element={<UserDetail />} />
-                  <Route path="/users/:id/edit" element={<UserForm />} />
+                  <Route path="/" element={<HomeRedirect />} />
+                  <Route path="/vehicles" element={<RequirePerm permission="vehicles.view"><VehiclesList /></RequirePerm>} />
+                  <Route path="/vehicles/create" element={<RequirePerm permission="vehicles.create"><VehicleForm /></RequirePerm>} />
+                  <Route path="/vehicles/eol/due" element={<RequirePerm permission="reports.view"><VehicleEolDue /></RequirePerm>} />
+                  <Route path="/vehicles/:id/edit" element={<RequirePerm permission="vehicles.edit"><VehicleForm /></RequirePerm>} />
+                  <Route path="/vehicles/:id" element={<RequirePerm permission="vehicles.view"><VehicleDetail /></RequirePerm>} />
+                  <Route path="/masters" element={<RequirePerm permission="masters.view"><VehicleMastersPage /></RequirePerm>} />
+                  <Route path="/drivers" element={<RequirePerm permission="drivers.view"><DriversPage /></RequirePerm>} />
+                  <Route path="/drivers/:id" element={<RequirePerm permission="drivers.view"><DriverDetailPage /></RequirePerm>} />
+                  <Route path="/audit" element={<RequirePerm permission="reports.view"><AuditPage /></RequirePerm>} />
+                  <Route path="/users" element={<RequirePerm permission="people.view"><UsersList /></RequirePerm>} />
+                  <Route path="/users/create" element={<RequirePerm permission="people.create"><UserForm /></RequirePerm>} />
+                  <Route path="/users/:id" element={<RequirePerm permission="people.view"><UserDetail /></RequirePerm>} />
+                  <Route path="/users/:id/edit" element={<RequirePerm permission="people.edit"><UserForm /></RequirePerm>} />
                   <Route path="/account/profile" element={<AccountProfile />} />
                   <Route path="/account/password" element={<AccountPassword />} />
                   <Route path="/settings" element={<RequireAdmin><SettingsGeneral /></RequireAdmin>} />
                   <Route path="/settings/roles" element={<RequireAdmin><RolesPermissions /></RequireAdmin>} />
                   <Route path="/settings/notifications" element={<RequireAdmin><NotificationsSettings /></RequireAdmin>} />
-                  <Route path="*" element={<Navigate to="/vehicles" replace />} />
+                  <Route path="*" element={<HomeRedirect />} />
                 </Routes>
               </RequireAuth>
             }

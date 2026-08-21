@@ -373,7 +373,7 @@ export function AdminHub() {
   const links = [
     { to: '/settings', label: 'General Settings', icon: 'fas fa-cog' },
     { to: '/settings/roles', label: 'Roles & permissions', icon: 'fas fa-user-shield-alt' },
-    { to: '/settings/notifications', label: 'Notifications / emails', icon: 'fas fa-envelope' },
+    { to: '/settings/notifications', label: 'Fleet notifications', icon: 'fas fa-envelope' },
     { to: '/masters', label: 'Cities & Models', icon: 'fas fa-database' },
     { to: '/audit', label: 'Audit', icon: 'fas fa-clipboard-list' },
     { to: '/drivers', label: 'Drivers', icon: 'fas fa-id-card' },
@@ -427,14 +427,11 @@ export function SettingsGeneral() {
   const [site, setSite] = useState(siteName)
   const [currency, setCurrency] = useState('INR')
   const [dateFormat, setDateFormat] = useState('YYYY-MM-DD')
-  const [fmcs, setFmcs] = useState(true)
   const [alertEmail, setAlertEmail] = useState('')
   const [error, setError] = useState('')
   const [okMsg, setOkMsg] = useState('')
   const [busy, setBusy] = useState(false)
-  const [digestBusy, setDigestBusy] = useState(false)
   const [qrBusy, setQrBusy] = useState(false)
-  const [tagMigrateBusy, setTagMigrateBusy] = useState(false)
   const [schemaMigrateBusy, setSchemaMigrateBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saml, setSaml] = useState<{
@@ -450,7 +447,6 @@ export function SettingsGeneral() {
         setSite(String(s.site_name || siteName))
         setCurrency(String(s.default_currency || 'INR'))
         setDateFormat(String(s.date_display_format || 'YYYY-MM-DD'))
-        setFmcs(Boolean(s.full_multiple_companies_support))
         setAlertEmail(String(s.alert_email || ''))
       })
       .catch(() => undefined)
@@ -477,7 +473,6 @@ export function SettingsGeneral() {
           site_name: site.trim() || siteName,
           default_currency: currency.trim() || 'INR',
           date_display_format: dateFormat,
-          full_multiple_companies_support: fmcs,
           alert_email: alertEmail.trim() || null,
         },
       })
@@ -495,7 +490,7 @@ export function SettingsGeneral() {
   }
 
   return (
-    <AppLayout title="General Settings" subtitle="Application, notifications, and company options">
+    <AppLayout title="General Settings" subtitle="Refex Mobility branding, SSO, and fleet tools">
       {error ? <div className="callout callout-danger"><p>{error}</p></div> : null}
       {okMsg ? <div className="callout callout-success"><p>{okMsg}</p></div> : null}
       <form className="form-horizontal rm-page" onSubmit={(e) => { void submit(e) }}>
@@ -514,60 +509,30 @@ export function SettingsGeneral() {
               ]}
             />
           </Field>
-        </Box>
-
-        <Box title="Notifications">
-          <Field label="Alert Email">
+          <Field label="Fallback alert email">
             <input className="form-control" type="email" value={alertEmail} onChange={(e) => setAlertEmail(e.target.value)} />
             <span className="help-block">
-              Fallback ops email. For recipients, categories, and IT Asset Manager mapping see{' '}
-              <a href="/settings/notifications">Settings → Notifications</a>.
+              Used when no role recipients are set. Full fleet alert rules live under{' '}
+              <Link to="/settings/notifications">Settings → Notifications</Link>.
             </span>
           </Field>
-          <div style={{ paddingLeft: 15, marginBottom: 12 }}>
-            <button
-              type="button"
-              className="btn btn-default"
-              disabled={digestBusy || !alertEmail.trim() || !canEdit}
-              onClick={() => {
-                setDigestBusy(true)
-                setError('')
-                setOkMsg('')
-                api<{ messages?: string[]; payload?: { skippedReason?: string; sent?: boolean } }>('/notifications/eol/run', { method: 'POST' })
-                  .then((res) => {
-                    const payload = res.payload
-                    setOkMsg(
-                      payload?.sent
-                        ? (Array.isArray(res.messages) ? res.messages.join(' ') : 'EOL digest sent')
-                        : (payload?.skippedReason || (Array.isArray(res.messages) ? res.messages.join(' ') : 'Skipped')),
-                    )
-                  })
-                  .catch((err: Error) => setError(err.message))
-                  .finally(() => setDigestBusy(false))
-              }}
-            >
-              {digestBusy ? 'Sending…' : 'Send EOL digest now'}
+          <div style={{ paddingLeft: 15, marginBottom: 8 }}>
+            <button type="submit" className="btn btn-primary" disabled={busy || !canEdit}>
+              {busy ? 'Saving…' : 'Save Settings'}
             </button>
-          </div>
-        </Box>
-
-        <Box title="Multi-company">
-          <Field label="Full Multiple Companies Support">
-            <label className="checkbox"><input type="checkbox" checked={fmcs} onChange={(e) => setFmcs(e.target.checked)} /> Enable FMCS</label>
-          </Field>
-          <div style={{ paddingLeft: 15 }}>
-            <button type="submit" className="btn btn-primary" disabled={busy || !canEdit}>{busy ? 'Saving…' : 'Save Settings'}</button>
+            {' '}
+            <Link to="/masters" className="btn btn-default">Cities &amp; Models</Link>
+            {' '}
+            <Link to="/settings/roles" className="btn btn-default">Roles</Link>
           </div>
         </Box>
       </form>
 
       <Box title="SAML / Refex Mobility SSO" type="primary">
         <p className="help-block" style={{ marginTop: 0 }}>
-          Paste these into the RefexOne portal SAML app for <strong>Refex Mobility</strong> (remove any old
-          Kissflow / Expense Management ACS values). Production uses{' '}
-          <code>PUBLIC_APP_URL=https://mobility.refexone.com</code> (no port). Then set{' '}
-          <code>SAML_ENABLED=true</code> and paste IdP SSO URL + certificate into{' '}
-          <code>server/.env</code>.
+          Paste these into the RefexOne portal SAML app for <strong>Refex Mobility</strong>.
+          Production uses <code>PUBLIC_APP_URL=https://mobility.refexone.com</code> (no port). Then set{' '}
+          <code>SAML_ENABLED=true</code> and IdP SSO URL + certificate in <code>server/.env</code>.
         </p>
         {saml?.portal_fields ? (
           <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
@@ -604,9 +569,8 @@ export function SettingsGeneral() {
 
       <Box title="Database migrations" type="primary">
         <p className="help-block" style={{ marginTop: 0 }}>
-          Applies pending SQL files from <code>server/src/db/mysql</code> (e.g. map location columns,
-          received-condition photos). Safe to re-run — already-applied versions are skipped.
-          Deploy/pull the new code first, then click this on production.
+          Applies pending SQL from <code>server/src/db/mysql</code> (vehicles, captures, masters, etc.).
+          Safe to re-run — already-applied versions are skipped.
         </p>
         <button
           type="button"
@@ -614,7 +578,7 @@ export function SettingsGeneral() {
           disabled={schemaMigrateBusy || !canEdit}
           onClick={() => {
             if (!window.confirm(
-              'Run pending database migrations on this server?\n\nThis updates the MySQL schema (new columns/kinds).',
+              'Run pending database migrations on this server?\n\nThis updates the MySQL schema (new columns/tables).',
             )) return
             setSchemaMigrateBusy(true)
             setError('')
@@ -639,54 +603,11 @@ export function SettingsGeneral() {
         </button>
       </Box>
 
-      <Box title="Migrate asset tags" type="warning">
+      <Box title="Vehicle QR codes" type="warning">
         <p className="help-block" style={{ marginTop: 0 }}>
-          For every asset that still has an empty <strong>Old Asset Tag</strong>, copies the current{' '}
-          <strong>Asset Tag</strong> into Old Asset Tag, then assigns a new auto tag (
-          <code>COMPANY/ENTITY-TYPE-0001</code>…). Safe to re-run — already-migrated assets (those with
-          Old Asset Tag set) are skipped. Assets missing company/entity or asset type are reported as failed.
-          Reprint labels after migrating if tags are printed.
-        </p>
-        <button
-          type="button"
-          className="btn btn-warning"
-          disabled={tagMigrateBusy || !canEdit}
-          onClick={() => {
-            if (!window.confirm(
-              'Migrate asset tags?\n\nCurrent Asset Tag → Old Asset Tag, then assign new auto tags for assets that do not already have an Old Asset Tag.',
-            )) return
-            setTagMigrateBusy(true)
-            setError('')
-            setOkMsg('')
-            api<{
-              messages?: string[]
-              payload?: { migrated?: number; failed?: number; skipped?: number; errors?: string[] }
-            }>('/settings/migrate-asset-tags', { method: 'POST' })
-              .then((res) => {
-                const msg = Array.isArray(res.messages) ? res.messages.join(' ') : 'Asset tag migration complete'
-                const errs = res.payload?.errors?.length
-                  ? `\n${res.payload.errors.slice(0, 10).join('\n')}`
-                  : ''
-                setOkMsg(msg + errs)
-                toast.success(msg)
-              })
-              .catch((err: Error) => {
-                setError(err.message)
-                toast.error(err.message)
-              })
-              .finally(() => setTagMigrateBusy(false))
-          }}
-        >
-          {tagMigrateBusy ? 'Migrating…' : 'Move Asset Tag → Old Asset Tag'}
-        </button>
-      </Box>
-
-      <Box title="Asset QR codes" type="warning">
-        <p className="help-block" style={{ marginTop: 0 }}>
-          Clears every asset&apos;s QR token, public URL, image path, and printed-label counters, and deletes
-          stored QR PNG files. Use after changing the public domain (e.g. to{' '}
-          <code>https://mobility.refexone.com</code>) so Print Label mints fresh codes without{' '}
-          <code>:3073</code>.
+          Clears every vehicle&apos;s QR token, public URL, and stored QR images. Use after changing the public
+          domain (e.g. to <code>https://mobility.refexone.com</code>) so Print QR mints fresh codes for{' '}
+          <code>/vehicle/…</code> pages.
         </p>
         <button
           type="button"
@@ -694,17 +615,17 @@ export function SettingsGeneral() {
           disabled={qrBusy || !canEdit}
           onClick={() => {
             if (!window.confirm(
-              'Reset ALL asset QR codes?\n\nExisting printed labels will stop matching until you Print Label again for each asset.',
+              'Reset ALL vehicle QR codes?\n\nExisting printed QR labels will stop matching until you open each vehicle → QR / Tags again.',
             )) return
             setQrBusy(true)
             setError('')
             setOkMsg('')
             api<{ messages?: string[]; payload?: { cleared?: number; files_removed?: number } }>(
-              '/settings/reset-qr',
+              '/settings/reset-vehicle-qr',
               { method: 'POST' },
             )
               .then((res) => {
-                const msg = Array.isArray(res.messages) ? res.messages.join(' ') : 'QR reset complete'
+                const msg = Array.isArray(res.messages) ? res.messages.join(' ') : 'Vehicle QR reset complete'
                 setOkMsg(msg)
                 toast.success(msg)
               })
@@ -715,7 +636,7 @@ export function SettingsGeneral() {
               .finally(() => setQrBusy(false))
           }}
         >
-          {qrBusy ? 'Resetting…' : 'Reset all QR codes'}
+          {qrBusy ? 'Resetting…' : 'Reset all vehicle QR codes'}
         </button>
       </Box>
     </AppLayout>

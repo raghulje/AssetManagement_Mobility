@@ -2,37 +2,41 @@ import { all, get, run, now } from '../db/index.js'
 import { mailConfigured } from './mail.js'
 import { listOpsRecipientEmails, listRoleRecipientEmails } from './permissions.js'
 
+/** Mobility-facing email categories (legacy ITAM keys still accepted for stored config). */
 export type EmailCategoryKey =
-  | 'custody'
+  | 'eol_warranty'
   | 'maintenance'
+  | 'custody'
   | 'inventory'
   | 'crud'
-  | 'eol_warranty'
   | 'license_renewal'
 
 export type NotificationConfig = {
   email_notifications: Record<EmailCategoryKey, boolean>
-  /** Extra addresses (comma/newline) always BCC'd on ops digests */
+  /** Extra addresses (comma/newline) always included on ops digests */
   extra_ops_emails: string
-  /** Also email IT Asset Manager role members for EOL/warranty / license renewals (default true) */
+  /** Also email Fleet Ops (+ legacy IT Asset Manager) role members for vehicle EOL/warranty */
   eol_to_it_asset_manager: boolean
-  /** Also email all notify.ops / admin / superuser for workflow events (default true) */
+  /** Also email notify.ops / admin / superuser for workflow events */
   workflow_to_ops_roles: boolean
 }
 
 const DEFAULT_CONFIG: NotificationConfig = {
   email_notifications: {
-    custody: true,
-    maintenance: true,
-    inventory: true,
-    crud: true,
     eol_warranty: true,
-    license_renewal: true,
+    maintenance: true,
+    custody: false,
+    inventory: false,
+    crud: false,
+    license_renewal: false,
   },
   extra_ops_emails: '',
   eol_to_it_asset_manager: true,
   workflow_to_ops_roles: true,
 }
+
+/** Roles that receive vehicle EOL digests when the Fleet Ops toggle is on. */
+const FLEET_OPS_ROLE_NAMES = ['Fleet Ops', 'IT Asset Manager']
 
 function parseConfig(raw: unknown): NotificationConfig {
   let obj: Record<string, unknown> = {}
@@ -97,7 +101,8 @@ export async function saveNotificationConfig(partial: Partial<NotificationConfig
 export async function isEmailCategoryEnabled(category: EmailCategoryKey | string): Promise<boolean> {
   if (!mailConfigured()) return false
   const cfg = await getNotificationConfig()
-  const key = category as EmailCategoryKey
+  // Accept legacy alias used by older vehicle digest code
+  const key = (category === 'eol' ? 'eol_warranty' : category) as EmailCategoryKey
   if (key in cfg.email_notifications) return Boolean(cfg.email_notifications[key])
   return true
 }
@@ -127,7 +132,9 @@ export async function resolveEolRecipients(): Promise<string[]> {
   if (!(await isEmailCategoryEnabled('eol_warranty'))) return []
   const emails = new Set<string>()
   if (cfg.eol_to_it_asset_manager) {
-    for (const e of await listRoleRecipientEmails('IT Asset Manager')) emails.add(e)
+    for (const roleName of FLEET_OPS_ROLE_NAMES) {
+      for (const e of await listRoleRecipientEmails(roleName)) emails.add(e)
+    }
   }
   if (cfg.workflow_to_ops_roles) {
     for (const e of await listOpsRecipientEmails()) emails.add(e)
@@ -144,12 +151,13 @@ export async function notificationAdminSnapshot() {
   const settings = await get<{ alert_email?: string | null; site_name?: string }>(
     `SELECT alert_email, site_name FROM settings WHERE id = 1`,
   )
-  const itam = await all<{ id: number; email: string | null; first_name: string; last_name: string; username: string }>(`
-    SELECT u.id, u.email, u.first_name, u.last_name, u.username
+  const fleetOps = await all<{ id: number; email: string | null; first_name: string; last_name: string; username: string }>(`
+    SELECT DISTINCT u.id, u.email, u.first_name, u.last_name, u.username
     FROM users u
     INNER JOIN users_groups ug ON ug.user_id = u.id
     INNER JOIN permission_groups g ON g.id = ug.group_id
-    WHERE g.name = 'IT Asset Manager' AND u.deleted_at IS NULL AND u.activated = 1
+    WHERE g.name IN ('Fleet Ops', 'IT Asset Manager')
+      AND u.deleted_at IS NULL AND u.activated = 1
     ORDER BY u.first_name, u.last_name
   `)
   const ops = await listOpsRecipientEmails()
@@ -160,8 +168,15 @@ export async function notificationAdminSnapshot() {
       : 'SMTP is not configured. Set SMTP_USER / SMTP_PASS in server/.env',
     alert_email: settings?.alert_email || null,
     site_name: settings?.site_name || null,
+    public_app_url: (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '') || null,
     config: cfg,
-    it_asset_managers: itam.map((u) => ({
+    fleet_ops_members: fleetOps.map((u) => ({
+      id: u.id,
+      name: `${u.first_name} ${u.last_name}`.trim() || u.username,
+      email: u.email,
+    })),
+    /** @deprecated use fleet_ops_members */
+    it_asset_managers: fleetOps.map((u) => ({
       id: u.id,
       name: `${u.first_name} ${u.last_name}`.trim() || u.username,
       email: u.email,
@@ -169,12 +184,8 @@ export async function notificationAdminSnapshot() {
     resolved_ops_emails: ops,
     resolved_eol_emails: await resolveEolRecipients(),
     categories: [
-      { key: 'custody', label: 'Assign / unassign / replace (assets, licenses, accessories…)' },
-      { key: 'maintenance', label: 'Maintenance scheduled / updated / completed' },
-      { key: 'inventory', label: 'License / accessory / consumable / component added' },
-      { key: 'crud', label: 'Asset created / deleted' },
-      { key: 'eol_warranty', label: 'EOL & warranty prior reminders (30d / 7d / 1d)' },
-      { key: 'license_renewal', label: 'Recurring license renewals (7d / last 3 days → IT Asset Manager)' },
+      { key: 'eol_warranty', label: 'Vehicle EOL & warranty reminders (30d / 7d / 1d)' },
+      { key: 'maintenance', label: 'Vehicle maintenance scheduled / updated / completed' },
     ],
   }
 }

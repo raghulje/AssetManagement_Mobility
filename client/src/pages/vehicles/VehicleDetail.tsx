@@ -70,7 +70,7 @@ export default function VehicleDetail() {
   const tab = (params.get('tab') as Tab) || 'overview'
   const navigate = useNavigate()
   const toast = useToast()
-  const { can, isAdmin } = useAuth()
+  const { can } = useAuth()
   const fileRef = useRef<HTMLInputElement>(null)
   const heldGpsRef = useRef<PrecisePosition | null>(null)
   const attachRef = useRef<HTMLInputElement>(null)
@@ -586,8 +586,8 @@ export default function VehicleDetail() {
     )
   }
 
-  const canEdit = isAdmin || can('assets.edit') || can('assets.create') || can('assets.view')
-  const canDelete = isAdmin || can('assets.delete') || can('assets.edit')
+  const canEdit = can('vehicles.edit') || can('vehicles.create')
+  const canDelete = can('vehicles.delete') || can('vehicles.edit')
   const v = vehicle
 
   const tabs: Array<{ id: Tab; label: string; count?: number }> = [
