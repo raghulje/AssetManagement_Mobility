@@ -91,7 +91,7 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
 
             <div className="em-hero-art">
               <img
-                src="/cars.png?v=2"
+                src="/test.png"
                 alt="Refex Mobility Fleet"
                 className="em-hero-art__img"
                 draggable={false}
