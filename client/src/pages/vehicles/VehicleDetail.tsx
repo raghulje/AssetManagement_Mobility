@@ -545,9 +545,6 @@ export default function VehicleDetail() {
       vehicle?.id != null ? `Asset ID ${vehicle.id}` : '',
       vehicle?.fleet_id ? `Fleet ${vehicle.fleet_id}` : '',
     ].filter(Boolean).join(' · ')
-    const scanUrl = vehicle?.qr_token
-      ? vehiclePublicScanUrl(String(vehicle.qr_token), vehicle.qr_url)
-      : (vehicle?.qr_url || '')
     // Blob URL avoids about:blank — window.open(..., 'noopener') cannot document.write
     const html = `<!DOCTYPE html>
 <html><head>
@@ -577,7 +574,6 @@ export default function VehicleDetail() {
   img { width: 240px; height: 240px; display: block; margin: 0 auto 12px; }
   .plate { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
   .meta { margin-top: 6px; font-size: 12px; color: #64748b; }
-  .url { margin-top: 10px; font-size: 10px; word-break: break-all; color: #94a3b8; }
 </style>
 </head><body>
   <div class="label">
@@ -585,7 +581,6 @@ export default function VehicleDetail() {
     <img src="${src}" alt="QR" />
     <div class="plate">${esc(plate)}</div>
     ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}
-    ${scanUrl ? `<div class="url">${esc(scanUrl)}</div>` : ''}
   </div>
   <script>
     window.addEventListener('load', function () {

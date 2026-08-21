@@ -1,18 +1,40 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { vehiclePublicScanUrl, vehicleQrDataUrl } from '../../lib/vehicleQrClient'
+import { vehicleQrDataUrl } from '../../lib/vehicleQrClient'
+import './public-vehicle.css'
 
 type PublicVehicle = {
-  vehicle_number: string
+  id?: number
+  vehicle_number?: string | null
   name?: string | null
-  model: string
-  location_name: string
-  category: string
-  fuel_type: string
-  status: string
+  model?: string | null
+  make?: string | null
+  variant?: string | null
+  location_name?: string | null
+  category?: string | null
+  fuel_type?: string | null
+  status?: string | null
+  fleet_id?: string | null
+  vin?: string | null
+  color?: string | null
+  assigned_name?: string | null
+  assigned_type?: string | null
   qr_token?: string | null
   qr_url?: string | null
-  qr_image_url?: string | null
+}
+
+function hasValue(v: unknown): boolean {
+  if (v == null) return false
+  const s = String(v).trim()
+  return s !== '' && s !== '—' && s.toLowerCase() !== 'null' && s.toLowerCase() !== 'undefined'
+}
+
+function statusClass(status: string) {
+  const s = status.toLowerCase()
+  if (s.includes('assign') || s.includes('deploy')) return 'pv-status--assigned'
+  if (s.includes('maint')) return 'pv-status--maintenance'
+  if (s.includes('inactive') || s.includes('retire')) return 'pv-status--inactive'
+  return 'pv-status--active'
 }
 
 export default function PublicVehicle() {
@@ -53,38 +75,114 @@ export default function PublicVehicle() {
     return () => { cancelled = true }
   }, [token, row?.qr_url])
 
-  if (error) {
-    return <div className="suite-page" style={{ padding: 40, textAlign: 'center' }}>{error}</div>
-  }
-  if (!row) {
-    return <div className="suite-page" style={{ padding: 40, textAlign: 'center' }}>Loading…</div>
-  }
+  const modelLine = useMemo(() => {
+    if (!row) return ''
+    return [row.make, row.model, row.variant].filter(hasValue).join(' ')
+  }, [row])
 
-  return (
-    <div className="suite-page" style={{ maxWidth: 480, margin: '40px auto', padding: 20 }}>
-      <div style={{ textAlign: 'center', marginBottom: 16 }}>
-        <img src="/mobility_logo.png" alt="Refex Mobility" style={{ height: 40 }} />
-        <h2 style={{ margin: '12px 0 4px' }}>Refex Mobility</h2>
-        <p style={{ color: '#64748b' }}>Fleet vehicle</p>
-      </div>
-      {qrDataUrl ? (
-        <div style={{ textAlign: 'center', marginBottom: 16 }}>
-          <img src={qrDataUrl} alt="QR" style={{ width: 160, height: 160 }} />
-          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, wordBreak: 'break-all' }}>
-            {vehiclePublicScanUrl(String(token || row.qr_token || ''), row.qr_url)}
+  const fields = useMemo(() => {
+    if (!row) return [] as Array<{ label: string; value: string }>
+    const list: Array<{ label: string; value: string }> = []
+    const push = (label: string, value: unknown) => {
+      if (!hasValue(value)) return
+      list.push({ label, value: String(value).trim() })
+    }
+    push('Display name', row.name)
+    push('Model', modelLine || row.model)
+    push('City', row.location_name)
+    push('Category', row.category)
+    push('Fuel', row.fuel_type)
+    push('Color', row.color)
+    push('VIN', row.vin)
+    push('Fleet ID', row.fleet_id)
+    if (hasValue(row.assigned_name)) {
+      const kind = hasValue(row.assigned_type) ? String(row.assigned_type) : 'assignee'
+      push('Assigned to', `${row.assigned_name} (${kind})`)
+    }
+    return list
+  }, [row, modelLine])
+
+  if (error) {
+    return (
+      <div className="pv-page">
+        <div className="pv-bg" aria-hidden />
+        <div className="pv-shell">
+          <div className="pv-state pv-state--error">
+            <img src="/mobility_logo.png" alt="Refex Mobility" className="pv-logo" />
+            <h1>Vehicle not found</h1>
+            <p>{error}</p>
           </div>
         </div>
-      ) : null}
-      <table className="table">
-        <tbody>
-          <tr><th>Plate</th><td>{row.vehicle_number}</td></tr>
-          <tr><th>Model</th><td>{row.model}</td></tr>
-          <tr><th>City</th><td>{row.location_name}</td></tr>
-          <tr><th>Category</th><td>{row.category}</td></tr>
-          <tr><th>Fuel</th><td>{row.fuel_type}</td></tr>
-          <tr><th>Status</th><td>{row.status}</td></tr>
-        </tbody>
-      </table>
+      </div>
+    )
+  }
+
+  if (!row) {
+    return (
+      <div className="pv-page">
+        <div className="pv-bg" aria-hidden />
+        <div className="pv-shell">
+          <div className="pv-state">
+            <img src="/mobility_logo.png" alt="Refex Mobility" className="pv-logo" />
+            <p>Loading vehicle…</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const plate = hasValue(row.vehicle_number) ? String(row.vehicle_number) : 'Vehicle'
+  const status = hasValue(row.status) ? String(row.status) : ''
+
+  return (
+    <div className="pv-page">
+      <div className="pv-bg" aria-hidden>
+        <div className="pv-orb pv-orb--a" />
+        <div className="pv-orb pv-orb--b" />
+      </div>
+
+      <div className="pv-shell">
+        <header className="pv-brand">
+          <img src="/mobility_logo.png" alt="Refex Mobility" className="pv-logo" />
+          <p className="pv-brand__tag">Fleet vehicle identity</p>
+        </header>
+
+        <section className="pv-hero" aria-label="Vehicle">
+          <div className="pv-hero__top">
+            <p className="pv-kicker">Registration</p>
+            <h1 className="pv-plate">{plate}</h1>
+            {modelLine ? <p className="pv-model">{modelLine}</p> : null}
+            {status ? (
+              <span className={`pv-status ${statusClass(status)}`}>{status}</span>
+            ) : null}
+          </div>
+
+          {qrDataUrl ? (
+            <div className="pv-qr" aria-hidden={false}>
+              <img src={qrDataUrl} alt="" />
+              <span>Scan QR for this vehicle</span>
+            </div>
+          ) : null}
+        </section>
+
+        {fields.length > 0 ? (
+          <section className="pv-specs" aria-label="Vehicle details">
+            <h2>Details</h2>
+            <dl>
+              {fields.map((f) => (
+                <div key={f.label} className="pv-spec">
+                  <dt>{f.label}</dt>
+                  <dd>{f.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ) : null}
+
+        <footer className="pv-foot">
+          Refex Mobility · Scan-verified vehicle record
+        </footer>
+      </div>
     </div>
   )
 }

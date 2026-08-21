@@ -1,0 +1,251 @@
+/* Public QR scan page — Refex Mobility */
+
+.pv-page {
+  --pv-coral: #f4553b;
+  --pv-ink: #0b1f44;
+  --pv-muted: #64748b;
+  --pv-line: #e2e8f0;
+  --pv-soft: #f8fafc;
+  --pv-font: "Plus Jakarta Sans", "Manrope", "Segoe UI", sans-serif;
+
+  position: relative;
+  min-height: 100vh;
+  font-family: var(--pv-font);
+  color: var(--pv-ink);
+  background: #f4f7fb;
+  overflow-x: hidden;
+}
+
+.pv-page *,
+.pv-page *::before,
+.pv-page *::after { box-sizing: border-box; }
+
+.pv-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(720px 380px at 12% 0%, rgba(244, 85, 59, 0.14), transparent 55%),
+    radial-gradient(620px 360px at 100% 8%, rgba(11, 31, 68, 0.08), transparent 50%),
+    linear-gradient(180deg, #fbfdff 0%, #eef2f7 100%);
+}
+
+.pv-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(42px);
+  opacity: 0.5;
+}
+
+.pv-orb--a {
+  width: 200px;
+  height: 200px;
+  background: rgba(244, 85, 59, 0.22);
+  top: 6%;
+  left: -40px;
+}
+
+.pv-orb--b {
+  width: 180px;
+  height: 180px;
+  background: rgba(11, 31, 68, 0.12);
+  top: 18%;
+  right: -50px;
+}
+
+.pv-shell {
+  position: relative;
+  z-index: 1;
+  width: min(440px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 36px;
+  animation: pvIn 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes pvIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+.pv-brand {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.pv-logo {
+  height: 42px;
+  width: auto;
+  display: inline-block;
+  object-fit: contain;
+}
+
+.pv-brand__tag {
+  margin: 10px 0 0;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pv-muted);
+}
+
+.pv-hero {
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 20px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+  padding: 22px 20px 18px;
+  text-align: center;
+}
+
+.pv-hero__top { margin-bottom: 16px; }
+
+.pv-kicker {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pv-coral);
+}
+
+.pv-plate {
+  margin: 0;
+  font-size: clamp(26px, 7vw, 34px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  color: var(--pv-ink);
+}
+
+.pv-model {
+  margin: 8px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--pv-muted);
+}
+
+.pv-status {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 12px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: capitalize;
+}
+
+.pv-status--active { background: #ecfdf5; color: #047857; }
+.pv-status--assigned { background: #eff6ff; color: #1d4ed8; }
+.pv-status--maintenance { background: #fff7ed; color: #c2410c; }
+.pv-status--inactive { background: #fef2f2; color: #b91c1c; }
+
+.pv-qr {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--pv-line);
+}
+
+.pv-qr img {
+  width: 148px;
+  height: 148px;
+  display: block;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.pv-qr span {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--pv-muted);
+  letter-spacing: 0.02em;
+}
+
+.pv-specs {
+  margin-top: 14px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 18px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
+  padding: 16px 18px 8px;
+}
+
+.pv-specs h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pv-muted);
+}
+
+.pv-specs dl {
+  margin: 0;
+}
+
+.pv-spec {
+  display: grid;
+  grid-template-columns: minmax(96px, 38%) 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 12px 0;
+  border-top: 1px solid var(--pv-line);
+}
+
+.pv-spec:first-of-type { border-top: 0; }
+
+.pv-spec dt {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--pv-muted);
+}
+
+.pv-spec dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pv-ink);
+  word-break: break-word;
+  text-align: right;
+}
+
+.pv-foot {
+  margin-top: 18px;
+  text-align: center;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.pv-state {
+  text-align: center;
+  padding: 48px 16px;
+  color: var(--pv-muted);
+}
+
+.pv-state h1 {
+  margin: 14px 0 8px;
+  font-size: 22px;
+  color: var(--pv-ink);
+}
+
+.pv-state--error h1 { color: #b91c1c; }
+
+.pv-state p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+@media (max-width: 420px) {
+  .pv-shell { width: min(100%, calc(100% - 24px)); }
+  .pv-spec {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+  .pv-spec dd { text-align: left; }
+}
