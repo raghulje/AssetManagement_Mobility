@@ -817,9 +817,6 @@ export default function VehicleDetail() {
               </div>
             ) : (
               <div className="vad-gallery">
-                <button type="button" className="vc-add-card" disabled={gpsBusy} onClick={() => void startCapture()}>
-                  <i className="fas fa-camera" /><span>{gpsBusy ? 'Getting GPS…' : 'Take photo'}</span>
-                </button>
                 {pending.map((p) => (
                   <div key={p.localId} className="vc-pending-wrap">
                     <VehicleCaptureFrame photoUrl={p.previewUrl} capturedAt={p.capturedAt} latitude={p.latitude} longitude={p.longitude} address={p.address} />
