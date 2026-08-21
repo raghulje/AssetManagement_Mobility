@@ -89,8 +89,9 @@ export default function App() {
                   <Route path="/audit" element={<RequirePerm permission="reports.view"><AuditPage /></RequirePerm>} />
                   <Route path="/users" element={<RequirePerm permission="people.view"><UsersList /></RequirePerm>} />
                   <Route path="/users/create" element={<RequirePerm permission="people.create"><UserForm /></RequirePerm>} />
-                  <Route path="/users/:id" element={<RequirePerm permission="people.view"><UserDetail /></RequirePerm>} />
                   <Route path="/users/:id/edit" element={<RequirePerm permission="people.edit"><UserForm /></RequirePerm>} />
+                  <Route path="/users/:id/clone" element={<RequirePerm permission="people.create"><UserForm /></RequirePerm>} />
+                  <Route path="/users/:id" element={<RequirePerm permission="people.view"><UserDetail /></RequirePerm>} />
                   <Route path="/account/profile" element={<AccountProfile />} />
                   <Route path="/account/password" element={<AccountPassword />} />
                   <Route path="/settings" element={<RequireAdmin><SettingsGeneral /></RequireAdmin>} />

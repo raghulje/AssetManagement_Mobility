@@ -9,6 +9,7 @@ import { stampGpsOnImage, fetchGpsStaticMapUrl } from '../../lib/stampGpsOnImage
 import { readGpsFromImageFile } from '../../lib/imageGps'
 import {
   preferNativePhoneCamera,
+  queryLocationPermission,
   requestLocationAccess,
   resolveCapturePosition,
   type PrecisePosition,
@@ -355,25 +356,65 @@ export default function VehicleDetail() {
     }
   }
 
+  function gpsIsFresh(pos: PrecisePosition | null | undefined, maxAgeMs = 90_000) {
+    if (!pos || !Number.isFinite(pos.latitude) || !Number.isFinite(pos.longitude)) return false
+    const t = pos.capturedAt instanceof Date
+      ? pos.capturedAt.getTime()
+      : Date.parse(String(pos.capturedAt))
+    return Number.isFinite(t) && Date.now() - t <= maxAgeMs
+  }
+
+  function launchNativeCamera() {
+    const el = fileRef.current
+    if (!el) return
+    try {
+      if (typeof el.showPicker === 'function') {
+        void el.showPicker()
+        return
+      }
+    } catch {
+      /* fall through to click() */
+    }
+    el.click()
+  }
+
   async function startCapture() {
-    setGpsBusy(true)
     setNativeCamArmed(false)
+    const useNative = preferNativePhoneCamera()
+    const warm = gpsIsFresh(captureGps)
+      ? captureGps
+      : gpsIsFresh(heldGpsRef.current)
+        ? heldGpsRef.current
+        : null
+
+    // GPS already locked → open camera in this same tap (true one-click)
+    if (useNative && warm) {
+      heldGpsRef.current = warm
+      setCaptureGps(warm)
+      launchNativeCamera()
+      return
+    }
+
+    setGpsBusy(true)
     try {
       const loc = await requestLocationAccess()
       if (loc.position) {
         heldGpsRef.current = loc.position
         setCaptureGps(loc.position)
-        toast.success(loc.message)
       } else {
         heldGpsRef.current = null
         setCaptureGps(null)
         toast.error(loc.message)
       }
 
-      // Phones leave the browser for the system camera (tick UI). Opening <input>
-      // must be a fresh user tap after the async GPS prompt — arm a confirm button.
-      if (preferNativePhoneCamera()) {
+      if (useNative) {
+        // Auto-open after GPS. Keep a soft fallback if the browser blocks the picker.
         setNativeCamArmed(true)
+        setGpsBusy(false)
+        await new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => window.setTimeout(() => resolve(), 80))
+        })
+        launchNativeCamera()
         return
       }
       setWebcamOpen(true)
@@ -381,6 +422,22 @@ export default function VehicleDetail() {
       setGpsBusy(false)
     }
   }
+
+  // Warm GPS on Photos tab so the next Take photo can open the camera in one gesture
+  useEffect(() => {
+    if (tab !== 'captures') return
+    if (gpsIsFresh(heldGpsRef.current) || gpsIsFresh(captureGps)) return
+    let cancelled = false
+    void queryLocationPermission().then((perm) => {
+      if (cancelled || perm !== 'granted') return
+      return requestLocationAccess().then((loc) => {
+        if (cancelled || !loc.position) return
+        heldGpsRef.current = loc.position
+        setCaptureGps(loc.position)
+      })
+    })
+    return () => { cancelled = true }
+  }, [tab])
 
   // Fleet list camera icon → open Photos tab and start capture immediately
   useEffect(() => {
@@ -398,9 +455,8 @@ export default function VehicleDetail() {
   }, [id])
 
   function openNativeCameraNow() {
-    // Synchronous with this tap — required on iOS/Android after GPS await
     setNativeCamArmed(false)
-    fileRef.current?.click()
+    launchNativeCamera()
   }
 
   async function onNativeCameraFile(file: File) {
@@ -771,14 +827,23 @@ export default function VehicleDetail() {
                 </button>
               </div>
             </div>
-            {nativeCamArmed ? (
+            {gpsBusy ? (
+              <div className="vc-native-arm vc-native-arm--busy" role="status">
+                <div className="vc-gps-pulse" aria-hidden />
+                <div>
+                  <strong>Getting GPS…</strong>
+                  <p>Locking your location. Camera opens automatically when ready.</p>
+                </div>
+              </div>
+            ) : null}
+            {nativeCamArmed && !gpsBusy ? (
               <div className="vc-native-arm" role="status">
                 <div>
-                  <strong>{captureGps ? 'GPS ready' : 'Continue without GPS?'}</strong>
+                  <strong>Opening camera…</strong>
                   <p>
                     {captureGps
-                      ? `Location locked (±${Math.round(captureGps.accuracyM)} m). Tap Open camera, shoot, then tap the tick — we stamp this GPS on the photo.`
-                      : 'Location was not available. You can still open the camera; we will try GPS/EXIF when you return.'}
+                      ? `Location locked (±${Math.round(captureGps.accuracyM)} m). If the camera did not open, tap below — then shoot and confirm.`
+                      : 'Location unavailable — we will try GPS from the photo. If the camera did not open, tap below.'}
                   </p>
                 </div>
                 <div className="vc-native-arm__actions">
@@ -798,6 +863,7 @@ export default function VehicleDetail() {
               capture="environment"
               className="sr-only"
               onChange={(e) => {
+                setNativeCamArmed(false)
                 const f = e.target.files?.[0]
                 e.target.value = ''
                 if (f) void onNativeCameraFile(f)
@@ -810,10 +876,10 @@ export default function VehicleDetail() {
               onClose={() => setWebcamOpen(false)}
               onCapture={(file, position) => { void processFile(file, position) }}
             />
-            {captures.length === 0 && pending.length === 0 && !nativeCamArmed ? (
+            {captures.length === 0 && pending.length === 0 && !nativeCamArmed && !gpsBusy ? (
               <div className="vad-empty">
                 <strong>No photos yet</strong>
-                Tap Take photo — we ask for Location first, then open the camera. On phones the system camera opens; tap the tick to keep the shot (GPS is saved with it).
+                Tap Take photo — we lock GPS, then open the camera automatically. On phones, confirm the shot with the tick.
               </div>
             ) : (
               <div className="vad-gallery">

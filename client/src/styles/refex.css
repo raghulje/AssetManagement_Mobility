@@ -4663,6 +4663,24 @@ table.table tr.is-selected td { background: rgba(255, 107, 74, 0.08); }
   background: #fff5f3;
 }
 
+.vc-native-arm--busy {
+  align-items: center;
+}
+
+.vc-gps-pulse {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 3px solid #ffd8d0;
+  border-top-color: #f4553b;
+  animation: vc-gps-spin 0.75s linear infinite;
+}
+
+@keyframes vc-gps-spin {
+  to { transform: rotate(360deg); }
+}
+
 .vc-native-arm strong {
   display: block;
   font-size: 15px;
