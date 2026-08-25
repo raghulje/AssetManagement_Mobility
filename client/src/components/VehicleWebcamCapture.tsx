@@ -12,8 +12,16 @@ type Props = {
   vehicleLabel?: string
   /** GPS acquired on the same user gesture that opened this dialog */
   initialPos?: PrecisePosition | null
+  /** After shutter: show ✕ / ✓ / + review before committing */
+  confirmShot?: boolean
   onClose: () => void
   onCapture: (file: File, position: PrecisePosition | null) => void
+}
+
+type PendingShot = {
+  file: File
+  previewUrl: string
+  pos: PrecisePosition | null
 }
 
 function formatCoord(n: number, kind: 'lat' | 'lng') {
@@ -25,6 +33,7 @@ export default function VehicleWebcamCapture({
   open,
   vehicleLabel,
   initialPos = null,
+  confirmShot = false,
   onClose,
   onCapture,
 }: Props) {
@@ -37,6 +46,7 @@ export default function VehicleWebcamCapture({
   const [pos, setPos] = useState<PrecisePosition | null>(initialPos)
   const [locStatus, setLocStatus] = useState(initialPos ? `±${Math.round(initialPos.accuracyM)} m` : 'Acquiring GPS…')
   const [facing, setFacing] = useState<'user' | 'environment'>('environment')
+  const [pending, setPending] = useState<PendingShot | null>(null)
   const mirrored = facing === 'user'
 
   useEffect(() => {
@@ -44,10 +54,17 @@ export default function VehicleWebcamCapture({
   }, [pos])
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      setPending((p) => {
+        if (p) URL.revokeObjectURL(p.previewUrl)
+        return null
+      })
+      return
+    }
     let cancelled = false
     setError('')
     setReady(false)
+    setPending(null)
     setPos(initialPos ?? null)
     posRef.current = initialPos ?? null
     setLocStatus(initialPos ? `±${Math.round(initialPos.accuracyM)} m` : 'Acquiring GPS…')
@@ -61,7 +78,6 @@ export default function VehicleWebcamCapture({
           streamRef.current.getTracks().forEach((t) => t.stop())
           streamRef.current = null
         }
-        // Prefer rear camera; fall back without ideal constraints on stubborn phones
         let stream: MediaStream
         try {
           stream = await navigator.mediaDevices.getUserMedia({
@@ -166,7 +182,6 @@ export default function VehicleWebcamCapture({
         streamRef.current = null
       }
     }
-    // initialPos only used when opening — don't restart camera when GPS updates
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, facing])
 
@@ -186,7 +201,7 @@ export default function VehicleWebcamCapture({
 
   async function snap() {
     const video = videoRef.current
-    if (!video || !ready || busy) return
+    if (!video || !ready || busy || pending) return
     setBusy(true)
     try {
       let usePos = posRef.current
@@ -221,8 +236,16 @@ export default function VehicleWebcamCapture({
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.92))
       if (!blob) throw new Error('Could not encode photo')
       const file = new File([blob], `webcam-${Date.now()}.jpg`, { type: 'image/jpeg' })
-      // Keep live camera open — parent saves in background
-      onCapture(file, usePos)
+
+      if (confirmShot) {
+        setPending({
+          file,
+          previewUrl: URL.createObjectURL(blob),
+          pos: usePos,
+        })
+      } else {
+        onCapture(file, usePos)
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Capture failed')
     } finally {
@@ -230,16 +253,40 @@ export default function VehicleWebcamCapture({
     }
   }
 
+  function discardPending() {
+    setPending((p) => {
+      if (p) URL.revokeObjectURL(p.previewUrl)
+      return null
+    })
+  }
+
+  function keepAndContinue() {
+    if (!pending) return
+    const shot = pending
+    setPending(null)
+    URL.revokeObjectURL(shot.previewUrl)
+    onCapture(shot.file, shot.pos)
+  }
+
+  function keepAndDone() {
+    if (!pending) return
+    const shot = pending
+    setPending(null)
+    URL.revokeObjectURL(shot.previewUrl)
+    onCapture(shot.file, shot.pos)
+    onClose()
+  }
+
   return (
     <div className="vc-webcam-overlay" role="dialog" aria-modal="true" aria-label="Webcam capture">
       <div className="vc-webcam-panel">
         <header className="vc-webcam-head">
           <div>
-            <strong>Live camera</strong>
+            <strong>GPS camera</strong>
             <span>{vehicleLabel || 'Refex Mobility GPS capture'}</span>
           </div>
           <button type="button" className="btn btn-default btn-sm" onClick={onClose} disabled={busy}>
-            Close
+            Done
           </button>
         </header>
 
@@ -250,47 +297,71 @@ export default function VehicleWebcamCapture({
             playsInline
             muted
             autoPlay
-            className={`vc-webcam-video${mirrored ? ' is-mirrored' : ''}`}
+            className={`vc-webcam-video${mirrored ? ' is-mirrored' : ''}${pending ? ' is-hidden' : ''}`}
           />
-          <div className="vc-webcam-hud">
-            <div className={`vc-webcam-gps${pos ? ' is-locked' : ' is-missing'}`}>
-              <i className="fas fa-crosshairs" />
-              {pos ? (
-                <>
-                  <span>{formatCoord(pos.latitude, 'lat')}</span>
-                  <span>{formatCoord(pos.longitude, 'lng')}</span>
+          {pending ? (
+            <img src={pending.previewUrl} alt="Captured" className="vc-webcam-preview" />
+          ) : null}
+          {!pending ? (
+            <div className="vc-webcam-hud">
+              <div className={`vc-webcam-gps${pos ? ' is-locked' : ' is-missing'}`}>
+                <i className="fas fa-crosshairs" />
+                {pos ? (
+                  <>
+                    <span>{formatCoord(pos.latitude, 'lat')}</span>
+                    <span>{formatCoord(pos.longitude, 'lng')}</span>
+                    <em>{locStatus}</em>
+                  </>
+                ) : (
                   <em>{locStatus}</em>
-                </>
-              ) : (
-                <em>{locStatus}</em>
-              )}
+                )}
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
 
-        <footer className="vc-webcam-foot">
-          {!pos ? (
-            <button type="button" className="btn btn-warning btn-sm" disabled={busy} onClick={() => void enableGps()}>
-              <i className="fas fa-map-marker-alt" /> Enable GPS
+        {pending ? (
+          <footer className="vc-webcam-review">
+            <button type="button" className="vc-review-btn vc-review-btn--discard" onClick={discardPending} aria-label="Discard">
+              <i className="fas fa-times" />
             </button>
-          ) : null}
-          <button
-            type="button"
-            className="btn btn-default btn-sm"
-            disabled={busy}
-            onClick={() => setFacing((f) => (f === 'environment' ? 'user' : 'environment'))}
-          >
-            <i className="fas fa-sync-alt" /> Flip
-          </button>
-          <button type="button" className="btn btn-primary vc-webcam-shutter" disabled={!ready || busy} onClick={() => void snap()}>
-            {busy ? 'Capturing…' : 'Take photo'}
-          </button>
-        </footer>
-        <p className="vc-webcam-hint">
-          {!pos
-            ? 'Allow Location first so lat/lng and address are stamped. Photos still save if GPS is missing, but try Enable GPS.'
-            : 'Each tap saves automatically — camera stays open for more shots. Close when done.'}
-        </p>
+            <button type="button" className="vc-review-btn vc-review-btn--more" onClick={keepAndContinue} aria-label="Keep and take more">
+              <i className="fas fa-plus" />
+            </button>
+            <button type="button" className="vc-review-btn vc-review-btn--keep" onClick={keepAndDone} aria-label="Keep photo">
+              <i className="fas fa-check" />
+            </button>
+            <p className="vc-webcam-hint">✕ Discard · + Keep &amp; add more · ✓ Keep &amp; finish</p>
+          </footer>
+        ) : (
+          <>
+            <footer className="vc-webcam-foot">
+              {!pos ? (
+                <button type="button" className="btn btn-warning btn-sm" disabled={busy} onClick={() => void enableGps()}>
+                  <i className="fas fa-map-marker-alt" /> Enable GPS
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-default btn-sm"
+                disabled={busy}
+                onClick={() => setFacing((f) => (f === 'environment' ? 'user' : 'environment'))}
+              >
+                <i className="fas fa-sync-alt" /> Flip
+              </button>
+              <button type="button" className="btn btn-primary vc-webcam-shutter" disabled={!ready || busy} onClick={() => void snap()}>
+                {busy ? 'Capturing…' : 'Capture'}
+              </button>
+            </footer>
+            <p className="vc-webcam-hint">
+              {!pos
+                ? 'Allow Location so photos are GPS-stamped.'
+                : confirmShot
+                  ? 'Capture a shot, then use + for more or ✓ when finished.'
+                  : 'Each tap saves — camera stays open for more shots.'}
+            </p>
+          </>
+        )}
       </div>
     </div>
   )

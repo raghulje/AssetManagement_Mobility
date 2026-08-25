@@ -2,7 +2,6 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEven
 import VehicleWebcamCapture from '../../components/VehicleWebcamCapture'
 import { stampGpsOnImage, fetchGpsStaticMapUrl } from '../../lib/stampGpsOnImage'
 import {
-  preferNativePhoneCamera,
   requestLocationAccess,
   type PrecisePosition,
 } from '../../lib/preciseLocation'
@@ -55,6 +54,14 @@ function isValidName(v: string) {
   return /^[A-Za-z][A-Za-z .'-]{1,100}$/.test(v.trim())
 }
 
+function gpsIsFresh(pos: PrecisePosition | null | undefined, maxAgeMs = 120_000) {
+  if (!pos || !Number.isFinite(pos.latitude) || !Number.isFinite(pos.longitude)) return false
+  const t = pos.capturedAt instanceof Date
+    ? pos.capturedAt.getTime()
+    : Date.parse(String(pos.capturedAt))
+  return Number.isFinite(t) && Date.now() - t <= maxAgeMs
+}
+
 function ReqLabel({ htmlFor, children }: { htmlFor?: string; children: string }) {
   return (
     <label className="pcf-label" htmlFor={htmlFor}>
@@ -79,9 +86,9 @@ async function publicReverseGeocode(lat: number, lng: number) {
 
 export default function PublicCaptureForm() {
   const vehicleListId = useId()
-  const fileRef = useRef<HTMLInputElement>(null)
   const heldGpsRef = useRef<PrecisePosition | null>(null)
   const searchTimer = useRef<number | null>(null)
+  const photosRef = useRef<LocalPhoto[]>([])
 
   const [vehicleQuery, setVehicleQuery] = useState('')
   const [vehicleHits, setVehicleHits] = useState<VehicleHit[]>([])
@@ -97,13 +104,16 @@ export default function PublicCaptureForm() {
   const [captureGps, setCaptureGps] = useState<PrecisePosition | null>(null)
   const [gpsBusy, setGpsBusy] = useState(false)
   const [webcamOpen, setWebcamOpen] = useState(false)
-  const [nativeCamArmed, setNativeCamArmed] = useState(false)
   const [stamping, setStamping] = useState(false)
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [done, setDone] = useState<{ vehicle_number: string; photo_count: number } | null>(null)
+
+  useEffect(() => {
+    photosRef.current = photos
+  }, [photos])
 
   const searchVehicles = useCallback((q: string) => {
     if (searchTimer.current) window.clearTimeout(searchTimer.current)
@@ -128,31 +138,30 @@ export default function PublicCaptureForm() {
 
   useEffect(() => () => {
     if (searchTimer.current) window.clearTimeout(searchTimer.current)
-    photos.forEach((p) => URL.revokeObjectURL(p.previewUrl))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    photosRef.current.forEach((p) => URL.revokeObjectURL(p.previewUrl))
   }, [])
 
-  function launchNativeCamera() {
-    const el = fileRef.current
-    if (!el) return
-    try {
-      if (typeof el.showPicker === 'function') {
-        void el.showPicker()
-        return
-      }
-    } catch { /* fall through */ }
-    el.click()
-  }
-
+  /** One tap: GPS loader → automatically open in-app GPS camera */
   async function startGpsCamera() {
     if (selected?.form_registered) return
     if (photos.length >= MAX_PHOTOS) {
       setError(`Maximum ${MAX_PHOTOS} photos`)
       return
     }
-    setNativeCamArmed(false)
     setError('')
-    const useNative = preferNativePhoneCamera()
+
+    const warm = gpsIsFresh(captureGps)
+      ? captureGps
+      : gpsIsFresh(heldGpsRef.current)
+        ? heldGpsRef.current
+        : null
+
+    if (warm) {
+      heldGpsRef.current = warm
+      setCaptureGps(warm)
+      setWebcamOpen(true)
+      return
+    }
 
     setGpsBusy(true)
     try {
@@ -163,17 +172,7 @@ export default function PublicCaptureForm() {
       } else {
         heldGpsRef.current = null
         setCaptureGps(null)
-        setError(loc.message || 'Could not get GPS. Allow Location and try again.')
-      }
-
-      if (useNative) {
-        setNativeCamArmed(true)
-        setGpsBusy(false)
-        await new Promise<void>((resolve) => {
-          window.requestAnimationFrame(() => window.setTimeout(() => resolve(), 80))
-        })
-        launchNativeCamera()
-        return
+        setError(loc.message || 'GPS not ready yet — camera will keep trying.')
       }
       setWebcamOpen(true)
     } finally {
@@ -182,7 +181,7 @@ export default function PublicCaptureForm() {
   }
 
   async function stampAndAdd(file: File, pos: PrecisePosition | null) {
-    if (photos.length >= MAX_PHOTOS) {
+    if (photosRef.current.length >= MAX_PHOTOS) {
       setError(`Maximum ${MAX_PHOTOS} photos`)
       return
     }
@@ -225,16 +224,15 @@ export default function PublicCaptureForm() {
       if (mapImageUrl) URL.revokeObjectURL(mapImageUrl)
 
       const previewUrl = URL.createObjectURL(stamped)
-      setPhotos((prev) => [{
+      setPhotos((prev) => [...prev, {
         id: `p-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         file: stamped,
         previewUrl,
         latitude,
         longitude,
         address,
-      }, ...prev].slice(0, MAX_PHOTOS))
+      }].slice(0, MAX_PHOTOS))
       setFieldErrors((fe) => ({ ...fe, photos: undefined }))
-      setNativeCamArmed(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not stamp GPS photo')
     } finally {
@@ -332,7 +330,6 @@ export default function PublicCaptureForm() {
     setPhone('')
     setError('')
     setFieldErrors({})
-    setNativeCamArmed(false)
     setWebcamOpen(false)
   }
 
@@ -364,7 +361,7 @@ export default function PublicCaptureForm() {
           <form onSubmit={(e) => { void onSubmit(e) }} noValidate>
             <h1>Capture vehicle photos</h1>
             <p className="pcf-lead">
-              All fields marked <span className="pcf-req">*</span> are mandatory. Use the GPS camera — photos are stamped with location.
+              All fields marked <span className="pcf-req">*</span> are mandatory. One tap locks GPS and opens the camera.
             </p>
 
             {error ? <div className="pcf-error" role="alert">{error}</div> : null}
@@ -493,86 +490,71 @@ export default function PublicCaptureForm() {
             </div>
 
             {gpsBusy ? (
-              <div className="pcf-gps-busy" role="status">
-                <div className="pcf-gps-spin" aria-hidden />
-                <div>
-                  <strong>Getting GPS…</strong>
-                  <p>Locking location, then opening the GPS camera.</p>
-                </div>
+              <div className="pcf-gps-overlay" role="status">
+                <div className="pcf-gps-spin pcf-gps-spin--lg" aria-hidden />
+                <strong>Getting GPS…</strong>
+                <p>Locking your location. Camera opens automatically.</p>
               </div>
             ) : null}
 
-            {nativeCamArmed && !gpsBusy ? (
-              <div className="pcf-gps-busy" role="status">
-                <div>
-                  <strong>Opening GPS camera…</strong>
-                  <p>
-                    {captureGps
-                      ? `Location locked (±${Math.round(captureGps.accuracyM)} m). If the camera did not open, tap below.`
-                      : 'Location unavailable — try again outdoors. If the camera did not open, tap below.'}
-                  </p>
-                </div>
-                <div className="pcf-photo-actions">
-                  <button type="button" className="pcf-btn pcf-btn--primary" onClick={launchNativeCamera}>
-                    Open camera
-                  </button>
-                  <button type="button" className="pcf-btn" onClick={() => setNativeCamArmed(false)}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
+            {stamping ? (
+              <div className="pcf-hint pcf-hint--block">Stamping GPS on photo…</div>
             ) : null}
 
             <div className="pcf-photo-actions">
               <button
                 type="button"
                 className="pcf-btn pcf-btn--primary"
-                disabled={Boolean(selected?.form_registered) || gpsBusy || stamping || photos.length >= MAX_PHOTOS}
+                disabled={Boolean(selected?.form_registered) || gpsBusy || photos.length >= MAX_PHOTOS}
                 onClick={() => { void startGpsCamera() }}
               >
-                {gpsBusy ? 'Getting GPS…' : stamping ? 'Stamping GPS…' : 'Take photo'}
+                {gpsBusy ? 'Getting GPS…' : photos.length > 0 ? 'Open camera again' : 'Take photo'}
               </button>
             </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="pcf-sr"
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                e.target.value = ''
-                if (f) void stampAndAdd(f, heldGpsRef.current || captureGps)
-              }}
-            />
+
             <VehicleWebcamCapture
               open={webcamOpen}
               vehicleLabel={selected?.vehicle_number}
               initialPos={captureGps}
+              confirmShot
               onClose={() => setWebcamOpen(false)}
               onCapture={(file, position) => {
-                setWebcamOpen(false)
                 if (position) {
                   heldGpsRef.current = position
                   setCaptureGps(position)
                 }
+                // Keep camera open for + more shots; stamp in background
                 void stampAndAdd(file, position || heldGpsRef.current)
               }}
             />
             {fieldErrors.photos ? <span className="pcf-field-error">{fieldErrors.photos}</span> : null}
 
             {photos.length > 0 ? (
-              <ul className="pcf-thumbs">
-                {photos.map((p) => (
+              <ul className="pcf-thumbs pcf-thumbs--gallery">
+                {photos.map((p, i) => (
                   <li key={p.id}>
-                    <img src={p.previewUrl} alt="" />
+                    <img src={p.previewUrl} alt={`Photo ${i + 1}`} />
+                    <span className="pcf-thumb-num">{i + 1}</span>
                     <button type="button" aria-label="Remove photo" onClick={() => removePhoto(p.id)}>×</button>
                   </li>
                 ))}
+                {photos.length < MAX_PHOTOS ? (
+                  <li className="pcf-thumb-add">
+                    <button
+                      type="button"
+                      disabled={gpsBusy || Boolean(selected?.form_registered)}
+                      onClick={() => { void startGpsCamera() }}
+                      aria-label="Add more photos"
+                    >
+                      <span>+</span>
+                      <em>Add more</em>
+                    </button>
+                  </li>
+                ) : null}
               </ul>
             ) : (
               <p className="pcf-hint pcf-hint--block">
-                Tap Take photo — we lock GPS, open the camera, and stamp the shot like GPS Map Camera.
+                Tap Take photo once — GPS loads, then the camera opens. After a shot: ✕ discard, + keep &amp; add more, ✓ finish.
               </p>
             )}
 
