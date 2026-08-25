@@ -55,6 +55,31 @@ export function makeUploader(subdir: string, field = 'file') {
   }).single(field)
 }
 
+/** Multi-file upload for public capture form (and similar). */
+export function makeMultiUploader(subdir: string, field = 'photos', maxCount = 20) {
+  const dest = path.join(storageRoot, subdir)
+  fs.mkdirSync(dest, { recursive: true })
+  const storage = multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, dest),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname) || ''
+      const base = path.basename(file.originalname, ext)
+      cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName(base)}${ext}`)
+    },
+  })
+  return multer({
+    storage,
+    limits: { fileSize: 15 * 1024 * 1024, files: maxCount },
+    fileFilter: (_req, file, cb) => {
+      if (!String(file.mimetype || '').startsWith('image/')) {
+        cb(new Error('Only image files are allowed'))
+        return
+      }
+      cb(null, true)
+    },
+  }).array(field, maxCount)
+}
+
 export async function recordUpload(opts: {
   type: string
   id: number

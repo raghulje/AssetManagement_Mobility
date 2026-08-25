@@ -13,6 +13,7 @@ import VehiclesList from './pages/vehicles/VehiclesList'
 import VehicleDetail from './pages/vehicles/VehicleDetail'
 import VehicleForm from './pages/vehicles/VehicleForm'
 import PublicVehicle from './pages/vehicles/PublicVehicle'
+import PublicCaptureForm from './pages/vehicles/PublicCaptureForm'
 import VehicleEolDue from './pages/vehicles/VehicleEolDue'
 import VehicleMastersPage from './pages/vehicles/VehicleMastersPage'
 import { UsersList, UserDetail, UserForm } from './pages/users/Users'
@@ -74,6 +75,7 @@ export default function App() {
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/vehicle/:token" element={<PublicVehicle />} />
+            <Route path="/capture" element={<PublicCaptureForm />} />
             <Route path="/*" element={
               <RequireAuth>
                 <Routes>

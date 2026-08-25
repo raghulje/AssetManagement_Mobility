@@ -169,6 +169,10 @@ export type VehicleCapture = {
   session_id?: number | null
   captured_by?: number | null
   captured_by_name?: string | null
+  submitter_name?: string | null
+  submitter_email?: string | null
+  submitter_phone?: string | null
+  source?: string | null
   storage_path: string
   url: string
   original_name?: string | null

@@ -32,6 +32,7 @@ type Props = {
   address?: string | null
   onRemove?: () => void
   busy?: boolean
+  formBadge?: boolean
 }
 
 /** Exact VEHICLE CAPTURE frame from the product mock */
@@ -43,9 +44,10 @@ export function VehicleCaptureFrame({
   address,
   onRemove,
   busy,
+  formBadge,
 }: Props) {
   return (
-    <article className="vc-frame">
+    <article className={`vc-frame${formBadge ? ' vc-frame--form' : ''}`}>
       <div className="vc-frame__corner vc-frame__corner--tl" aria-hidden />
       <div className="vc-frame__corner vc-frame__corner--tr" aria-hidden />
       <div className="vc-frame__corner vc-frame__corner--bl" aria-hidden />
@@ -53,6 +55,7 @@ export function VehicleCaptureFrame({
 
       <header className="vc-frame__header">
         <span className="vc-frame__title">CAPTURE</span>
+        {formBadge ? <span className="vc-frame__form-badge">Form</span> : null}
         {onRemove ? (
           <button
             type="button"

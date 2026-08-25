@@ -185,7 +185,11 @@ function mapCapture(row: Record<string, unknown>) {
     vehicle_id: Number(row.vehicle_id),
     session_id: row.session_id != null ? Number(row.session_id) : null,
     captured_by: row.captured_by != null ? Number(row.captured_by) : null,
-    captured_by_name: row.captured_by_name || null,
+    captured_by_name: row.captured_by_name || row.submitter_name || null,
+    submitter_name: row.submitter_name || null,
+    submitter_email: row.submitter_email || null,
+    submitter_phone: row.submitter_phone || null,
+    source: row.source || null,
     storage_path: storagePath,
     url,
     original_name: row.original_name,
@@ -851,12 +855,24 @@ router.get('/:id/captures', async (req, res) => {
   if (!vehicle) return fail(res, 'Vehicle not found', 404)
   const rows = await all<Record<string, unknown>>(`
     SELECT c.*,
-      TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))) AS captured_by_name
+      TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))) AS captured_by_name,
+      s.submitter_name, s.submitter_email, s.submitter_phone, s.source
     FROM vehicle_captures c
     LEFT JOIN users u ON u.id = c.captured_by
+    LEFT JOIN vehicle_capture_sessions s ON s.id = c.session_id
     WHERE c.vehicle_id = ? AND c.deleted_at IS NULL
     ORDER BY c.captured_at DESC, c.id DESC
-  `, [req.params.id])
+  `, [req.params.id]).catch(async () => {
+    // Fallback before public-form columns exist
+    return all<Record<string, unknown>>(`
+      SELECT c.*,
+        TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))) AS captured_by_name
+      FROM vehicle_captures c
+      LEFT JOIN users u ON u.id = c.captured_by
+      WHERE c.vehicle_id = ? AND c.deleted_at IS NULL
+      ORDER BY c.captured_at DESC, c.id DESC
+    `, [req.params.id])
+  })
   return okList(res, rows.map(mapCapture))
 })
 

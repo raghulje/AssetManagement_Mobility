@@ -92,10 +92,16 @@ function authHeaders(): Record<string, string> {
 }
 
 /** Fetch satellite pin map via server proxy (keeps API key server-side). */
-export async function fetchGpsStaticMapUrl(lat: number, lng: number, size = 400): Promise<string | null> {
+export async function fetchGpsStaticMapUrl(
+  lat: number,
+  lng: number,
+  size = 400,
+  opts?: { publicAccess?: boolean },
+): Promise<string | null> {
   try {
-    const url = `${getApiBase()}/geo/static-map?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}&size=${size}`
-    const res = await fetch(url, { headers: authHeaders() })
+    const path = opts?.publicAccess ? '/public/geo/static-map' : '/geo/static-map'
+    const url = `${getApiBase()}${path}?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}&size=${size}`
+    const res = await fetch(url, { headers: opts?.publicAccess ? undefined : authHeaders() })
     if (!res.ok) return null
     const blob = await res.blob()
     if (!blob.type.startsWith('image/')) return null

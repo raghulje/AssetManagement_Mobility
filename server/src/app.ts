@@ -108,6 +108,11 @@ export function createApp() {
   // Public QR scan + device agent (no session cookie)
   app.use('/api/v1/public', publicAssetsRouter)
   app.use('/api/v1/public', publicVehiclesRouter)
+  // Public GPS stamp helpers for /capture form (no search / config)
+  app.use('/api/v1/public/geo', (req, res, next) => {
+    if (req.path === '/reverse' || req.path === '/static-map') return next()
+    return res.status(404).json({ status: 'error', messages: ['Not found'] })
+  }, geoRouter)
   app.use('/api/v1/agent', agentRouter)
 
   const api = express.Router()

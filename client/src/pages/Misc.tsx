@@ -528,6 +528,31 @@ export function SettingsGeneral() {
         </Box>
       </form>
 
+      <Box title="Public photo capture form" type="primary">
+        <p className="help-block" style={{ marginTop: 0 }}>
+          Share this link like a Google Form. Field users pick a vehicle, enter name / email / phone,
+          add multiple photos, and submit — photos are appended to that vehicle&apos;s Photos tab.
+        </p>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <code style={{ flex: 1, minWidth: 200, wordBreak: 'break-all', fontSize: 12 }}>
+            {`${window.location.origin}/capture`}
+          </code>
+          <button
+            type="button"
+            className="btn btn-default btn-sm"
+            onClick={() => {
+              void navigator.clipboard.writeText(`${window.location.origin}/capture`)
+              toast.success('Capture link copied')
+            }}
+          >
+            Copy link
+          </button>
+          <a className="btn btn-theme btn-sm" href="/capture" target="_blank" rel="noreferrer">
+            Open form
+          </a>
+        </div>
+      </Box>
+
       <Box title="SAML / Refex Mobility SSO" type="primary">
         <p className="help-block" style={{ marginTop: 0 }}>
           Paste these into the RefexOne portal SAML app for <strong>Refex Mobility</strong>.
