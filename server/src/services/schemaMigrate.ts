@@ -66,7 +66,19 @@ export async function runPendingSchemaMigrations(): Promise<SchemaMigrateResult>
       let sql = fs.readFileSync(path.join(dir, file), 'utf8')
         .replace(/CREATE DATABASE[\s\S]*?;/i, '')
         .replace(/USE\s+`?[\w]+`?\s*;/gi, '')
-      await root.query(sql)
+      try {
+        await root.query(sql)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        // Columns may already exist from soft-migrates / partial prior runs
+        const dup =
+          /Duplicate column name/i.test(msg)
+          || /Duplicate key name/i.test(msg)
+          || (typeof (e as { errno?: number }).errno === 'number'
+            && ((e as { errno: number }).errno === 1060 || (e as { errno: number }).errno === 1061))
+        if (!dup) throw e
+        console.warn(`[schemaMigrate] ${versionName}: treating as applied (${msg})`)
+      }
       await root.query(
         `INSERT IGNORE INTO schema_migrations (version) VALUES (?)`,
         [versionName],
