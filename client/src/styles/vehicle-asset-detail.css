@@ -156,6 +156,11 @@
     0 14px 32px rgba(244, 85, 59, 0.14);
 }
 
+.vad-panel.vad-card--highlight,
+.vc-form-reg.vad-card--highlight {
+  border-radius: 14px;
+}
+
 @keyframes vad-assign-pulse {
   0% {
     box-shadow: 0 0 0 0 rgba(244, 85, 59, 0.5), 0 8px 20px rgba(15, 23, 42, 0.06);

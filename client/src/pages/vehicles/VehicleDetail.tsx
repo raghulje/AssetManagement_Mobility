@@ -77,6 +77,7 @@ function formatVehicleAction(action: string) {
   if (key === 'maintenance') return 'Maintenance logged'
   if (key === 'uploaded') return 'File uploaded'
   if (key === 'verified') return 'Form registration verified'
+  if (key === 'deregistered') return 'Form registration removed'
   if (key === 'label_printed') return 'QR printed'
   if (!key) return 'Activity'
   return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -95,6 +96,7 @@ export default function VehicleDetail() {
     || rawTab === 'qr'
   ) ? rawTab : 'overview'
   const autoCapture = params.get('capture') === '1'
+  const focusVerify = params.get('focus') === 'verify'
   const navigate = useNavigate()
   const toast = useToast()
   const { can } = useAuth()
@@ -102,7 +104,10 @@ export default function VehicleDetail() {
   const heldGpsRef = useRef<PrecisePosition | null>(null)
   const attachRef = useRef<HTMLInputElement>(null)
   const assignRef = useRef<HTMLElement | null>(null)
+  const photosPanelRef = useRef<HTMLDivElement | null>(null)
+  const formRegRef = useRef<HTMLElement | null>(null)
   const autoCaptureStarted = useRef(false)
+  const focusVerifyDone = useRef(false)
 
   const [vehicle, setVehicle] = useState<Vehicle | null>(null)
   const [captures, setCaptures] = useState<VehicleCapture[]>([])
@@ -112,6 +117,7 @@ export default function VehicleDetail() {
   const [verifySessionId, setVerifySessionId] = useState<number | null>(null)
   const [verifySummary, setVerifySummary] = useState('')
   const [verifyBusy, setVerifyBusy] = useState(false)
+  const [deregisterBusy, setDeregisterBusy] = useState(false)
   const [captureGps, setCaptureGps] = useState<PrecisePosition | null>(null)
   const [gpsBusy, setGpsBusy] = useState(false)
   const [nativeCamArmed, setNativeCamArmed] = useState(false)
@@ -457,7 +463,40 @@ export default function VehicleDetail() {
 
   useEffect(() => {
     autoCaptureStarted.current = false
+    focusVerifyDone.current = false
   }, [id])
+
+  // Pending-verify badge → Photos tab: scroll to Photo captures / form registration and highlight
+  useEffect(() => {
+    if (!focusVerify || loading || !vehicle || tab !== 'captures' || focusVerifyDone.current) return
+
+    const finish = (target: HTMLElement) => {
+      if (focusVerifyDone.current) return
+      focusVerifyDone.current = true
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      target.classList.remove('vad-card--highlight')
+      void target.offsetWidth
+      target.classList.add('vad-card--highlight')
+      window.setTimeout(() => target.classList.remove('vad-card--highlight'), 2800)
+      const next = new URLSearchParams(params)
+      next.delete('focus')
+      setParams(next, { replace: true })
+    }
+
+    let attempts = 0
+    const tick = window.setInterval(() => {
+      attempts += 1
+      const target = formRegRef.current || photosPanelRef.current
+      if (target) {
+        window.clearInterval(tick)
+        finish(target)
+        return
+      }
+      if (attempts >= 20) window.clearInterval(tick)
+    }, 100)
+
+    return () => window.clearInterval(tick)
+  }, [focusVerify, loading, vehicle, tab, captures.length, params, setParams])
 
   function openNativeCameraNow() {
     setNativeCamArmed(false)
@@ -780,6 +819,30 @@ export default function VehicleDetail() {
     }
   }
 
+  async function deregisterForm(sessionId: number, photoCount: number) {
+    if (!id) return
+    if (!window.confirm(
+      `Deregister this form submission?\n\nThis removes ${photoCount} photo(s) and clears the registration so the vehicle can be submitted again via /capture.`,
+    )) return
+    setDeregisterBusy(true)
+    try {
+      const res = await vehiclesApi.deregisterFormSession(id, sessionId)
+      const removed = Number(res.payload?.photos_removed ?? photoCount)
+      setCaptures((list) => list.filter((c) => c.session_id !== sessionId))
+      setVehicle((cur) => (cur
+        ? { ...cur, captures_count: Math.max(0, (cur.captures_count || 0) - removed) }
+        : cur))
+      toast.success(Array.isArray(res.messages) ? res.messages.join(' ') : 'Form registration removed')
+      if (tab === 'history') {
+        vehiclesApi.history(id).then((r) => setHistory(r.rows || [])).catch(() => undefined)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Deregister failed')
+    } finally {
+      setDeregisterBusy(false)
+    }
+  }
+
   const tabs: Array<{ id: Tab; label: string; count?: number }> = [
     { id: 'overview', label: 'Overview' },
     { id: 'captures', label: 'Photos', count: v.captures_count || captures.length || 0 },
@@ -892,7 +955,7 @@ export default function VehicleDetail() {
         ) : null}
 
         {tab === 'captures' ? (
-          <div className="vad-panel">
+          <div className="vad-panel" ref={photosPanelRef}>
             <div className="vad-panel__bar">
               <h3>Photo captures</h3>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -964,8 +1027,12 @@ export default function VehicleDetail() {
               </div>
             ) : (
               <>
-                {formRegistrations.map((reg) => (
-                  <section key={reg.key} className={`vc-form-reg${reg.verifiedAt ? ' vc-form-reg--verified' : ''}`}>
+                {formRegistrations.map((reg, idx) => (
+                  <section
+                    key={reg.key}
+                    ref={idx === 0 ? formRegRef : undefined}
+                    className={`vc-form-reg${reg.verifiedAt ? ' vc-form-reg--verified' : ''}`}
+                  >
                     <div className="vc-form-reg__head">
                       <span className="vc-form-reg__badge">Form registration</span>
                       {reg.verifiedAt ? (
@@ -977,18 +1044,28 @@ export default function VehicleDetail() {
                       )}
                       <h4>Public capture submission</h4>
                       {canEdit && reg.sessionId != null ? (
-                        <button
-                          type="button"
-                          className="btn btn-theme btn-sm"
-                          style={{ marginLeft: 'auto' }}
-                          disabled={verifyBusy}
-                          onClick={() => {
-                            setVerifySessionId(reg.sessionId)
-                            setVerifySummary(reg.verifiedSummary || '')
-                          }}
-                        >
-                          <i className="fas fa-check" /> {reg.verifiedAt ? 'Re-verify' : 'Verify'}
-                        </button>
+                        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            className="btn btn-theme btn-sm"
+                            disabled={verifyBusy || deregisterBusy}
+                            onClick={() => {
+                              setVerifySessionId(reg.sessionId)
+                              setVerifySummary(reg.verifiedSummary || '')
+                            }}
+                          >
+                            <i className="fas fa-check" /> {reg.verifiedAt ? 'Re-verify' : 'Verify'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            disabled={verifyBusy || deregisterBusy}
+                            onClick={() => { void deregisterForm(reg.sessionId!, reg.photos.length) }}
+                            title="Remove form photos and allow re-registration"
+                          >
+                            <i className="fas fa-undo" /> {deregisterBusy ? 'Removing…' : 'Deregister'}
+                          </button>
+                        </div>
                       ) : null}
                     </div>
                     <dl className="vc-form-reg__meta">

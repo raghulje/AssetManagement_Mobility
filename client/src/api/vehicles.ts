@@ -321,6 +321,14 @@ export const vehiclesApi = {
       method: 'POST',
       json: { summary },
     }),
+  deregisterFormSession: (id: number | string, sessionId: number | string) =>
+    api<{
+      status: string
+      messages?: string[]
+      payload?: { session_id: number; photos_removed: number; files_removed: number }
+    }>(`/vehicles/${id}/capture-sessions/${sessionId}/form-registration`, {
+      method: 'DELETE',
+    }),
   reverseGeocode: (lat: number, lng: number) =>
     api<{
       address?: string | null

@@ -140,7 +140,7 @@ function PendingVerifyAlert({ refreshKey }: { refreshKey: number }) {
                 {rows.map((r) => (
                   <li key={`${r.id}-${r.session_id}`}>
                     <Link
-                      to={`/vehicles/${r.id}?tab=captures`}
+                      to={`/vehicles/${r.id}?tab=captures&focus=verify`}
                       onClick={() => setOpen(false)}
                     >
                       <span className="rm-pending-verify__plate">{r.vehicle_number}</span>

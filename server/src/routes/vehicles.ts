@@ -1078,6 +1078,76 @@ router.post('/:id/capture-sessions/:sessionId/verify', async (req, res) => {
   })
 })
 
+/**
+ * Remove a public form registration: soft-delete photos, delete files, delete session
+ * so the vehicle can be registered again via /capture.
+ */
+router.delete('/:id/capture-sessions/:sessionId/form-registration', async (req, res) => {
+  const vehicleId = Number(req.params.id)
+  const sessionId = Number(req.params.sessionId)
+  if (!Number.isFinite(vehicleId) || !Number.isFinite(sessionId)) return fail(res, 'Invalid ids')
+
+  const session = await get<Record<string, unknown>>(`
+    SELECT * FROM vehicle_capture_sessions WHERE id = ? AND vehicle_id = ?
+  `, [sessionId, vehicleId])
+  if (!session) return fail(res, 'Form registration not found', 404)
+  if (String(session.source || '') !== 'public_form') {
+    return fail(res, 'Only public form registrations can be deregistered')
+  }
+
+  const captures = await all<{ id: number; storage_path: string }>(`
+    SELECT id, storage_path FROM vehicle_captures
+    WHERE vehicle_id = ? AND session_id = ? AND deleted_at IS NULL
+  `, [vehicleId, sessionId])
+
+  const ts = now()
+  let filesRemoved = 0
+  for (const c of captures) {
+    await run(`UPDATE vehicle_captures SET deleted_at = ?, updated_at = ? WHERE id = ?`, [ts, ts, c.id])
+    const rel = String(c.storage_path || '').replace(/\\/g, '/')
+    const candidates = [
+      path.join(storageRoot, rel),
+      path.join(storageRoot, rel.replace(/^public\//, '')),
+    ]
+    for (const p of candidates) {
+      try {
+        if (p.startsWith(storageRoot) && fs.existsSync(p)) {
+          fs.unlinkSync(p)
+          filesRemoved += 1
+          break
+        }
+      } catch {
+        // non-fatal
+      }
+    }
+  }
+
+  // Clear FK refs then remove session so /capture allows a new registration
+  await run(`UPDATE vehicle_captures SET session_id = NULL WHERE session_id = ?`, [sessionId])
+  await run(`DELETE FROM vehicle_capture_sessions WHERE id = ?`, [sessionId])
+
+  await logAction({
+    userId: req.user?.id,
+    actionType: 'deregistered',
+    itemType: 'vehicle',
+    itemId: vehicleId,
+    note: 'Public form registration removed',
+    meta: {
+      session_id: sessionId,
+      photos_removed: captures.length,
+      files_removed: filesRemoved,
+      submitter_name: session.submitter_name || null,
+      submitter_email: session.submitter_email || null,
+    },
+  })
+
+  return okMessage(res, `Form registration removed — ${captures.length} photo(s) cleared. Vehicle can be registered again.`, {
+    session_id: sessionId,
+    photos_removed: captures.length,
+    files_removed: filesRemoved,
+  })
+})
+
 router.post('/:id/capture-sessions', async (req, res) => {
   const vehicle = await get(`SELECT id FROM vehicles WHERE id = ? AND deleted_at IS NULL`, [req.params.id])
   if (!vehicle) return fail(res, 'Vehicle not found', 404)
