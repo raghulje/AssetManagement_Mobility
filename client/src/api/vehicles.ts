@@ -181,6 +181,7 @@ export type VehicleCapture = {
   verified_by_name?: string | null
   verified_summary?: string | null
   verification_log?: Array<{
+    action?: string
     verified_at?: string
     verified_by?: number
     verified_by_name?: string
@@ -269,6 +270,8 @@ export const vehiclesApi = {
   checkin: (id: number | string, body: Record<string, unknown>) =>
     api<{ payload: Vehicle }>(`/vehicles/${id}/checkin`, { method: 'POST', json: body }),
   history: (id: number | string) => api<ApiList<Record<string, unknown>>>(`/vehicles/${id}/history`),
+  formRegistrationLogs: (id: number | string) =>
+    api<ApiList<Record<string, unknown>>>(`/vehicles/${id}/form-registration-logs`),
   assignments: (id: number | string) => api<ApiList<Record<string, unknown>>>(`/vehicles/${id}/assignments`),
   ensureQr: (id: number | string) => api<Record<string, unknown>>(`/vehicles/${id}/qr`, { method: 'POST' }),
   maintenances: (id: number | string) => api<ApiList<VehicleMaintenance>>(`/vehicles/${id}/maintenances`),
@@ -320,6 +323,22 @@ export const vehiclesApi = {
     }>(`/vehicles/${id}/capture-sessions/${sessionId}/verify`, {
       method: 'POST',
       json: { summary },
+    }),
+  deverifyCaptureSession: (id: number | string, sessionId: number | string, summary?: string) =>
+    api<{
+      status: string
+      messages?: string[]
+      payload?: {
+        session_id: number
+        verified_at: null
+        verified_by: null
+        verified_by_name: null
+        verified_summary: null
+        verification_log: VehicleCapture['verification_log']
+      }
+    }>(`/vehicles/${id}/capture-sessions/${sessionId}/deverify`, {
+      method: 'POST',
+      json: { summary: summary || '' },
     }),
   deregisterFormSession: (id: number | string, sessionId: number | string) =>
     api<{

@@ -86,10 +86,9 @@ async function publicReverseGeocode(lat: number, lng: number) {
 
 export default function PublicCaptureForm() {
   const vehicleListId = useId()
-  const employeeListId = useId()
   const heldGpsRef = useRef<PrecisePosition | null>(null)
   const searchTimer = useRef<number | null>(null)
-  const empSearchTimer = useRef<number | null>(null)
+  const empLookupTimer = useRef<number | null>(null)
   const photosRef = useRef<LocalPhoto[]>([])
 
   const [vehicleQuery, setVehicleQuery] = useState('')
@@ -98,10 +97,9 @@ export default function PublicCaptureForm() {
   const [vehicleBusy, setVehicleBusy] = useState(false)
   const [selected, setSelected] = useState<VehicleHit | null>(null)
 
-  const [employeeQuery, setEmployeeQuery] = useState('')
-  const [employeeHits, setEmployeeHits] = useState<EmployeeHit[]>([])
-  const [employeeOpen, setEmployeeOpen] = useState(false)
+  const [employeeCode, setEmployeeCode] = useState('')
   const [employeeBusy, setEmployeeBusy] = useState(false)
+  const [employeeLookupError, setEmployeeLookupError] = useState('')
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeHit | null>(null)
 
   const [photos, setPhotos] = useState<LocalPhoto[]>([])
@@ -145,30 +143,47 @@ export default function PublicCaptureForm() {
     }, 220)
   }, [])
 
-  const searchEmployees = useCallback((q: string) => {
-    if (empSearchTimer.current) window.clearTimeout(empSearchTimer.current)
-    const term = q.trim()
-    if (term.length < 1) {
-      setEmployeeHits([])
+  const lookupEmployee = useCallback((raw: string) => {
+    if (empLookupTimer.current) window.clearTimeout(empLookupTimer.current)
+    const code = raw.trim()
+    if (code.length < 1) {
+      setSelectedEmployee(null)
+      setEmployeeLookupError('')
       setEmployeeBusy(false)
       return
     }
     setEmployeeBusy(true)
-    empSearchTimer.current = window.setTimeout(() => {
-      fetch(`/api/v1/public/employees/search?q=${encodeURIComponent(term)}`)
+    setEmployeeLookupError('')
+    empLookupTimer.current = window.setTimeout(() => {
+      fetch(`/api/v1/public/employees/lookup?code=${encodeURIComponent(code)}`)
         .then(async (r) => {
-          const data = await r.json()
-          if (!r.ok) throw new Error((data.messages || []).join(', ') || 'Search failed')
-          setEmployeeHits(Array.isArray(data.rows) ? data.rows : [])
+          const data = await r.json().catch(() => ({}))
+          if (!r.ok) {
+            setSelectedEmployee(null)
+            setEmployeeLookupError((data.messages || []).join(', ') || 'Employee ID not found')
+            return
+          }
+          const hit = (data.payload || data) as EmployeeHit
+          if (!hit?.id) {
+            setSelectedEmployee(null)
+            setEmployeeLookupError('Employee ID not found')
+            return
+          }
+          setSelectedEmployee(hit)
+          setEmployeeLookupError('')
+          setFieldErrors((fe) => ({ ...fe, employee: undefined, email: undefined, phone: undefined }))
         })
-        .catch(() => setEmployeeHits([]))
+        .catch(() => {
+          setSelectedEmployee(null)
+          setEmployeeLookupError('Could not look up employee ID')
+        })
         .finally(() => setEmployeeBusy(false))
-    }, 220)
+    }, 350)
   }, [])
 
   useEffect(() => () => {
     if (searchTimer.current) window.clearTimeout(searchTimer.current)
-    if (empSearchTimer.current) window.clearTimeout(empSearchTimer.current)
+    if (empLookupTimer.current) window.clearTimeout(empLookupTimer.current)
     photosRef.current.forEach((p) => URL.revokeObjectURL(p.previewUrl))
   }, [])
 
@@ -283,7 +298,11 @@ export default function PublicCaptureForm() {
     const next: FieldErrors = {}
     if (!selected?.id) next.vehicle = 'Select a vehicle number from the list'
     else if (selected.form_registered) next.vehicle = 'This vehicle is already registered'
-    if (!selectedEmployee?.id) next.employee = 'Select an employee ID from the list'
+    if (!selectedEmployee?.id) {
+      next.employee = employeeCode.trim()
+        ? (employeeLookupError || 'Enter a valid active employee ID')
+        : 'Enter your employee ID'
+    }
     if (!populatedEmail) next.email = 'Selected employee has no email in HRMS'
     if (populatedPhones.length < 1) next.phone = 'Selected employee has no mobile / work mobile in HRMS'
     if (photos.length < 1) next.photos = 'Take at least one photo'
@@ -317,6 +336,7 @@ export default function PublicCaptureForm() {
       const fd = new FormData()
       fd.append('vehicle_id', String(selected.id))
       fd.append('employee_id', String(selectedEmployee.id))
+      fd.append('employee_code', selectedEmployee.employee_code || employeeCode.trim())
       fd.append('captured_at', formatSqlDate(heldGpsRef.current?.capturedAt || new Date()))
       const lat = photos.find((p) => p.latitude != null)?.latitude ?? heldGpsRef.current?.latitude
       const lng = photos.find((p) => p.longitude != null)?.longitude ?? heldGpsRef.current?.longitude
@@ -352,8 +372,8 @@ export default function PublicCaptureForm() {
     setVehicleQuery('')
     setVehicleHits([])
     setSelectedEmployee(null)
-    setEmployeeQuery('')
-    setEmployeeHits([])
+    setEmployeeCode('')
+    setEmployeeLookupError('')
     setError('')
     setFieldErrors({})
     setWebcamOpen(false)
@@ -387,7 +407,7 @@ export default function PublicCaptureForm() {
           <form onSubmit={(e) => { void onSubmit(e) }} noValidate>
             <h1>Capture vehicle photos</h1>
             <p className="pcf-lead">
-              All fields marked <span className="pcf-req">*</span> are mandatory. Pick vehicle + employee ID — email and phones auto-fill from HRMS.
+              All fields marked <span className="pcf-req">*</span> are mandatory. Pick vehicle, enter your employee ID — email and phones auto-fill from HRMS.
             </p>
 
             {error ? <div className="pcf-error" role="alert">{error}</div> : null}
@@ -462,61 +482,35 @@ export default function PublicCaptureForm() {
             </div>
 
             <ReqLabel htmlFor="pcf-employee">Employee ID</ReqLabel>
-            <div className="pcf-vehicle">
-              <input
-                id="pcf-employee"
-                className={`pcf-input${fieldErrors.employee ? ' is-invalid' : ''}`}
-                role="combobox"
-                aria-expanded={employeeOpen}
-                aria-controls={employeeListId}
-                aria-autocomplete="list"
-                placeholder="Search employee ID…"
-                value={selectedEmployee ? selectedEmployee.employee_code : employeeQuery}
-                onChange={(e) => {
-                  setSelectedEmployee(null)
-                  setEmployeeQuery(e.target.value)
-                  setEmployeeOpen(true)
-                  setFieldErrors((fe) => ({ ...fe, employee: undefined, email: undefined, phone: undefined }))
-                  searchEmployees(e.target.value)
-                }}
-                onFocus={() => {
-                  setEmployeeOpen(true)
-                  if (!selectedEmployee && employeeQuery.trim()) searchEmployees(employeeQuery)
-                }}
-                onBlur={() => {
-                  window.setTimeout(() => setEmployeeOpen(false), 180)
-                }}
-                autoComplete="off"
-                required
-              />
-              {employeeBusy ? <span className="pcf-hint">Searching…</span> : null}
-              {fieldErrors.employee ? <span className="pcf-field-error">{fieldErrors.employee}</span> : null}
-              {employeeOpen && !selectedEmployee && (employeeHits.length > 0 || employeeQuery.trim()) ? (
-                <ul id={employeeListId} className="pcf-menu" role="listbox">
-                  {employeeHits.length === 0 ? (
-                    <li className="pcf-menu__empty">{employeeBusy ? 'Searching…' : 'No active employees match'}</li>
-                  ) : employeeHits.map((hit) => (
-                    <li key={hit.id}>
-                      <button
-                        type="button"
-                        role="option"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          setSelectedEmployee(hit)
-                          setEmployeeQuery(hit.employee_code)
-                          setEmployeeOpen(false)
-                          setError('')
-                          setFieldErrors((fe) => ({ ...fe, employee: undefined, email: undefined, phone: undefined }))
-                        }}
-                      >
-                        <strong>{hit.employee_code}</strong>
-                        <span>{[hit.name, hit.email].filter(Boolean).join(' · ')}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
+            <input
+              id="pcf-employee"
+              className={`pcf-input${fieldErrors.employee || employeeLookupError ? ' is-invalid' : ''}`}
+              placeholder="Enter your full employee ID"
+              value={employeeCode}
+              onChange={(e) => {
+                const v = e.target.value
+                setEmployeeCode(v)
+                setSelectedEmployee(null)
+                setEmployeeLookupError('')
+                setFieldErrors((fe) => ({ ...fe, employee: undefined, email: undefined, phone: undefined }))
+                lookupEmployee(v)
+              }}
+              onBlur={() => {
+                if (employeeCode.trim()) lookupEmployee(employeeCode)
+              }}
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              required
+            />
+            {employeeBusy ? <span className="pcf-hint">Looking up…</span> : null}
+            {!employeeBusy && selectedEmployee ? (
+              <span className="pcf-hint pcf-hint--ok">Matched active employee — contact details filled below.</span>
+            ) : null}
+            {fieldErrors.employee ? <span className="pcf-field-error">{fieldErrors.employee}</span> : null}
+            {!fieldErrors.employee && employeeLookupError ? (
+              <span className="pcf-field-error">{employeeLookupError}</span>
+            ) : null}
 
             <ReqLabel htmlFor="pcf-name">Full name</ReqLabel>
             <input

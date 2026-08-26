@@ -143,7 +143,45 @@ router.get('/vehicles/search', async (req, res) => {
 })
 
 /**
- * Active employees for public capture form (Employee ID search).
+ * Exact active employee lookup by employee code (typed ID on public form).
+ * GET /api/v1/public/employees/lookup?code=
+ */
+router.get('/employees/lookup', async (req, res) => {
+  const code = String(req.query.code || req.query.employee_code || '').trim()
+  if (code.length < 1) return fail(res, 'Employee ID is required')
+
+  const row = await get<Record<string, unknown>>(`
+    SELECT id, employee_code, first_name, last_name, email, mobile, work_mobile,
+           department_name, designation, employment_status, employment_status_description
+    FROM employees
+    WHERE deleted_at IS NULL
+      AND UPPER(TRIM(employee_code)) = UPPER(?)
+    LIMIT 1
+  `, [code]).catch(() => null)
+
+  if (!row) return fail(res, 'Employee ID not found', 404)
+
+  const isActive = String(row.employment_status_description || '') === 'Active'
+    || String(row.employment_status || '') === '1'
+  if (!isActive) return fail(res, 'Only active employees can use this form', 400)
+
+  const empCode = String(row.employee_code || '')
+  const name = `${row.first_name || ''} ${row.last_name || ''}`.trim()
+  return okItem(res, {
+    id: Number(row.id),
+    employee_code: empCode,
+    name: name || empCode,
+    email: row.email ? String(row.email).trim() : null,
+    mobile: row.mobile ? String(row.mobile).trim() : null,
+    work_mobile: row.work_mobile ? String(row.work_mobile).trim() : null,
+    department_name: row.department_name ? String(row.department_name) : null,
+    designation: row.designation ? String(row.designation) : null,
+    text: [empCode, name].filter(Boolean).join(' — '),
+  })
+})
+
+/**
+ * Active employees for public capture form (legacy typeahead; prefer /lookup).
  * GET /api/v1/public/employees/search?q=
  */
 router.get('/employees/search', async (req, res) => {
@@ -206,19 +244,16 @@ router.post('/capture-form', (req, res) => {
 
       const body = req.body || {}
       const vehicleId = Number(body.vehicle_id)
-      const employeeId = Number(body.employee_id)
+      const employeeIdRaw = Number(body.employee_id)
+      const employeeCodeRaw = String(body.employee_code || body.employee_id_code || '').trim()
       const files = Array.isArray(req.files) ? req.files as Express.Multer.File[] : []
 
       if (!Number.isFinite(vehicleId) || vehicleId <= 0) {
         for (const f of files) fs.unlink(f.path, () => undefined)
         return fail(res, 'Select a vehicle number')
       }
-      if (!Number.isFinite(employeeId) || employeeId <= 0) {
-        for (const f of files) fs.unlink(f.path, () => undefined)
-        return fail(res, 'Select an employee ID')
-      }
 
-      const employee = await get<{
+      let employee = null as null | {
         id: number
         employee_code: string
         first_name: string | null
@@ -228,12 +263,28 @@ router.post('/capture-form', (req, res) => {
         work_mobile: string | null
         employment_status: string | null
         employment_status_description: string | null
-      }>(`
-        SELECT id, employee_code, first_name, last_name, email, mobile, work_mobile,
-               employment_status, employment_status_description
-        FROM employees
-        WHERE id = ? AND deleted_at IS NULL
-      `, [employeeId])
+      }
+
+      if (Number.isFinite(employeeIdRaw) && employeeIdRaw > 0) {
+        employee = await get(`
+          SELECT id, employee_code, first_name, last_name, email, mobile, work_mobile,
+                 employment_status, employment_status_description
+          FROM employees
+          WHERE id = ? AND deleted_at IS NULL
+        `, [employeeIdRaw])
+      } else if (employeeCodeRaw) {
+        employee = await get(`
+          SELECT id, employee_code, first_name, last_name, email, mobile, work_mobile,
+                 employment_status, employment_status_description
+          FROM employees
+          WHERE deleted_at IS NULL AND UPPER(TRIM(employee_code)) = UPPER(?)
+          LIMIT 1
+        `, [employeeCodeRaw])
+      } else {
+        for (const f of files) fs.unlink(f.path, () => undefined)
+        return fail(res, 'Enter your employee ID')
+      }
+
       if (!employee) {
         for (const f of files) fs.unlink(f.path, () => undefined)
         return fail(res, 'Employee not found', 404)
@@ -325,10 +376,10 @@ router.post('/capture-form', (req, res) => {
       }
 
       await logAction({
-        actionType: 'uploaded',
+        actionType: 'registered',
         itemType: 'vehicle',
         itemId: vehicleId,
-        note: 'public capture form',
+        note: 'Public form registration submitted',
         meta: {
           session_id: sessionId,
           capture_ids: captureIds,

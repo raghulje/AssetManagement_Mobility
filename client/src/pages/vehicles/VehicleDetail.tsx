@@ -30,7 +30,7 @@ import OverviewTab from './detail/OverviewTab'
 import { AppSelect, DateField } from '../../components/formControls'
 import { formatAppDateTime } from '../../lib/datetime'
 
-type Tab = 'overview' | 'captures' | 'attachments' | 'maintenance' | 'assignments' | 'history' | 'qr'
+type Tab = 'overview' | 'captures' | 'attachments' | 'maintenance' | 'assignments' | 'form-logs' | 'history' | 'qr'
 
 type PendingCapture = {
   localId: string
@@ -76,11 +76,44 @@ function formatVehicleAction(action: string) {
   if (key === 'delete') return 'Deleted'
   if (key === 'maintenance') return 'Maintenance logged'
   if (key === 'uploaded') return 'File uploaded'
-  if (key === 'verified') return 'Form registration verified'
-  if (key === 'deregistered') return 'Form registration removed'
+  if (key === 'registered') return 'Form registered'
+  if (key === 'verified') return 'Form verified'
+  if (key === 'deverified') return 'Form deverified'
+  if (key === 'deregistered') return 'Form deregistered'
   if (key === 'label_printed') return 'QR printed'
   if (!key) return 'Activity'
   return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function parseLogMeta(raw: unknown): Record<string, unknown> {
+  if (!raw) return {}
+  if (typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>
+    } catch {
+      return {}
+    }
+  }
+  return {}
+}
+
+function formLogDetail(row: Record<string, unknown>) {
+  const meta = parseLogMeta(row.log_meta)
+  const action = String(row.action_type || '').toLowerCase()
+  const bits: string[] = []
+  if (meta.employee_code) bits.push(`Employee ${String(meta.employee_code)}`)
+  if (meta.submitter_name) bits.push(String(meta.submitter_name))
+  if (meta.submitter_email) bits.push(String(meta.submitter_email))
+  if (meta.photo_count != null) bits.push(`${meta.photo_count} photo(s)`)
+  if (meta.photos_removed != null) bits.push(`${meta.photos_removed} photo(s) removed`)
+  if (meta.session_id != null) bits.push(`Session #${meta.session_id}`)
+  if (action === 'uploaded' && !bits.length) bits.push('Public capture form')
+  const note = row.note ? String(row.note) : ''
+  if (note && action !== 'registered') bits.push(note)
+  else if (note && action === 'registered' && !bits.length) bits.push(note)
+  return bits.join(' · ')
 }
 
 export default function VehicleDetail() {
@@ -92,6 +125,7 @@ export default function VehicleDetail() {
     || rawTab === 'attachments'
     || rawTab === 'maintenance'
     || rawTab === 'assignments'
+    || rawTab === 'form-logs'
     || rawTab === 'history'
     || rawTab === 'qr'
   ) ? rawTab : 'overview'
@@ -118,6 +152,7 @@ export default function VehicleDetail() {
   const [verifySummary, setVerifySummary] = useState('')
   const [verifyBusy, setVerifyBusy] = useState(false)
   const [deregisterBusy, setDeregisterBusy] = useState(false)
+  const [deverifyBusy, setDeverifyBusy] = useState(false)
   const [captureGps, setCaptureGps] = useState<PrecisePosition | null>(null)
   const [gpsBusy, setGpsBusy] = useState(false)
   const [nativeCamArmed, setNativeCamArmed] = useState(false)
@@ -127,6 +162,7 @@ export default function VehicleDetail() {
   const [maintenances, setMaintenances] = useState<VehicleMaintenance[]>([])
   const [viewingMaint, setViewingMaint] = useState<VehicleMaintenance | null>(null)
   const [history, setHistory] = useState<Record<string, unknown>[]>([])
+  const [formLogs, setFormLogs] = useState<Record<string, unknown>[]>([])
   const [assignments, setAssignments] = useState<Record<string, unknown>[]>([])
   const [users, setUsers] = useState<Array<{ id: number; text?: string; name?: string }>>([])
   const [drivers, setDrivers] = useState<Array<{ id: number; text: string; name?: string; phone?: string | null }>>([])
@@ -202,6 +238,9 @@ export default function VehicleDetail() {
     if (!id || !vehicle) return
     if (tab === 'captures' || tab === 'overview') {
       vehiclesApi.captures(id).then((r) => setCaptures(r.rows || [])).catch(() => undefined)
+    }
+    if (tab === 'captures' || tab === 'overview' || tab === 'form-logs') {
+      vehiclesApi.formRegistrationLogs(id).then((r) => setFormLogs(r.rows || [])).catch(() => undefined)
     }
     if (tab === 'attachments') {
       vehiclesApi.listFiles(id).then((r) => setFiles(r.rows || [])).catch(() => undefined)
@@ -809,13 +848,40 @@ export default function VehicleDetail() {
       setVerifySessionId(null)
       setVerifySummary('')
       toast.success('Registration verified')
-      if (tab === 'history') {
-        vehiclesApi.history(id).then((r) => setHistory(r.rows || [])).catch(() => undefined)
-      }
+      vehiclesApi.formRegistrationLogs(id).then((r) => setFormLogs(r.rows || [])).catch(() => undefined)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Verify failed')
     } finally {
       setVerifyBusy(false)
+    }
+  }
+
+  async function deverifyForm(sessionId: number) {
+    if (!id) return
+    if (!window.confirm(
+      'Clear verification for this form registration?\n\nPhotos stay; status returns to pending review.',
+    )) return
+    setDeverifyBusy(true)
+    try {
+      const res = await vehiclesApi.deverifyCaptureSession(id, sessionId)
+      const payload = res.payload
+      setCaptures((list) => list.map((c) => {
+        if (c.session_id !== sessionId) return c
+        return {
+          ...c,
+          verified_at: null,
+          verified_by: null,
+          verified_by_name: null,
+          verified_summary: null,
+          verification_log: payload?.verification_log || c.verification_log,
+        }
+      }))
+      toast.success(Array.isArray(res.messages) ? res.messages.join(' ') : 'Verification cleared')
+      vehiclesApi.formRegistrationLogs(id).then((r) => setFormLogs(r.rows || [])).catch(() => undefined)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Deverify failed')
+    } finally {
+      setDeverifyBusy(false)
     }
   }
 
@@ -833,9 +899,7 @@ export default function VehicleDetail() {
         ? { ...cur, captures_count: Math.max(0, (cur.captures_count || 0) - removed) }
         : cur))
       toast.success(Array.isArray(res.messages) ? res.messages.join(' ') : 'Form registration removed')
-      if (tab === 'history') {
-        vehiclesApi.history(id).then((r) => setHistory(r.rows || [])).catch(() => undefined)
-      }
+      vehiclesApi.formRegistrationLogs(id).then((r) => setFormLogs(r.rows || [])).catch(() => undefined)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Deregister failed')
     } finally {
@@ -849,6 +913,7 @@ export default function VehicleDetail() {
     { id: 'attachments', label: 'Documents', count: files.length || undefined },
     { id: 'maintenance', label: 'Maintenance', count: v.maintenances_count || maintenances.length || 0 },
     { id: 'assignments', label: 'Assignments', count: assignments.length || undefined },
+    { id: 'form-logs', label: 'Registration logs', count: formLogs.length || undefined },
     { id: 'history', label: 'Activity' },
     { id: 'qr', label: 'QR / Tags' },
   ]
@@ -1048,7 +1113,7 @@ export default function VehicleDetail() {
                           <button
                             type="button"
                             className="btn btn-theme btn-sm"
-                            disabled={verifyBusy || deregisterBusy}
+                            disabled={verifyBusy || deregisterBusy || deverifyBusy}
                             onClick={() => {
                               setVerifySessionId(reg.sessionId)
                               setVerifySummary(reg.verifiedSummary || '')
@@ -1056,10 +1121,21 @@ export default function VehicleDetail() {
                           >
                             <i className="fas fa-check" /> {reg.verifiedAt ? 'Re-verify' : 'Verify'}
                           </button>
+                          {reg.verifiedAt ? (
+                            <button
+                              type="button"
+                              className="btn btn-default btn-sm"
+                              disabled={verifyBusy || deregisterBusy || deverifyBusy}
+                              onClick={() => { void deverifyForm(reg.sessionId!) }}
+                              title="Clear verification; keep photos"
+                            >
+                              <i className="fas fa-times" /> {deverifyBusy ? 'Clearing…' : 'Deverify'}
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             className="btn btn-danger btn-sm"
-                            disabled={verifyBusy || deregisterBusy}
+                            disabled={verifyBusy || deregisterBusy || deverifyBusy}
                             onClick={() => { void deregisterForm(reg.sessionId!, reg.photos.length) }}
                             title="Remove form photos and allow re-registration"
                           >
@@ -1085,20 +1161,14 @@ export default function VehicleDetail() {
                         </>
                       ) : null}
                     </dl>
-                    {reg.verificationLog.length > 0 ? (
-                      <div className="vc-form-reg__log">
-                        <strong>Verification log</strong>
-                        <ul>
-                          {reg.verificationLog.map((entry, idx) => (
-                            <li key={`${entry.verified_at || idx}-${idx}`}>
-                              <span className="vc-form-reg__log-meta">
-                                {formatAppDateTime(entry.verified_at)} · {entry.verified_by_name || 'User'}
-                              </span>
-                              <span>{entry.summary || '—'}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+                    {reg.verificationLog.length > 0 || formLogs.length > 0 ? (
+                      <p className="pcf-hint" style={{ margin: '0 0 12px' }}>
+                        Full register / verify / deverify / deregister history is on the{' '}
+                        <button type="button" className="btn-link" style={{ padding: 0, border: 0, background: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }} onClick={() => setTab('form-logs')}>
+                          Registration logs
+                        </button>
+                        {' '}tab.
+                      </p>
                     ) : null}
                     <div className="vad-gallery">
                       {reg.photos.map((c) => (
@@ -1552,6 +1622,44 @@ export default function VehicleDetail() {
                           {open ? 'Active' : 'Closed'}
                         </span>
                       </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        ) : null}
+
+        {tab === 'form-logs' ? (
+          <div className="vad-panel">
+            <div className="vad-panel__bar">
+              <h3>Registration logs</h3>
+            </div>
+            <p className="vad-panel__hint" style={{ margin: '0 0 12px', color: 'var(--muted, #64748b)', fontSize: '0.9rem' }}>
+              Register, verify, deverify, and deregister events for this vehicle&apos;s public capture form.
+            </p>
+            {formLogs.length === 0 ? (
+              <div className="vad-empty">
+                <strong>No registration activity yet</strong>
+                Submissions from <code>/capture</code> and verify / deverify / deregister actions appear here.
+              </div>
+            ) : (
+              <ul className="vad-timeline">
+                {formLogs.map((h) => {
+                  const action = String(h.action_type || '').toLowerCase()
+                  const detail = formLogDetail(h)
+                  const when = String(h.action_date || h.created_at || '')
+                  return (
+                    <li key={String(h.id)}>
+                      <span className={`vad-timeline__dot${action === 'deregistered' || action === 'deverified' ? ' vad-timeline__dot--muted' : ''}`} />
+                      <div className="vad-timeline__body">
+                        <strong>{formatVehicleAction(action === 'uploaded' ? 'registered' : action)}</strong>
+                        <span>
+                          {String(h.actor_name || 'Public / System')}
+                          {detail ? ` · ${detail}` : ''}
+                        </span>
+                      </div>
+                      <div className="vad-timeline__time">{when ? formatAppDateTime(when) : '—'}</div>
                     </li>
                   )
                 })}

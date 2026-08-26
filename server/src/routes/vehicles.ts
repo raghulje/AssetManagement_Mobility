@@ -817,9 +817,37 @@ router.get('/:id/history', async (req, res) => {
     FROM action_logs al
     LEFT JOIN users u ON u.id = al.user_id
     WHERE al.item_type = 'vehicle' AND al.item_id = ?
-      AND COALESCE(al.action_type, '') NOT IN ('checkout', 'checkin', 'assigned', 'unassigned')
+      AND COALESCE(al.action_type, '') NOT IN ('checkout', 'checkin', 'assigned', 'unassigned',
+        'registered', 'verified', 'deregistered', 'deverified')
+      AND NOT (
+        COALESCE(al.action_type, '') = 'uploaded'
+        AND COALESCE(al.note, '') LIKE '%public capture form%'
+      )
     ORDER BY al.action_date DESC, al.id DESC
     LIMIT 200
+  `, [req.params.id])
+  return okList(res, rows)
+})
+
+/** Form registration lifecycle: register, verify, deverify, deregister. */
+router.get('/:id/form-registration-logs', async (req, res) => {
+  const vehicle = await get(`SELECT id FROM vehicles WHERE id = ? AND deleted_at IS NULL`, [req.params.id])
+  if (!vehicle) return fail(res, 'Vehicle not found', 404)
+  const rows = await all(`
+    SELECT al.*,
+      TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))) AS actor_name
+    FROM action_logs al
+    LEFT JOIN users u ON u.id = al.user_id
+    WHERE al.item_type = 'vehicle' AND al.item_id = ?
+      AND (
+        COALESCE(al.action_type, '') IN ('registered', 'verified', 'deregistered', 'deverified')
+        OR (
+          COALESCE(al.action_type, '') = 'uploaded'
+          AND COALESCE(al.note, '') LIKE '%public capture form%'
+        )
+      )
+    ORDER BY al.action_date DESC, al.id DESC
+    LIMIT 300
   `, [req.params.id])
   return okList(res, rows)
 })
@@ -1040,6 +1068,7 @@ router.post('/:id/capture-sessions/:sessionId/verify', async (req, res) => {
   }
 
   const entry = {
+    action: 'verified',
     verified_at: ts,
     verified_by: req.user!.id,
     verified_by_name: byName,
@@ -1074,6 +1103,84 @@ router.post('/:id/capture-sessions/:sessionId/verify', async (req, res) => {
     verified_by: req.user!.id,
     verified_by_name: byName,
     verified_summary: summary,
+    verification_log: nextLog,
+  })
+})
+
+/** Clear verification so the form registration is pending again (photos kept). */
+router.post('/:id/capture-sessions/:sessionId/deverify', async (req, res) => {
+  const vehicleId = Number(req.params.id)
+  const sessionId = Number(req.params.sessionId)
+  const summary = String(req.body?.summary || req.body?.note || '').trim()
+  if (!Number.isFinite(vehicleId) || !Number.isFinite(sessionId)) return fail(res, 'Invalid ids')
+  if (summary.length > 2000) return fail(res, 'Note is too long (max 2000 characters)')
+
+  const row = await get<Record<string, unknown>>(`
+    SELECT * FROM vehicle_capture_sessions WHERE id = ? AND vehicle_id = ?
+  `, [sessionId, vehicleId])
+  if (!row) return fail(res, 'Capture session not found', 404)
+  if (String(row.source || '') !== 'public_form') {
+    return fail(res, 'Only public form registrations can be deverified')
+  }
+  if (!row.verified_at) return fail(res, 'Registration is not verified')
+
+  const actor = await get<{ id: number; first_name: string; last_name: string; username: string }>(`
+    SELECT id, first_name, last_name, username FROM users WHERE id = ? AND deleted_at IS NULL
+  `, [req.user!.id])
+  const byName = actor
+    ? (`${actor.first_name || ''} ${actor.last_name || ''}`.trim() || actor.username)
+    : 'User'
+
+  const ts = now()
+  let prevLog: unknown[] = []
+  const rawLog = row.verification_log
+  if (typeof rawLog === 'string' && rawLog.trim()) {
+    try { prevLog = JSON.parse(rawLog) as unknown[] } catch { prevLog = [] }
+  } else if (Array.isArray(rawLog)) {
+    prevLog = rawLog
+  }
+
+  const note = summary || 'Verification cleared'
+  const entry = {
+    action: 'deverified',
+    verified_at: ts,
+    verified_by: req.user!.id,
+    verified_by_name: byName,
+    summary: note,
+  }
+  const nextLog = [...prevLog, entry]
+
+  await run(`
+    UPDATE vehicle_capture_sessions
+    SET verified_at = NULL, verified_by = NULL, verified_summary = NULL,
+        verification_log = ?, updated_at = ?
+    WHERE id = ?
+  `, [JSON.stringify(nextLog), ts, sessionId])
+
+  await logAction({
+    userId: req.user!.id,
+    actionType: 'deverified',
+    itemType: 'vehicle',
+    itemId: vehicleId,
+    note,
+    meta: {
+      session_id: sessionId,
+      deverified_at: ts,
+      deverified_by: req.user!.id,
+      deverified_by_name: byName,
+      summary: note,
+      previous_verified_at: row.verified_at || null,
+      previous_verified_by: row.verified_by ?? null,
+      previous_summary: row.verified_summary || null,
+    },
+  })
+
+  return okMessage(res, 'Verification cleared — registration is pending review again', {
+    session_id: sessionId,
+    verified_at: null,
+    verified_by: null,
+    verified_by_name: null,
+    verified_summary: null,
     verification_log: nextLog,
   })
 })

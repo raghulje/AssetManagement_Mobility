@@ -313,6 +313,11 @@
   color: var(--pcf-muted);
 }
 
+.pcf-hint--ok {
+  color: #15803d;
+  font-weight: 650;
+}
+
 .pcf-hint--block {
   margin: 0 0 14px;
 }
