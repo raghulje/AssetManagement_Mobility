@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs'
 import { all, get, run, now } from '../db/index.js'
 import { ensureDefaultRoles, getUserGroupIds, setUserGroups } from './permissions.js'
 
+/** @deprecated optional company filter — pass empty / "all" for every active employee */
 export const RGML_COMPANY = 'Refex Green Mobility Limited'
 export const DEFAULT_APP_MANAGER_PASSWORD = 'Welcome@2026'
 export const APP_MANAGERS_ROLE = 'App Managers'
@@ -53,15 +54,17 @@ async function uniqueUsername(preferred: string): Promise<string> {
   }
 }
 
-async function resolveCompanyId(companyName: string): Promise<number | null> {
+async function resolveCompanyId(companyName: string | null | undefined): Promise<number | null> {
+  const name = String(companyName || '').trim()
+  if (!name) return null
   const exact = await get<{ id: number }>(
     `SELECT id FROM companies WHERE deleted_at IS NULL AND name = ? LIMIT 1`,
-    [companyName],
+    [name],
   )
   if (exact) return Number(exact.id)
   const like = await get<{ id: number }>(
     `SELECT id FROM companies WHERE deleted_at IS NULL AND name LIKE ? LIMIT 1`,
-    [`%${companyName}%`],
+    [`%${name}%`],
   )
   return like ? Number(like.id) : null
 }
@@ -69,7 +72,6 @@ async function resolveCompanyId(companyName: string): Promise<number | null> {
 async function ensureAppManagersGroup(userId: number, roleId: number) {
   const current = await getUserGroupIds(userId)
   if (current.includes(roleId)) {
-    // Re-sync perms in case role was updated
     await setUserGroups(userId, current)
     return false
   }
@@ -78,16 +80,25 @@ async function ensureAppManagersGroup(userId: number, roleId: number) {
 }
 
 /**
- * Create / update App Users for active employees of Refex Green Mobility Limited
- * with the App Managers role and default password (first login must change).
+ * Create / update App Users for active HRMS employees with the App Managers role
+ * and default password (first login must change).
+ * Pass company to filter; omit / "all" for every active employee.
  */
 export async function provisionRgmlAppManagers(opts?: {
-  company?: string
+  company?: string | null
   password?: string
+  /** When true (default), provision every active employee */
+  allActive?: boolean
 }): Promise<ProvisionResult> {
   await ensureDefaultRoles()
 
-  const company = String(opts?.company || RGML_COMPANY).trim()
+  const companyRaw = opts?.company != null ? String(opts.company).trim() : ''
+  const allActive = opts?.allActive !== false && (
+    !companyRaw
+    || companyRaw.toLowerCase() === 'all'
+    || companyRaw.toLowerCase() === '*'
+  )
+  const companyFilter = allActive ? '' : companyRaw
   const plainPassword = String(opts?.password || DEFAULT_APP_MANAGER_PASSWORD)
   const passwordHash = bcrypt.hashSync(plainPassword, 10)
 
@@ -97,24 +108,34 @@ export async function provisionRgmlAppManagers(opts?: {
   )
   if (!role) throw new Error(`Role "${APP_MANAGERS_ROLE}" not found — run role seed / migrations first`)
 
-  const companyId = await resolveCompanyId(company)
   const ts = now()
 
-  const employees = await all<EmpRow>(`
-    SELECT id, employee_code, first_name, last_name, email, mobile, work_mobile, designation, refex_company_name
-    FROM employees
-    WHERE deleted_at IS NULL
-      AND (
-        refex_company_name = ?
-        OR TRIM(refex_company_name) = ?
-        OR refex_company_name LIKE ?
-      )
-      AND (employment_status_description = 'Active' OR employment_status = '1')
-    ORDER BY employee_code ASC
-  `, [company, company, `%${company}%`])
+  let employees: EmpRow[]
+  if (allActive) {
+    employees = await all<EmpRow>(`
+      SELECT id, employee_code, first_name, last_name, email, mobile, work_mobile, designation, refex_company_name
+      FROM employees
+      WHERE deleted_at IS NULL
+        AND (employment_status_description = 'Active' OR employment_status = '1')
+      ORDER BY employee_code ASC
+    `)
+  } else {
+    employees = await all<EmpRow>(`
+      SELECT id, employee_code, first_name, last_name, email, mobile, work_mobile, designation, refex_company_name
+      FROM employees
+      WHERE deleted_at IS NULL
+        AND (
+          refex_company_name = ?
+          OR TRIM(refex_company_name) = ?
+          OR refex_company_name LIKE ?
+        )
+        AND (employment_status_description = 'Active' OR employment_status = '1')
+      ORDER BY employee_code ASC
+    `, [companyFilter, companyFilter, `%${companyFilter}%`])
+  }
 
   const result: ProvisionResult = {
-    company,
+    company: allActive ? 'All active HRMS employees' : companyFilter,
     role: APP_MANAGERS_ROLE,
     candidates: employees.length,
     created: 0,
@@ -123,6 +144,8 @@ export async function provisionRgmlAppManagers(opts?: {
     errors: [],
     created_users: [],
   }
+
+  const companyIdCache = new Map<string, number | null>()
 
   for (const emp of employees) {
     const code = String(emp.employee_code || '').trim()
@@ -142,9 +165,18 @@ export async function provisionRgmlAppManagers(opts?: {
     const last = String(emp.last_name || '').trim() || code
     const phone = String(emp.mobile || emp.work_mobile || '').trim() || null
     const jobtitle = String(emp.designation || '').trim() || null
+    const empCompany = String(emp.refex_company_name || '').trim()
+    let companyId: number | null = null
+    if (empCompany) {
+      if (companyIdCache.has(empCompany)) {
+        companyId = companyIdCache.get(empCompany) ?? null
+      } else {
+        companyId = await resolveCompanyId(empCompany)
+        companyIdCache.set(empCompany, companyId)
+      }
+    }
 
     try {
-      // Match existing by employee_num, then email
       let existing = await get<{ id: number; email: string | null; employee_num: string | null }>(`
         SELECT id, email, employee_num FROM users
         WHERE deleted_at IS NULL AND employee_num = ?
@@ -174,13 +206,15 @@ export async function provisionRgmlAppManagers(opts?: {
         `, [
           first, last, email, code, phone, jobtitle, companyId, ts, existing.id,
         ])
-        const roleAdded = await ensureAppManagersGroup(Number(existing.id), Number(role.id))
-        if (roleAdded) result.updated += 1
-        else result.updated += 1 // still count profile refresh
+        await ensureAppManagersGroup(Number(existing.id), Number(role.id))
+        result.updated += 1
         continue
       }
 
       const username = await uniqueUsername(code)
+      const note = allActive
+        ? `Provisioned from HRMS (active employee)${empCompany ? ` · ${empCompany}` : ''}`
+        : `Provisioned from HRMS (${companyFilter})`
       const info = await run(`
         INSERT INTO users (
           first_name, last_name, username, email, password, employee_num,
@@ -196,7 +230,7 @@ export async function provisionRgmlAppManagers(opts?: {
         companyId,
         jobtitle,
         phone,
-        `Provisioned from HRMS (${company})`,
+        note,
         ts,
         ts,
       ])

@@ -899,24 +899,33 @@ settingsRouter.post('/migrate-asset-tags', async (req, res) => {
 })
 
 /**
- * Provision App Users for active employees of Refex Green Mobility Limited
- * with the App Managers role and default password Welcome@2026 (must change on first login).
+ * Provision App Users for active HRMS employees with the App Managers role
+ * and default password Welcome@2026 (must change on first login).
+ * Body: { all_active?: true, company?: string, password?: string }
  */
 settingsRouter.post('/provision-rgml-app-managers', async (req, res) => {
   try {
-    const { provisionRgmlAppManagers, RGML_COMPANY, DEFAULT_APP_MANAGER_PASSWORD } = await import(
+    const { provisionRgmlAppManagers, DEFAULT_APP_MANAGER_PASSWORD } = await import(
       '../services/provisionRgmlAppManagers.js'
     )
+    const body = req.body || {}
+    const companyRaw = body.company != null ? String(body.company).trim() : ''
+    // Default: all active employees (unless a specific company is requested)
+    const allActive = body.all_active === false || body.allActive === false
+      ? false
+      : (!companyRaw || companyRaw.toLowerCase() === 'all' || body.all_active === true || body.allActive === true)
+
     const result = await provisionRgmlAppManagers({
-      company: req.body?.company ? String(req.body.company) : RGML_COMPANY,
-      password: req.body?.password ? String(req.body.password) : DEFAULT_APP_MANAGER_PASSWORD,
+      company: allActive ? null : companyRaw,
+      password: body.password ? String(body.password) : DEFAULT_APP_MANAGER_PASSWORD,
+      allActive,
     })
     await logAction({
       userId: req.user?.id,
-      actionType: 'provision_rgml_app_managers',
+      actionType: 'provision_app_managers',
       itemType: 'settings',
       itemId: 1,
-      note: `Created ${result.created}, updated ${result.updated}, skipped ${result.skipped} of ${result.candidates}`,
+      note: `Created ${result.created}, updated ${result.updated}, skipped ${result.skipped} of ${result.candidates} (${result.company})`,
       meta: {
         company: result.company,
         created: result.created,
@@ -927,7 +936,7 @@ settingsRouter.post('/provision-rgml-app-managers', async (req, res) => {
     })
     return okMessage(
       res,
-      `RGML App Managers — created ${result.created}, updated ${result.updated}, skipped ${result.skipped} (of ${result.candidates} active employees). Default password ${DEFAULT_APP_MANAGER_PASSWORD}; first login requires a new password.`,
+      `App Managers — created ${result.created}, updated ${result.updated}, skipped ${result.skipped} (of ${result.candidates}: ${result.company}). Default password ${DEFAULT_APP_MANAGER_PASSWORD}; first login requires a new password.`,
       result,
     )
   } catch (e) {

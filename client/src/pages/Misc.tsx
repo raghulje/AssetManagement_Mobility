@@ -690,10 +690,10 @@ export function SettingsGeneral() {
         </button>
       </Box>
 
-      <Box title="Provision RGML App Managers" type="primary">
+      <Box title="Provision App Managers from HRMS" type="primary">
         <p className="help-block" style={{ marginTop: 0 }}>
-          Finds active HRMS employees under <strong>Refex Green Mobility Limited</strong>, creates App Users
-          with the <strong>App Managers</strong> role, and sets temporary password{' '}
+          Finds <strong>all active</strong> HRMS employees, creates App Users with the{' '}
+          <strong>App Managers</strong> role, and sets temporary password{' '}
           <code>Welcome@2026</code>. Existing matches (by employee ID or email) get the role updated;
           new users must set a new password on first login.
         </p>
@@ -707,7 +707,7 @@ export function SettingsGeneral() {
           disabled={provisionBusy || !canEdit}
           onClick={() => {
             if (!window.confirm(
-              'Create / update App Managers for active Refex Green Mobility Limited employees?\n\nDefault password: Welcome@2026\nFirst login will force a password change.',
+              'Create / update App Managers for ALL active HRMS employees?\n\nDefault password: Welcome@2026\nFirst login will force a password change.',
             )) return
             setProvisionBusy(true)
             setError('')
@@ -719,9 +719,13 @@ export function SettingsGeneral() {
                 updated?: number
                 skipped?: number
                 candidates?: number
+                company?: string
                 errors?: { employee_code: string; reason: string }[]
               }
-            }>('/settings/provision-rgml-app-managers', { method: 'POST' })
+            }>('/settings/provision-rgml-app-managers', {
+              method: 'POST',
+              json: { all_active: true },
+            })
               .then((res) => {
                 const msg = Array.isArray(res.messages) ? res.messages.join(' ') : 'Provisioning complete'
                 const errs = res.payload?.errors?.length
@@ -737,7 +741,7 @@ export function SettingsGeneral() {
               .finally(() => setProvisionBusy(false))
           }}
         >
-          {provisionBusy ? 'Provisioning…' : 'Provision RGML → App Managers'}
+          {provisionBusy ? 'Provisioning…' : 'Provision all active employees → App Managers'}
         </button>
       </Box>
 
