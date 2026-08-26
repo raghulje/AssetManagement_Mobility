@@ -58,6 +58,12 @@ async function loadVehicle(id: number | string) {
         ) THEN 1 ELSE 0
       END AS form_verified,
       CASE
+        WHEN EXISTS (
+          SELECT 1 FROM vehicle_capture_sessions s
+          WHERE s.vehicle_id = v.id AND s.source = 'public_form'
+        ) THEN 1 ELSE 0
+      END AS form_registered,
+      CASE
         WHEN v.assigned_type = 'user' THEN (
           SELECT TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,'')))
           FROM users u WHERE u.id = v.assigned_to)
@@ -115,7 +121,12 @@ function mapVehicle(row: Record<string, unknown>) {
     maintenances_count: Number(row.maintenances_count || 0),
     last_captured_at: row.last_captured_at || null,
     form_verified: Boolean(Number(row.form_verified || 0)),
-    verification_status: Number(row.form_verified || 0) ? 'Verified' : 'Not Verified',
+    form_registered: Boolean(Number(row.form_registered || 0)),
+    verification_status: Number(row.form_verified || 0)
+      ? 'Verified'
+      : Number(row.form_registered || 0)
+        ? 'Pending review'
+        : 'Capture pending',
     company_name: row.company_name || null,
     legal_entity_name: row.legal_entity_name || null,
     created_at: row.created_at,
@@ -267,7 +278,7 @@ router.get('/facets', async (req, res) => {
   const fuelPred = vehiclePred('fuel')
   const statusPred = vehiclePred('status')
 
-  const [locations, models, categories, fuelTypes, statuses] = await Promise.all([
+  const [locations, models, categories, fuelTypes, statuses, captureStats] = await Promise.all([
     all<{ value: string; c: number; id: number }>(`
       SELECT c.name AS value, c.id, COUNT(v.id) AS c
       FROM vehicle_cities c
@@ -302,9 +313,40 @@ router.get('/facets', async (req, res) => {
       WHERE ${statusPred.sql} AND v.status IS NOT NULL AND v.status <> ''
       GROUP BY v.status
       ORDER BY v.status`, statusPred.params),
+    get<{ fleet: number; photos_submitted: number; pending_review: number }>(`
+      SELECT
+        (SELECT COUNT(*) FROM vehicles v WHERE v.deleted_at IS NULL) AS fleet,
+        (SELECT COUNT(DISTINCT v.id) FROM vehicles v
+          INNER JOIN vehicle_capture_sessions s ON s.vehicle_id = v.id AND s.source = 'public_form'
+          WHERE v.deleted_at IS NULL) AS photos_submitted,
+        (SELECT COUNT(DISTINCT v.id) FROM vehicles v
+          INNER JOIN vehicle_capture_sessions s ON s.vehicle_id = v.id AND s.source = 'public_form' AND s.verified_at IS NULL
+          WHERE v.deleted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM vehicle_capture_sessions s2
+              WHERE s2.vehicle_id = v.id AND s2.source = 'public_form' AND s2.verified_at IS NOT NULL
+            )) AS pending_review
+    `).catch(() => ({ fleet: 0, photos_submitted: 0, pending_review: 0 })),
   ])
 
-  return okItem(res, { locations, models, categories, fuel_types: fuelTypes, statuses })
+  const fleet = Number(captureStats?.fleet || 0)
+  const photosSubmitted = Number(captureStats?.photos_submitted || 0)
+  const pendingReview = Number(captureStats?.pending_review || 0)
+  const capturePending = Math.max(0, fleet - photosSubmitted)
+
+  return okItem(res, {
+    locations,
+    models,
+    categories,
+    fuel_types: fuelTypes,
+    statuses,
+    capture_stats: {
+      photos_submitted: photosSubmitted,
+      capture_pending: capturePending,
+      pending_review: pendingReview,
+      fleet,
+    },
+  })
 })
 
 router.get('/eol/due', async (req, res) => {
@@ -394,6 +436,7 @@ router.get('/', async (req, res) => {
   const status = String(req.query.status || '').trim()
   const assigned = String(req.query.assigned || '').trim()
   const verified = String(req.query.verified || req.query.verification_status || '').trim().toLowerCase()
+  const registered = String(req.query.registered || req.query.form_registered || '').trim().toLowerCase()
   const sort = String(req.query.sort || 'vehicle_number')
   const order = String(req.query.order || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC'
   const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 200)
@@ -401,7 +444,7 @@ router.get('/', async (req, res) => {
 
   const allowedSort = new Set([
     'id', 'vehicle_number', 'model', 'location_name', 'category', 'fuel_type', 'status', 'created_at', 'purchase_date',
-    'verification_status', 'form_verified',
+    'verification_status', 'form_verified', 'form_registered',
   ])
   const sortCol = allowedSort.has(sort) ? sort : 'vehicle_number'
 
@@ -409,6 +452,12 @@ router.get('/', async (req, res) => {
     WHEN EXISTS (
       SELECT 1 FROM vehicle_capture_sessions s
       WHERE s.vehicle_id = v.id AND s.source = 'public_form' AND s.verified_at IS NOT NULL
+    ) THEN 1 ELSE 0
+  END`
+  const formRegisteredExpr = `CASE
+    WHEN EXISTS (
+      SELECT 1 FROM vehicle_capture_sessions s
+      WHERE s.vehicle_id = v.id AND s.source = 'public_form'
     ) THEN 1 ELSE 0
   END`
 
@@ -429,13 +478,30 @@ router.get('/', async (req, res) => {
   if (status) { where.push('v.status = ?'); params.push(status) }
   if (assigned === '1' || assigned === 'yes') where.push('v.assigned_to IS NOT NULL')
   if (assigned === '0' || assigned === 'no') where.push('v.assigned_to IS NULL')
+  if (registered === '1' || registered === 'true' || registered === 'yes' || registered === 'submitted') {
+    where.push(`EXISTS (
+      SELECT 1 FROM vehicle_capture_sessions s
+      WHERE s.vehicle_id = v.id AND s.source = 'public_form'
+    )`)
+  }
+  if (registered === '0' || registered === 'false' || registered === 'no' || registered === 'pending') {
+    where.push(`NOT EXISTS (
+      SELECT 1 FROM vehicle_capture_sessions s
+      WHERE s.vehicle_id = v.id AND s.source = 'public_form'
+    )`)
+  }
   if (verified === '1' || verified === 'true' || verified === 'verified' || verified === 'yes') {
     where.push(`EXISTS (
       SELECT 1 FROM vehicle_capture_sessions s
       WHERE s.vehicle_id = v.id AND s.source = 'public_form' AND s.verified_at IS NOT NULL
     )`)
   }
-  if (verified === '0' || verified === 'false' || verified === 'not_verified' || verified === 'no' || verified === 'unverified') {
+  if (verified === '0' || verified === 'false' || verified === 'not_verified' || verified === 'no' || verified === 'unverified' || verified === 'pending_review') {
+    // Submitted via form but not yet verified
+    where.push(`EXISTS (
+      SELECT 1 FROM vehicle_capture_sessions s
+      WHERE s.vehicle_id = v.id AND s.source = 'public_form' AND s.verified_at IS NULL
+    )`)
     where.push(`NOT EXISTS (
       SELECT 1 FROM vehicle_capture_sessions s
       WHERE s.vehicle_id = v.id AND s.source = 'public_form' AND s.verified_at IS NOT NULL
@@ -443,8 +509,10 @@ router.get('/', async (req, res) => {
   }
 
   const orderBy = (sortCol === 'verification_status' || sortCol === 'form_verified')
-    ? `form_verified ${order}, v.vehicle_number ASC`
-    : `v.${sortCol} ${order}`
+    ? `form_verified ${order}, form_registered ${order}, v.vehicle_number ASC`
+    : sortCol === 'form_registered'
+      ? `form_registered ${order}, v.vehicle_number ASC`
+      : `v.${sortCol} ${order}`
 
   const sql = `
     SELECT v.*,
@@ -452,6 +520,7 @@ router.get('/', async (req, res) => {
       (SELECT MAX(c.captured_at) FROM vehicle_captures c WHERE c.vehicle_id = v.id AND c.deleted_at IS NULL) AS last_captured_at,
       (SELECT COUNT(*) FROM vehicle_maintenances m WHERE m.vehicle_id = v.id AND m.deleted_at IS NULL) AS maintenances_count,
       (${formVerifiedExpr}) AS form_verified,
+      (${formRegisteredExpr}) AS form_registered,
       CASE
         WHEN v.assigned_type = 'user' THEN (
           SELECT TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))) FROM users u WHERE u.id = v.assigned_to)

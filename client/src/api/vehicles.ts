@@ -161,7 +161,9 @@ export type Vehicle = {
   last_captured_at?: string | null
   /** Public form registration verified */
   form_verified?: boolean
-  verification_status?: 'Verified' | 'Not Verified' | string
+  /** Public /capture form submitted (photos on file) */
+  form_registered?: boolean
+  verification_status?: 'Verified' | 'Pending review' | 'Capture pending' | 'Not Verified' | string
   created_at?: string
   updated_at?: string
 }
@@ -222,6 +224,12 @@ export type VehicleFacets = {
   categories: Array<{ value: string; c: number }>
   fuel_types: Array<{ value: string; c: number }>
   statuses?: Array<{ value: string; c: number }>
+  capture_stats?: {
+    photos_submitted?: number
+    capture_pending?: number
+    pending_review?: number
+    fleet?: number
+  }
 }
 
 function qs(params: Record<string, string | number | undefined | null>) {

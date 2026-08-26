@@ -214,6 +214,7 @@ export default function VehiclesList() {
   const [category, setCategory] = useState('')
   const [fuelType, setFuelType] = useState('')
   const [verified, setVerified] = useState('')
+  const [registered, setRegistered] = useState('')
   const [sort, setSort] = useState('vehicle_number')
   const [order, setOrder] = useState<'asc' | 'desc'>('asc')
   const [page, setPage] = useState(0)
@@ -246,7 +247,7 @@ export default function VehiclesList() {
 
   useEffect(() => {
     vehiclesApi.facets().then(setKpiFacets).catch(() => undefined)
-  }, [])
+  }, [pendingRefresh])
 
   useEffect(() => {
     let cancelled = false
@@ -266,7 +267,7 @@ export default function VehiclesList() {
 
   useEffect(() => {
     setPage(0)
-  }, [search, location, cityId, model, modelId, category, fuelType, verified, sort, order])
+  }, [search, location, cityId, model, modelId, category, fuelType, verified, registered, sort, order])
 
   useEffect(() => {
     let cancelled = false
@@ -282,6 +283,7 @@ export default function VehiclesList() {
         category: category || undefined,
         fuel_type: fuelType || undefined,
         verified: verified || undefined,
+        registered: registered || undefined,
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
         sort,
@@ -300,7 +302,7 @@ export default function VehiclesList() {
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [search, location, cityId, model, modelId, category, fuelType, verified, sort, order, page])
+  }, [search, location, cityId, model, modelId, category, fuelType, verified, registered, sort, order, page])
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -328,7 +330,7 @@ export default function VehiclesList() {
     ? `${((evCount / fleetTotal) * 100).toFixed(1)}% of total fleet`
     : 'Electric vehicles in fleet'
 
-  const hasActiveFilter = Boolean(cityId || location || modelId || model || category || fuelType || verified)
+  const hasActiveFilter = Boolean(cityId || location || modelId || model || category || fuelType || verified || registered)
 
   const clearFilters = () => {
     setCityId('')
@@ -338,9 +340,46 @@ export default function VehiclesList() {
     setCategory('')
     setFuelType('')
     setVerified('')
+    setRegistered('')
     setSort('vehicle_number')
     setOrder('asc')
     setDrill('none')
+  }
+
+  const photosSubmitted = kpiFacets?.capture_stats?.photos_submitted ?? null
+  const capturePending = kpiFacets?.capture_stats?.capture_pending ?? null
+  const pendingReview = kpiFacets?.capture_stats?.pending_review ?? null
+
+  const filterPhotosSubmitted = () => {
+    setDrill('none')
+    if (registered === '1' && !verified) {
+      setRegistered('')
+      return
+    }
+    setRegistered('1')
+    setVerified('')
+  }
+
+  const filterCapturePending = () => {
+    setDrill('none')
+    if (registered === '0') {
+      setRegistered('')
+      setVerified('')
+      return
+    }
+    setRegistered('0')
+    setVerified('')
+  }
+
+  const filterPendingReview = () => {
+    setDrill('none')
+    if (verified === '0' && registered === '1') {
+      setVerified('')
+      setRegistered('')
+      return
+    }
+    setRegistered('1')
+    setVerified('0')
   }
 
   const selectCity = (id: number | undefined, name: string) => {
@@ -409,7 +448,9 @@ export default function VehiclesList() {
     fuelType ? `${fuelType} fleet` : null,
     activeModelLabel ? `model ${activeModelLabel}` : null,
     activeCityLabel ? `in ${activeCityLabel}` : null,
-    verified === '1' ? 'Verified' : verified === '0' ? 'Not Verified' : null,
+    registered === '1' && verified !== '0' ? 'Photos submitted' : null,
+    registered === '0' ? 'Capture pending' : null,
+    verified === '1' ? 'Verified' : verified === '0' ? 'Pending review' : null,
   ].filter(Boolean).join(' · ')
 
   return (
@@ -470,6 +511,43 @@ export default function VehiclesList() {
                 : 'Platforms in operation'}
             </span>
             <span className="rm-kpi__icon" aria-hidden><i className="fas fa-car-side" /></span>
+          </button>
+        </div>
+
+        <div className="rm-kpi-row rm-kpi-row--capture">
+          <button
+            type="button"
+            className={`rm-kpi rm-kpi--teal${registered === '1' && verified !== '0' ? ' is-active' : ''}`}
+            onClick={filterPhotosSubmitted}
+          >
+            <span className="rm-kpi__label">Photos submitted</span>
+            <span className="rm-kpi__value">{fmt(photosSubmitted)}</span>
+            <span className="rm-kpi__hint">Form capture on file</span>
+            <span className="rm-kpi__icon" aria-hidden><i className="fas fa-camera" /></span>
+          </button>
+
+          <button
+            type="button"
+            className={`rm-kpi rm-kpi--amber${registered === '0' ? ' is-active' : ''}`}
+            onClick={filterCapturePending}
+          >
+            <span className="rm-kpi__label">Capture pending</span>
+            <span className="rm-kpi__value">{fmt(capturePending)}</span>
+            <span className="rm-kpi__hint">Still awaiting /capture</span>
+            <span className="rm-kpi__icon" aria-hidden><i className="fas fa-hourglass-half" /></span>
+          </button>
+
+          <button
+            type="button"
+            className={`rm-kpi rm-kpi--rose${verified === '0' && registered === '1' ? ' is-active' : ''}`}
+            onClick={filterPendingReview}
+          >
+            <span className="rm-kpi__label">Pending review</span>
+            <span className="rm-kpi__value">{fmt(pendingReview)}</span>
+            <span className="rm-kpi__hint">
+              {canVerify ? 'Submitted · need to verify' : 'Submitted · awaiting verification'}
+            </span>
+            <span className="rm-kpi__icon" aria-hidden><i className="fas fa-clipboard-check" /></span>
           </button>
         </div>
 
@@ -552,7 +630,9 @@ export default function VehiclesList() {
             {activeCityLabel ? <span className="rm-pill">City · {activeCityLabel}</span> : null}
             {category ? <span className="rm-pill">Category · {category}</span> : null}
             {verified === '1' ? <span className="rm-pill">Verified</span> : null}
-            {verified === '0' ? <span className="rm-pill">Not Verified</span> : null}
+            {verified === '0' ? <span className="rm-pill">Pending review</span> : null}
+            {registered === '1' && verified !== '0' && verified !== '1' ? <span className="rm-pill">Photos submitted</span> : null}
+            {registered === '0' ? <span className="rm-pill">Capture pending</span> : null}
             <button type="button" className="btn btn-default btn-xs" onClick={clearFilters}>Reset</button>
             <em style={{ fontStyle: 'normal', marginLeft: 'auto' }}>
               {fmt(total)} matches{filterSummary ? ` · ${filterSummary}` : ''}
@@ -655,13 +735,30 @@ export default function VehiclesList() {
             />
             <AppSelect
               value={verified}
-              onChange={setVerified}
+              onChange={(v) => {
+                setVerified(v)
+                if (v === '0' || v === '1') setRegistered('1')
+              }}
               searchable={false}
-              placeholder="All verification"
+              placeholder="All capture status"
               options={[
-                { value: '', label: 'All verification' },
+                { value: '', label: 'All capture status' },
                 { value: '1', label: 'Verified' },
-                { value: '0', label: 'Not Verified' },
+                { value: '0', label: 'Pending review' },
+              ]}
+            />
+            <AppSelect
+              value={registered}
+              onChange={(v) => {
+                setRegistered(v)
+                if (v === '0') setVerified('')
+              }}
+              searchable={false}
+              placeholder="All form capture"
+              options={[
+                { value: '', label: 'All form capture' },
+                { value: '1', label: 'Photos submitted' },
+                { value: '0', label: 'Capture pending' },
               ]}
             />
           </div>
@@ -674,7 +771,7 @@ export default function VehiclesList() {
             <SortHead label="Location" col="location_name" sort={sort} order={order} onSort={toggleSort} />
             <SortHead label="Status" col="status" sort={sort} order={order} onSort={toggleSort} />
             <span>Assigned</span>
-            <SortHead label="Verification" col="verification_status" sort={sort} order={order} onSort={toggleSort} />
+            <SortHead label="Capture status" col="verification_status" sort={sort} order={order} onSort={toggleSort} />
             <span>Actions</span>
           </div>
 
@@ -704,8 +801,15 @@ export default function VehiclesList() {
                 </div>
                 <div className="rm-fleet-meta">{v.assigned_name || 'Unassigned'}</div>
                 <div>
-                  <span className={`rm-verify-badge ${v.form_verified ? 'rm-verify-badge--ok' : 'rm-verify-badge--no'}`}>
-                    {v.verification_status || (v.form_verified ? 'Verified' : 'Not Verified')}
+                  <span className={`rm-verify-badge ${
+                    v.form_verified
+                      ? 'rm-verify-badge--ok'
+                      : v.form_registered
+                        ? 'rm-verify-badge--pending'
+                        : 'rm-verify-badge--no'
+                  }`}>
+                    {v.verification_status
+                      || (v.form_verified ? 'Verified' : v.form_registered ? 'Pending review' : 'Capture pending')}
                   </span>
                 </div>
                 <div className="rm-fleet-actions" onClick={(e) => e.stopPropagation()}>
