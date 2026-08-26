@@ -1,4 +1,4 @@
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 import AppLayout from '../../layout/AppLayout'
 import { AppSelect, Box, DataTable, Field, FileInput, PageForm, StackField } from '../../components/ui'
@@ -13,6 +13,8 @@ import { formatAppDateTime } from '../../lib/datetime'
 type Row = Record<string, unknown>
 
 export function EmployeesList() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeFilter = searchParams.get('active') // '1' | '0' | null
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(0)
   const [rows, setRows] = useState<Row[]>([])
@@ -21,13 +23,28 @@ export function EmployeesList() {
   const [error, setError] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState('')
-  const [insights, setInsights] = useState({ employees: 0, deployed: 0 })
+  const [stats, setStats] = useState({ total: 0, active: 0, inactive: 0 })
   const pageSize = 15
+
+  const loadStats = () => {
+    employeesApi.stats()
+      .then((s) => setStats({
+        total: Number(s.total || 0),
+        active: Number(s.active || 0),
+        inactive: Number(s.inactive || 0),
+      }))
+      .catch(() => undefined)
+  }
 
   const load = () => {
     setLoading(true)
     employeesApi
-      .list({ search: search || undefined, limit: pageSize, offset: page * pageSize })
+      .list({
+        search: search || undefined,
+        limit: pageSize,
+        offset: page * pageSize,
+        active: activeFilter === '1' || activeFilter === '0' ? activeFilter : undefined,
+      })
       .then((res) => {
         setRows(res.rows)
         setTotal(res.total)
@@ -42,12 +59,7 @@ export function EmployeesList() {
   }
 
   useEffect(() => {
-    dashboardApi.counts().then((c) => {
-      setInsights({
-        employees: Number(c.employees || 0),
-        deployed: Number(c.deployed || 0),
-      })
-    }).catch(() => undefined)
+    loadStats()
   }, [])
 
   const syncHrms = async () => {
@@ -63,6 +75,7 @@ export function EmployeesList() {
         + (m ? ` · masters ${m.companies.total} companies / ${m.departments.total} departments / ${m.locations.total} locations` : ''),
       )
       load()
+      loadStats()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'HRMS sync failed')
     } finally {
@@ -73,34 +86,71 @@ export function EmployeesList() {
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, page])
+  }, [search, page, activeFilter])
 
   const onSearch = (value: string) => {
     setPage(0)
     setSearch(value)
   }
 
-  const activeCount = rows.filter((r) =>
-    String(r.employment_status_description || '') === 'Active' || r.employment_status === '1',
-  ).length
+  const setActiveFilter = (value: '1' | '0' | null) => {
+    setPage(0)
+    const next = new URLSearchParams(searchParams)
+    if (value == null) next.delete('active')
+    else next.set('active', value)
+    setSearchParams(next, { replace: true })
+  }
+
+  const listTitle = activeFilter === '1'
+    ? 'Active employees'
+    : activeFilter === '0'
+      ? 'Inactive employees'
+      : 'All employees'
 
   return (
-    <AppLayout title="Employees" subtitle={loading ? 'Loading…' : `${total} employees`}>
+    <AppLayout title="Employees" subtitle={loading ? 'Loading…' : `${total} ${listTitle.toLowerCase()}`}>
       {error ? <div className="callout callout-danger"><p>{error}</p></div> : null}
       {syncMsg ? <div className="callout callout-success"><p>{syncMsg}</p></div> : null}
       <ModuleInsights
-        title="People insights"
+        title="Employee status"
         cards={[
-          { label: 'Employees', value: insights.employees || total, tone: 'teal' },
-          { label: 'Active (page)', value: activeCount, tone: 'default' },
-          { label: 'Assets assigned', value: insights.deployed, tone: 'amber', to: '/hardware?status_type=Assigned', hint: 'Across all employees' },
+          {
+            label: 'All employees',
+            value: stats.total,
+            tone: 'slate',
+            icon: 'fas fa-users',
+            hint: activeFilter == null ? 'Showing all' : 'Show all',
+            to: '/employees',
+          },
+          {
+            label: 'Active employees',
+            value: stats.active,
+            tone: 'teal',
+            icon: 'fas fa-user-check',
+            hint: 'Email & Employee ID available',
+            to: '/employees?active=1',
+          },
+          {
+            label: 'Inactive employees',
+            value: stats.inactive,
+            tone: 'rose',
+            icon: 'fas fa-user-slash',
+            hint: 'Not active in HRMS',
+            to: '/employees?active=0',
+          },
         ]}
       />
       <Box
-        title="Employees"
+        title={listTitle}
         type="primary"
         tools={
           <>
+            {activeFilter != null ? (
+              <button type="button" className="btn btn-default btn-sm" onClick={() => setActiveFilter(null)}>
+                Clear filter
+              </button>
+            ) : null}
+            {' '}
             <button
               type="button"
               className="btn btn-success btn-sm"
@@ -136,23 +186,42 @@ export function EmployeesList() {
           onBulkDelete={async (ids) => {
             for (const id of ids) await employeesApi.remove(id)
             load()
+            loadStats()
           }}
           columns={[
             {
               key: 'employee_code',
               label: 'Employee ID',
-              render: (r) => <Link to={`/employees/${r.id}`}>{String(r.employee_code)}</Link>,
+              render: (r) => <Link to={`/employees/${r.id}`}><strong>{String(r.employee_code)}</strong></Link>,
+            },
+            {
+              key: 'email',
+              label: 'Email',
+              render: (r) => {
+                const mail = String(r.email || '').trim()
+                return mail
+                  ? <a href={`mailto:${mail}`}>{mail}</a>
+                  : <span className="text-muted">—</span>
+              },
             },
             {
               key: 'name',
               label: 'Name',
               render: (r) => <Link to={`/employees/${r.id}`}>{String(r.name)}</Link>,
             },
-            { key: 'email', label: 'Email' },
+            {
+              key: 'mobile',
+              label: 'Mobile',
+              render: (r) => String(r.mobile || '—'),
+            },
+            {
+              key: 'work_mobile',
+              label: 'Work mobile',
+              render: (r) => String(r.work_mobile || '—'),
+            },
             { key: 'department_name', label: 'Department' },
             { key: 'designation', label: 'Designation' },
             { key: 'refex_company_name', label: 'Company' },
-            { key: 'refex_location', label: 'Location' },
             {
               key: 'employment_status_description',
               label: 'Status',

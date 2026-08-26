@@ -114,6 +114,22 @@ employeesRouter.get('/', async (req, res) => {
   return okList(res, rows.map(transformEmployee), total)
 })
 
+/** Active / inactive totals for list cards */
+employeesRouter.get('/stats', async (_req, res) => {
+  const base = `FROM employees WHERE deleted_at IS NULL`
+  const activeClause = `(employment_status_description = 'Active' OR employment_status = '1')`
+  const [totalRow, activeRow, inactiveRow] = await Promise.all([
+    get<{ c: number }>(`SELECT COUNT(*) as c ${base}`),
+    get<{ c: number }>(`SELECT COUNT(*) as c ${base} AND ${activeClause}`),
+    get<{ c: number }>(`SELECT COUNT(*) as c ${base} AND NOT ${activeClause}`),
+  ])
+  return okItem(res, {
+    total: Number(totalRow?.c || 0),
+    active: Number(activeRow?.c || 0),
+    inactive: Number(inactiveRow?.c || 0),
+  })
+})
+
 employeesRouter.get('/selectlist', async (req, res) => {
   const q = String(req.query.search || '').trim()
   let sql = `

@@ -9,6 +9,7 @@ type User = {
   email?: string
   name?: string
   permissions?: Record<string, unknown>
+  must_change_password?: boolean
 }
 
 type AuthCtx = {
@@ -18,7 +19,7 @@ type AuthCtx = {
   /** Admin or Superuser role flag — Settings / Reports / HRMS Profile */
   isAdmin: boolean
   can: (permission: string) => boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string) => Promise<User>
   loginWithToken: (token: string) => Promise<void>
   logout: () => void
   refreshUser: () => Promise<void>
@@ -66,7 +67,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async login(email, password) {
       const res = await authApi.login(email, password)
       setToken(res.token)
-      setUser(res.user as unknown as User)
+      const u = res.user as unknown as User
+      setUser(u)
+      return u
     },
     async loginWithToken(token) {
       setToken(token)

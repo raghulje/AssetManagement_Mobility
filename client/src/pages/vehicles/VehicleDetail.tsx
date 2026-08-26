@@ -28,6 +28,7 @@ import { useAuth } from '../../api/AuthContext'
 import VehicleHero from './detail/VehicleHero'
 import OverviewTab from './detail/OverviewTab'
 import { AppSelect, DateField } from '../../components/formControls'
+import { formatAppDateTime } from '../../lib/datetime'
 
 type Tab = 'overview' | 'captures' | 'attachments' | 'maintenance' | 'assignments' | 'history' | 'qr'
 
@@ -75,6 +76,7 @@ function formatVehicleAction(action: string) {
   if (key === 'delete') return 'Deleted'
   if (key === 'maintenance') return 'Maintenance logged'
   if (key === 'uploaded') return 'File uploaded'
+  if (key === 'verified') return 'Form registration verified'
   if (key === 'label_printed') return 'QR printed'
   if (!key) return 'Activity'
   return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -107,6 +109,9 @@ export default function VehicleDetail() {
   const [pending, setPending] = useState<PendingCapture[]>([])
   const [sessionId, setSessionId] = useState<number | null>(null)
   const [webcamOpen, setWebcamOpen] = useState(false)
+  const [verifySessionId, setVerifySessionId] = useState<number | null>(null)
+  const [verifySummary, setVerifySummary] = useState('')
+  const [verifyBusy, setVerifyBusy] = useState(false)
   const [captureGps, setCaptureGps] = useState<PrecisePosition | null>(null)
   const [gpsBusy, setGpsBusy] = useState(false)
   const [nativeCamArmed, setNativeCamArmed] = useState(false)
@@ -709,6 +714,10 @@ export default function VehicleDetail() {
       name: string | null
       email: string | null
       phone: string | null
+      verifiedAt: string | null
+      verifiedByName: string | null
+      verifiedSummary: string | null
+      verificationLog: NonNullable<VehicleCapture['verification_log']>
       photos: typeof captures
     }>()
     for (const c of captures) {
@@ -724,6 +733,10 @@ export default function VehicleDetail() {
           name: c.submitter_name || c.captured_by_name || null,
           email: c.submitter_email || null,
           phone: c.submitter_phone || null,
+          verifiedAt: c.verified_at || null,
+          verifiedByName: c.verified_by_name || null,
+          verifiedSummary: c.verified_summary || null,
+          verificationLog: Array.isArray(c.verification_log) ? c.verification_log : [],
           photos: [c],
         })
       }
@@ -731,6 +744,41 @@ export default function VehicleDetail() {
     return Array.from(map.values())
   })()
   const appCaptures = captures.filter((c) => String(c.source || '') !== 'public_form')
+
+  async function submitVerify() {
+    if (!id || verifySessionId == null) return
+    const summary = verifySummary.trim()
+    if (!summary) {
+      toast.error('Enter a short verification summary')
+      return
+    }
+    setVerifyBusy(true)
+    try {
+      const res = await vehiclesApi.verifyCaptureSession(id, verifySessionId, summary)
+      const payload = res.payload
+      setCaptures((list) => list.map((c) => {
+        if (c.session_id !== verifySessionId) return c
+        return {
+          ...c,
+          verified_at: payload?.verified_at || c.verified_at,
+          verified_by: payload?.verified_by ?? c.verified_by,
+          verified_by_name: payload?.verified_by_name || c.verified_by_name,
+          verified_summary: payload?.verified_summary || summary,
+          verification_log: payload?.verification_log || c.verification_log,
+        }
+      }))
+      setVerifySessionId(null)
+      setVerifySummary('')
+      toast.success('Registration verified')
+      if (tab === 'history') {
+        vehiclesApi.history(id).then((r) => setHistory(r.rows || [])).catch(() => undefined)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Verify failed')
+    } finally {
+      setVerifyBusy(false)
+    }
+  }
 
   const tabs: Array<{ id: Tab; label: string; count?: number }> = [
     { id: 'overview', label: 'Overview' },
@@ -910,15 +958,38 @@ export default function VehicleDetail() {
             {captures.length === 0 && pending.length === 0 && !nativeCamArmed && !gpsBusy ? (
               <div className="vad-empty">
                 <strong>No photos yet</strong>
-                Tap Take photo — we lock GPS, then open the camera automatically. On phones, confirm the shot with the tick.
+                Tap Take photo to capture from the app, or wait for a public form registration
+                (<code>/capture</code>). After a form is submitted, a <strong>Form registration</strong> block
+                appears here with photos and a <strong>Verify</strong> button (verified on / by / summary).
               </div>
             ) : (
               <>
                 {formRegistrations.map((reg) => (
-                  <section key={reg.key} className="vc-form-reg">
+                  <section key={reg.key} className={`vc-form-reg${reg.verifiedAt ? ' vc-form-reg--verified' : ''}`}>
                     <div className="vc-form-reg__head">
                       <span className="vc-form-reg__badge">Form registration</span>
+                      {reg.verifiedAt ? (
+                        <span className="vc-form-reg__badge vc-form-reg__badge--verified">
+                          <i className="fas fa-check-circle" aria-hidden /> Verified
+                        </span>
+                      ) : (
+                        <span className="vc-form-reg__badge vc-form-reg__badge--pending">Pending review</span>
+                      )}
                       <h4>Public capture submission</h4>
+                      {canEdit && reg.sessionId != null ? (
+                        <button
+                          type="button"
+                          className="btn btn-theme btn-sm"
+                          style={{ marginLeft: 'auto' }}
+                          disabled={verifyBusy}
+                          onClick={() => {
+                            setVerifySessionId(reg.sessionId)
+                            setVerifySummary(reg.verifiedSummary || '')
+                          }}
+                        >
+                          <i className="fas fa-check" /> {reg.verifiedAt ? 'Re-verify' : 'Verify'}
+                        </button>
+                      ) : null}
                     </div>
                     <dl className="vc-form-reg__meta">
                       <div><dt>Vehicle number</dt><dd>{reg.vehicleNumber}</dd></div>
@@ -926,7 +997,32 @@ export default function VehicleDetail() {
                       <div><dt>Email</dt><dd>{reg.email || '—'}</dd></div>
                       <div><dt>Phone number</dt><dd>{reg.phone || '—'}</dd></div>
                       <div><dt>Photos</dt><dd>{reg.photos.length}</dd></div>
+                      {reg.verifiedAt ? (
+                        <>
+                          <div><dt>Verified at</dt><dd>{formatAppDateTime(reg.verifiedAt)}</dd></div>
+                          <div><dt>Verified by</dt><dd>{reg.verifiedByName || '—'}</dd></div>
+                          <div style={{ gridColumn: '1 / -1' }}>
+                            <dt>Summary</dt>
+                            <dd>{reg.verifiedSummary || '—'}</dd>
+                          </div>
+                        </>
+                      ) : null}
                     </dl>
+                    {reg.verificationLog.length > 0 ? (
+                      <div className="vc-form-reg__log">
+                        <strong>Verification log</strong>
+                        <ul>
+                          {reg.verificationLog.map((entry, idx) => (
+                            <li key={`${entry.verified_at || idx}-${idx}`}>
+                              <span className="vc-form-reg__log-meta">
+                                {formatAppDateTime(entry.verified_at)} · {entry.verified_by_name || 'User'}
+                              </span>
+                              <span>{entry.summary || '—'}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                     <div className="vad-gallery">
                       {reg.photos.map((c) => (
                         <VehicleCaptureFrame
@@ -945,6 +1041,45 @@ export default function VehicleDetail() {
                     </div>
                   </section>
                 ))}
+
+                {verifySessionId != null ? createPortal(
+                  <div className="vc-verify-modal" role="dialog" aria-modal="true" aria-labelledby="vc-verify-title">
+                    <div className="vc-verify-modal__card">
+                      <h3 id="vc-verify-title">Verify form registration</h3>
+                      <p>Confirm you have reviewed the photos. Add a short summary for the audit log.</p>
+                      <label className="vc-verify-modal__label" htmlFor="vc-verify-summary">Summary</label>
+                      <textarea
+                        id="vc-verify-summary"
+                        className="form-control"
+                        rows={4}
+                        value={verifySummary}
+                        onChange={(e) => setVerifySummary(e.target.value)}
+                        placeholder="e.g. Photos match vehicle, plates clear, GPS looks correct"
+                        maxLength={2000}
+                        autoFocus
+                      />
+                      <div className="vc-verify-modal__actions">
+                        <button
+                          type="button"
+                          className="btn btn-default"
+                          disabled={verifyBusy}
+                          onClick={() => { setVerifySessionId(null); setVerifySummary('') }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-theme"
+                          disabled={verifyBusy || !verifySummary.trim()}
+                          onClick={() => { void submitVerify() }}
+                        >
+                          {verifyBusy ? 'Saving…' : 'Confirm verified'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>,
+                  document.body,
+                ) : null}
 
                 {(pending.length > 0 || appCaptures.length > 0) ? (
                   <div className="vad-gallery">

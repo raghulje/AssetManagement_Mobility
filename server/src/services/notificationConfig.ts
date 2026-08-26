@@ -10,6 +10,7 @@ export type EmailCategoryKey =
   | 'inventory'
   | 'crud'
   | 'license_renewal'
+  | 'form_registration'
 
 export type NotificationConfig = {
   email_notifications: Record<EmailCategoryKey, boolean>
@@ -29,6 +30,7 @@ const DEFAULT_CONFIG: NotificationConfig = {
     inventory: false,
     crud: false,
     license_renewal: false,
+    form_registration: true,
   },
   extra_ops_emails: '',
   eol_to_it_asset_manager: true,
@@ -186,6 +188,7 @@ export async function notificationAdminSnapshot() {
     categories: [
       { key: 'eol_warranty', label: 'Vehicle EOL & warranty reminders (30d / 7d / 1d)' },
       { key: 'maintenance', label: 'Vehicle maintenance scheduled / updated / completed' },
+      { key: 'form_registration', label: 'Public form registration submitted (photos to verify)' },
     ],
   }
 }

@@ -19,7 +19,15 @@ function useIsNarrow() {
   return narrow
 }
 
-type Props = { children: ReactNode; title: string; subtitle?: string; dense?: boolean; hideHeader?: boolean }
+type Props = {
+  children: ReactNode
+  title: string
+  subtitle?: string
+  dense?: boolean
+  hideHeader?: boolean
+  /** Shown above breadcrumbs (e.g. pending-verify badge on Vehicles) */
+  headerAside?: ReactNode
+}
 
 type SectionTab = {
   to: string
@@ -129,6 +137,27 @@ const SECTION_TABS: Record<SectionKey, SectionTab[]> = {
   ],
   people: [
     {
+      to: '/employees',
+      label: 'Employees',
+      isActive: (p, s) => {
+        if (!p.startsWith('/employees')) return false
+        // List + filters only on index; detail/edit stay under Employees section without forcing a tab
+        if (p !== '/employees' && p !== '/employees/') return true
+        const q = new URLSearchParams(s)
+        return !q.has('active') || q.get('active') === null
+      },
+    },
+    {
+      to: '/employees?active=1',
+      label: 'Active',
+      isActive: (p, s) => p.startsWith('/employees') && new URLSearchParams(s).get('active') === '1',
+    },
+    {
+      to: '/employees?active=0',
+      label: 'Inactive',
+      isActive: (p, s) => p.startsWith('/employees') && new URLSearchParams(s).get('active') === '0',
+    },
+    {
       to: '/users',
       label: 'App Users',
       isActive: (p, s) => {
@@ -157,7 +186,7 @@ function resolveSection(pathname: string, search = ''): SectionKey | null {
   void search
   // Drivers is fleet-only — never mix App Users / Admin tabs here
   if (pathname.startsWith('/drivers')) return null
-  if (pathname.startsWith('/users')) return 'people'
+  if (pathname.startsWith('/employees') || pathname.startsWith('/users')) return 'people'
   if (pathname.startsWith('/masters')) return 'masters'
   if (pathname.startsWith('/settings')) return 'settings'
   if (pathname.startsWith('/audit') || pathname.startsWith('/reports')) return 'reports'
@@ -172,6 +201,7 @@ function shouldShowSectionTabs(pathname: string): boolean {
   if (pathname.startsWith('/audit') || pathname.startsWith('/reports')) return true
 
   const listRoutes = [
+    /^\/employees\/?$/,
     /^\/users\/?$/,
     /^\/masters\/?$/,
     /^\/settings\/?$/,
@@ -230,7 +260,7 @@ function SectionTabs({ section }: { section: SectionKey }) {
   )
 }
 
-export default function AppLayout({ children, title, subtitle, dense, hideHeader }: Props) {
+export default function AppLayout({ children, title, subtitle, dense, hideHeader, headerAside }: Props) {
   const isNarrow = useIsNarrow()
   /** Desktop: false = sidebar visible. Mobile: true = drawer closed. */
   const [collapsed, setCollapsed] = useState(() =>
@@ -323,6 +353,7 @@ export default function AppLayout({ children, title, subtitle, dense, hideHeader
               {canVehicles ? <li><NavLink to="/vehicles" title="Vehicles"><i className="fas fa-car" /></NavLink></li> : null}
               {canDrivers ? <li><NavLink to="/drivers" title="Drivers"><i className="fas fa-id-card" /></NavLink></li> : null}
               {canAudit ? <li><NavLink to="/audit" title="Audit"><i className="fas fa-clipboard-list" /></NavLink></li> : null}
+              {canPeople ? <li><NavLink to="/employees" title="Employees"><i className="fas fa-users" /></NavLink></li> : null}
               {canPeople ? <li><NavLink to="/users" title="App users"><i className="fas fa-user-shield" /></NavLink></li> : null}
               {showCreateMenu ? (
                 <li className={`dropdown ${createOpen ? 'open' : ''}`}>
@@ -333,6 +364,7 @@ export default function AppLayout({ children, title, subtitle, dense, hideHeader
                     {canCreateVehicle ? <NavLink to="/vehicles/create" onClick={() => setCreateOpen(false)}>Vehicle</NavLink> : null}
                     {canCreateDriver ? <NavLink to="/drivers" onClick={() => setCreateOpen(false)}>Driver</NavLink> : null}
                     {canCreateMaster ? <NavLink to="/masters" onClick={() => setCreateOpen(false)}>City / Model</NavLink> : null}
+                    {canCreateUser ? <NavLink to="/employees/create" onClick={() => setCreateOpen(false)}>Employee</NavLink> : null}
                     {canCreateUser ? <NavLink to="/users/create" onClick={() => setCreateOpen(false)}>App user</NavLink> : null}
                   </div>
                 </li>
@@ -383,6 +415,11 @@ export default function AppLayout({ children, title, subtitle, dense, hideHeader
             </li>
           ) : null}
           {canPeople ? (
+            <li className={path.startsWith('/employees') ? 'active' : ''}>
+              <NavLink to="/employees" onClick={closeDrawer}><i className="fas fa-users fa-fw" /><span>Employees</span></NavLink>
+            </li>
+          ) : null}
+          {canPeople ? (
             <li className={path.startsWith('/users') ? 'active' : ''}>
               <NavLink to="/users" onClick={closeDrawer}><i className="fas fa-user-shield fa-fw" /><span>App users</span></NavLink>
             </li>
@@ -402,10 +439,13 @@ export default function AppLayout({ children, title, subtitle, dense, hideHeader
               {title}
               {subtitle ? <small>{subtitle}</small> : null}
             </h1>
-            <ol className="breadcrumb">
-              <li><NavLink to="/">Home</NavLink></li>
-              <li>{title}</li>
-            </ol>
+            <div className="content-header__right">
+              {headerAside}
+              <ol className="breadcrumb">
+                <li><NavLink to="/">Home</NavLink></li>
+                <li>{title}</li>
+              </ol>
+            </div>
           </section>
         ) : null}
         {showSectionTabs && section ? <SectionTabs section={section} /> : null}

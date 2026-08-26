@@ -6,6 +6,7 @@ import { fail, okItem, okList, okMessage } from '../utils/response.js'
 import { ensureVehicleQr } from '../services/vehicleQr.js'
 import { makeMultiUploader, storageRoot } from '../services/uploads.js'
 import { logAction } from '../services/actionLog.js'
+import { notifyWorkflow } from '../services/notify.js'
 
 const router = Router()
 
@@ -79,17 +80,6 @@ function isEmail(v: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
 }
 
-function isPhone(v: string) {
-  const digits = v.replace(/\D/g, '')
-  // Allow optional country code 91 + 10-digit Indian mobile
-  const local = digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : digits
-  return /^[6-9]\d{9}$/.test(local)
-}
-
-function isName(v: string) {
-  return /^[A-Za-z][A-Za-z .'-]{1,100}$/.test(v.trim())
-}
-
 /**
  * Searchable vehicle dropdown for the public capture form.
  * GET /api/v1/public/vehicles/search?q=
@@ -153,9 +143,53 @@ router.get('/vehicles/search', async (req, res) => {
 })
 
 /**
+ * Active employees for public capture form (Employee ID search).
+ * GET /api/v1/public/employees/search?q=
+ */
+router.get('/employees/search', async (req, res) => {
+  const q = String(req.query.q || '').trim()
+  if (q.length < 1) return okList(res, [])
+  const like = `%${q.replace(/[%_]/g, '')}%`
+  const rows = await all<Record<string, unknown>>(`
+    SELECT id, employee_code, first_name, last_name, email, mobile, work_mobile,
+           department_name, designation
+    FROM employees
+    WHERE deleted_at IS NULL
+      AND (employment_status_description = 'Active' OR employment_status = '1')
+      AND (
+        employee_code LIKE ?
+        OR first_name LIKE ?
+        OR last_name LIKE ?
+        OR email LIKE ?
+        OR CONCAT(COALESCE(first_name,''), ' ', COALESCE(last_name,'')) LIKE ?
+      )
+    ORDER BY
+      CASE WHEN employee_code LIKE ? THEN 0 ELSE 1 END,
+      employee_code ASC
+    LIMIT 40
+  `, [like, like, like, like, like, `${q.replace(/[%_]/g, '')}%`]).catch(() => [])
+
+  return okList(res, rows.map((r) => {
+    const code = String(r.employee_code || '')
+    const name = `${r.first_name || ''} ${r.last_name || ''}`.trim()
+    return {
+      id: Number(r.id),
+      employee_code: code,
+      name: name || code,
+      email: r.email ? String(r.email).trim() : null,
+      mobile: r.mobile ? String(r.mobile).trim() : null,
+      work_mobile: r.work_mobile ? String(r.work_mobile).trim() : null,
+      department_name: r.department_name ? String(r.department_name) : null,
+      designation: r.designation ? String(r.designation) : null,
+      text: [code, name].filter(Boolean).join(' — '),
+    }
+  }))
+})
+
+/**
  * Public multi-photo capture submit (no auth).
  * POST /api/v1/public/capture-form
- * multipart: vehicle_id, name, email, phone, photos[]
+ * multipart: vehicle_id, employee_id, photos[]  (name/email/phone resolved from employee)
  */
 router.post('/capture-form', (req, res) => {
   const ip = clientIp(req as { ip?: string; headers: Record<string, unknown> })
@@ -172,26 +206,60 @@ router.post('/capture-form', (req, res) => {
 
       const body = req.body || {}
       const vehicleId = Number(body.vehicle_id)
-      const name = String(body.name || '').trim()
-      const email = String(body.email || '').trim().toLowerCase()
-      const phone = String(body.phone || '').trim()
+      const employeeId = Number(body.employee_id)
       const files = Array.isArray(req.files) ? req.files as Express.Multer.File[] : []
 
       if (!Number.isFinite(vehicleId) || vehicleId <= 0) {
         for (const f of files) fs.unlink(f.path, () => undefined)
         return fail(res, 'Select a vehicle number')
       }
-      if (!name || !isName(name)) {
+      if (!Number.isFinite(employeeId) || employeeId <= 0) {
         for (const f of files) fs.unlink(f.path, () => undefined)
-        return fail(res, 'Enter a valid full name')
+        return fail(res, 'Select an employee ID')
       }
+
+      const employee = await get<{
+        id: number
+        employee_code: string
+        first_name: string | null
+        last_name: string | null
+        email: string | null
+        mobile: string | null
+        work_mobile: string | null
+        employment_status: string | null
+        employment_status_description: string | null
+      }>(`
+        SELECT id, employee_code, first_name, last_name, email, mobile, work_mobile,
+               employment_status, employment_status_description
+        FROM employees
+        WHERE id = ? AND deleted_at IS NULL
+      `, [employeeId])
+      if (!employee) {
+        for (const f of files) fs.unlink(f.path, () => undefined)
+        return fail(res, 'Employee not found', 404)
+      }
+      const isActive = String(employee.employment_status_description || '') === 'Active'
+        || String(employee.employment_status || '') === '1'
+      if (!isActive) {
+        for (const f of files) fs.unlink(f.path, () => undefined)
+        return fail(res, 'Only active employees can submit this form')
+      }
+
+      const name = `${employee.first_name || ''} ${employee.last_name || ''}`.trim()
+        || String(employee.employee_code)
+      const email = String(employee.email || '').trim().toLowerCase()
+      const mobile = String(employee.mobile || '').trim()
+      const workMobile = String(employee.work_mobile || '').trim()
+      const phoneParts = [mobile, workMobile].filter(Boolean)
+      const phone = phoneParts.join(' / ')
+
       if (!email || !isEmail(email)) {
         for (const f of files) fs.unlink(f.path, () => undefined)
-        return fail(res, 'Enter a valid email address')
+        return fail(res, 'This employee has no valid email in HRMS')
       }
-      if (!phone || !isPhone(phone)) {
+      if (!phone) {
         for (const f of files) fs.unlink(f.path, () => undefined)
-        return fail(res, 'Enter a valid 10-digit mobile number')
+        return fail(res, 'This employee has no mobile / work mobile in HRMS')
       }
       if (files.length < 1) {
         return fail(res, 'At least one photo is required')
@@ -232,7 +300,7 @@ router.post('/capture-form', (req, res) => {
       }
 
       const ts = now()
-      const notes = `Public form · ${name} · ${email} · ${phone}`
+      const notes = `Public form · ${employee.employee_code} · ${name} · ${email} · ${phone}`
       const session = await run(`
         INSERT INTO vehicle_capture_sessions
           (vehicle_id, captured_by, notes, submitter_name, submitter_email, submitter_phone, source, created_at, updated_at)
@@ -264,10 +332,32 @@ router.post('/capture-form', (req, res) => {
         meta: {
           session_id: sessionId,
           capture_ids: captureIds,
+          employee_id: employee.id,
+          employee_code: employee.employee_code,
           submitter_name: name,
           submitter_email: email,
           photo_count: captureIds.length,
         },
+      })
+
+      notifyWorkflow({
+        category: 'form_registration',
+        event: 'vehicle.form_registration',
+        subject: `Form registration · ${vehicle.vehicle_number}`,
+        title: 'New form registration to verify',
+        intro: 'A first-time public capture form was submitted. Review the photos and mark the registration as verified when checks are complete.',
+        fields: [
+          { label: 'Vehicle', value: vehicle.vehicle_number },
+          { label: 'Employee ID', value: String(employee.employee_code) },
+          { label: 'Name', value: name },
+          { label: 'Email', value: email },
+          { label: 'Phone', value: phone },
+          { label: 'Photos', value: String(captureIds.length) },
+        ],
+        ctaPath: `/vehicles/${vehicleId}?tab=captures`,
+        ctaLabel: 'Open photos to verify',
+        itemType: 'vehicle',
+        itemId: vehicleId,
       })
 
       return okMessage(res, `Submitted ${captureIds.length} photo(s) for ${vehicle.vehicle_number}`, {

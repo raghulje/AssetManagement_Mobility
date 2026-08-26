@@ -1,16 +1,126 @@
 import { Link, useSearchParams } from 'react-router-dom'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import AppLayout from '../../layout/AppLayout'
 import { AppSelect } from '../../components/formControls'
 import { vehiclesApi, type Vehicle, type VehicleFacets } from '../../api/vehicles'
+import { formatAppDateTime } from '../../lib/datetime'
 
 const PAGE_SIZE = 25
 
 type Drill = 'none' | 'cities' | 'models' | 'fuel'
 
+type PendingRow = {
+  id: number
+  vehicle_number: string
+  model?: string | null
+  location_name?: string | null
+  session_id: number
+  submitter_name?: string | null
+  submitter_email?: string | null
+  photo_count: number
+  submitted_at?: string | null
+}
+
 function fmt(n: number | null | undefined) {
   if (n == null || Number.isNaN(n)) return '—'
   return Number(n).toLocaleString('en-IN')
+}
+
+function PendingVerifyAlert({ refreshKey }: { refreshKey: number }) {
+  const [open, setOpen] = useState(false)
+  const [rows, setRows] = useState<PendingRow[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    vehiclesApi
+      .pendingVerification(100)
+      .then((res) => {
+        if (cancelled) return
+        setRows((res.rows || []) as PendingRow[])
+        setTotal(Number(res.total || res.rows?.length || 0))
+      })
+      .catch(() => {
+        if (cancelled) return
+        setRows([])
+        setTotal(0)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [refreshKey])
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  if (loading && total === 0 && rows.length === 0) return null
+  if (!loading && total === 0) return null
+
+  const labelCount = total || rows.length
+  const noun = labelCount === 1 ? 'vehicle' : 'vehicles'
+
+  return (
+    <div className="rm-pending-verify" ref={rootRef}>
+      <button
+        type="button"
+        className="rm-pending-verify__btn"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="rm-pending-verify__count">{fmt(labelCount)}</span>
+        <span className="rm-pending-verify__text">
+          {noun} registered, need to verify
+        </span>
+        <i className={`fas fa-chevron-${open ? 'up' : 'down'}`} aria-hidden />
+      </button>
+      {open ? (
+        <div className="rm-pending-verify__panel" role="dialog" aria-label="Vehicles pending verification">
+          <div className="rm-pending-verify__panel-head">
+            Pending form registrations · click plate to open Photos
+          </div>
+          {rows.length === 0 ? (
+            <div className="rm-pending-verify__empty">Nothing pending right now.</div>
+          ) : (
+            <ul className="rm-pending-verify__list">
+              {rows.map((r) => (
+                <li key={`${r.id}-${r.session_id}`}>
+                  <Link
+                    to={`/vehicles/${r.id}?tab=captures`}
+                    onClick={() => setOpen(false)}
+                  >
+                    <span className="rm-pending-verify__plate">{r.vehicle_number}</span>
+                    <span className="rm-pending-verify__meta">
+                      {[r.model, r.location_name].filter(Boolean).join(' · ') || '—'}
+                      {r.photo_count ? ` · ${r.photo_count} photo${r.photo_count === 1 ? '' : 's'}` : ''}
+                      {r.submitter_name ? ` · ${r.submitter_name}` : ''}
+                      {r.submitted_at ? ` · ${formatAppDateTime(r.submitted_at)}` : ''}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 function statusClass(status: string) {
@@ -20,6 +130,33 @@ function statusClass(status: string) {
   if (s.includes('inactive') || s.includes('retire') || s.includes('delete')) return 'rm-status--inactive'
   if (s.includes('active') || s.includes('ready') || s.includes('rtd') || s.includes('stock')) return 'rm-status--active'
   return ''
+}
+
+function SortHead({
+  label,
+  col,
+  sort,
+  order,
+  onSort,
+}: {
+  label: string
+  col: string
+  sort: string
+  order: 'asc' | 'desc'
+  onSort: (col: string) => void
+}) {
+  const active = sort === col
+  return (
+    <button
+      type="button"
+      className={`rm-fleet-sort${active ? ' is-active' : ''}`}
+      onClick={() => onSort(col)}
+      title={`Sort by ${label}`}
+    >
+      {label}
+      <i className={`fas fa-sort${active ? (order === 'asc' ? '-up' : '-down') : ''}`} aria-hidden />
+    </button>
+  )
 }
 
 export default function VehiclesList() {
@@ -33,6 +170,9 @@ export default function VehiclesList() {
   const [modelId, setModelId] = useState('')
   const [category, setCategory] = useState('')
   const [fuelType, setFuelType] = useState('')
+  const [verified, setVerified] = useState('')
+  const [sort, setSort] = useState('vehicle_number')
+  const [order, setOrder] = useState<'asc' | 'desc'>('asc')
   const [page, setPage] = useState(0)
   const [rows, setRows] = useState<Vehicle[]>([])
   const [total, setTotal] = useState(0)
@@ -43,6 +183,7 @@ export default function VehiclesList() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [drill, setDrill] = useState<Drill>('none')
+  const [pendingRefresh, setPendingRefresh] = useState(0)
 
   useEffect(() => {
     setSearchInput(qParam)
@@ -53,6 +194,12 @@ export default function VehiclesList() {
     const t = setTimeout(() => setSearch(searchInput.trim()), 300)
     return () => clearTimeout(t)
   }, [searchInput])
+
+  useEffect(() => {
+    const bump = () => setPendingRefresh((k) => k + 1)
+    window.addEventListener('focus', bump)
+    return () => window.removeEventListener('focus', bump)
+  }, [])
 
   useEffect(() => {
     vehiclesApi.facets().then(setKpiFacets).catch(() => undefined)
@@ -76,7 +223,7 @@ export default function VehiclesList() {
 
   useEffect(() => {
     setPage(0)
-  }, [search, location, cityId, model, modelId, category, fuelType])
+  }, [search, location, cityId, model, modelId, category, fuelType, verified, sort, order])
 
   useEffect(() => {
     let cancelled = false
@@ -91,10 +238,11 @@ export default function VehiclesList() {
         model_id: modelId || undefined,
         category: category || undefined,
         fuel_type: fuelType || undefined,
+        verified: verified || undefined,
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
-        sort: 'vehicle_number',
-        order: 'asc',
+        sort,
+        order,
       })
       .then((data) => {
         if (cancelled) return
@@ -109,9 +257,17 @@ export default function VehiclesList() {
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [search, location, cityId, model, modelId, category, fuelType, page])
+  }, [search, location, cityId, model, modelId, category, fuelType, verified, sort, order, page])
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  const toggleSort = (col: string) => {
+    if (sort === col) setOrder((o) => (o === 'asc' ? 'desc' : 'asc'))
+    else {
+      setSort(col)
+      setOrder(col === 'verification_status' ? 'desc' : 'asc')
+    }
+  }
 
   const fleetTotal = useMemo(() => {
     if (!kpiFacets) return null
@@ -129,7 +285,7 @@ export default function VehiclesList() {
     ? `${((evCount / fleetTotal) * 100).toFixed(1)}% of total fleet`
     : 'Electric vehicles in fleet'
 
-  const hasActiveFilter = Boolean(cityId || location || modelId || model || category || fuelType)
+  const hasActiveFilter = Boolean(cityId || location || modelId || model || category || fuelType || verified)
 
   const clearFilters = () => {
     setCityId('')
@@ -138,6 +294,9 @@ export default function VehiclesList() {
     setModel('')
     setCategory('')
     setFuelType('')
+    setVerified('')
+    setSort('vehicle_number')
+    setOrder('asc')
     setDrill('none')
   }
 
@@ -207,10 +366,15 @@ export default function VehiclesList() {
     fuelType ? `${fuelType} fleet` : null,
     activeModelLabel ? `model ${activeModelLabel}` : null,
     activeCityLabel ? `in ${activeCityLabel}` : null,
+    verified === '1' ? 'Verified' : verified === '0' ? 'Not Verified' : null,
   ].filter(Boolean).join(' · ')
 
   return (
-    <AppLayout title="Vehicles" subtitle="Manage and monitor your Refex Mobility fleet">
+    <AppLayout
+      title="Vehicles"
+      subtitle="Manage and monitor your Refex Mobility fleet"
+      headerAside={<PendingVerifyAlert refreshKey={pendingRefresh} />}
+    >
       <div className="rm-page">
         <div className="rm-kpi-row">
           <button
@@ -344,6 +508,8 @@ export default function VehiclesList() {
             {activeModelLabel ? <span className="rm-pill">Model · {activeModelLabel}</span> : null}
             {activeCityLabel ? <span className="rm-pill">City · {activeCityLabel}</span> : null}
             {category ? <span className="rm-pill">Category · {category}</span> : null}
+            {verified === '1' ? <span className="rm-pill">Verified</span> : null}
+            {verified === '0' ? <span className="rm-pill">Not Verified</span> : null}
             <button type="button" className="btn btn-default btn-xs" onClick={clearFilters}>Reset</button>
             <em style={{ fontStyle: 'normal', marginLeft: 'auto' }}>
               {fmt(total)} matches{filterSummary ? ` · ${filterSummary}` : ''}
@@ -444,17 +610,28 @@ export default function VehiclesList() {
                 })),
               ]}
             />
+            <AppSelect
+              value={verified}
+              onChange={setVerified}
+              searchable={false}
+              placeholder="All verification"
+              options={[
+                { value: '', label: 'All verification' },
+                { value: '1', label: 'Verified' },
+                { value: '0', label: 'Not Verified' },
+              ]}
+            />
           </div>
 
           {error ? <div className="callout callout-danger" style={{ margin: 16 }}>{error}</div> : null}
 
           <div className="rm-fleet-head">
             <span />
-            <span>Vehicle</span>
-            <span>Location</span>
-            <span>Status</span>
+            <SortHead label="Vehicle" col="vehicle_number" sort={sort} order={order} onSort={toggleSort} />
+            <SortHead label="Location" col="location_name" sort={sort} order={order} onSort={toggleSort} />
+            <SortHead label="Status" col="status" sort={sort} order={order} onSort={toggleSort} />
             <span>Assigned</span>
-            <span>Photos</span>
+            <SortHead label="Verification" col="verification_status" sort={sort} order={order} onSort={toggleSort} />
             <span>Actions</span>
           </div>
 
@@ -483,7 +660,11 @@ export default function VehiclesList() {
                   <span className={`rm-status ${statusClass(v.status)}`}>{v.status || '—'}</span>
                 </div>
                 <div className="rm-fleet-meta">{v.assigned_name || 'Unassigned'}</div>
-                <div className="rm-fleet-meta">{v.captures_count ?? 0}</div>
+                <div>
+                  <span className={`rm-verify-badge ${v.form_verified ? 'rm-verify-badge--ok' : 'rm-verify-badge--no'}`}>
+                    {v.verification_status || (v.form_verified ? 'Verified' : 'Not Verified')}
+                  </span>
+                </div>
                 <div className="rm-fleet-actions" onClick={(e) => e.stopPropagation()}>
                   <Link
                     to={`/vehicles/${v.id}?tab=captures&capture=1`}

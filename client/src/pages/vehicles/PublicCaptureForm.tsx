@@ -16,6 +16,16 @@ type VehicleHit = {
   form_registered?: boolean
 }
 
+type EmployeeHit = {
+  id: number
+  employee_code: string
+  name: string
+  email?: string | null
+  mobile?: string | null
+  work_mobile?: string | null
+  text: string
+}
+
 type LocalPhoto = {
   id: string
   file: File
@@ -27,7 +37,7 @@ type LocalPhoto = {
 
 type FieldErrors = {
   vehicle?: string
-  name?: string
+  employee?: string
   email?: string
   phone?: string
   photos?: string
@@ -38,20 +48,6 @@ const MAX_PHOTOS = 20
 function formatSqlDate(d = new Date()) {
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-}
-
-function isValidEmail(v: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())
-}
-
-function isValidPhone(v: string) {
-  const digits = v.replace(/\D/g, '')
-  const local = digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : digits
-  return /^[6-9]\d{9}$/.test(local)
-}
-
-function isValidName(v: string) {
-  return /^[A-Za-z][A-Za-z .'-]{1,100}$/.test(v.trim())
 }
 
 function gpsIsFresh(pos: PrecisePosition | null | undefined, maxAgeMs = 120_000) {
@@ -70,6 +66,10 @@ function ReqLabel({ htmlFor, children }: { htmlFor?: string; children: string })
   )
 }
 
+function combinePhones(mobile?: string | null, workMobile?: string | null) {
+  return [mobile, workMobile].map((p) => String(p || '').trim()).filter(Boolean)
+}
+
 async function publicReverseGeocode(lat: number, lng: number) {
   try {
     const r = await fetch(`/api/v1/public/geo/reverse?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}`)
@@ -86,8 +86,10 @@ async function publicReverseGeocode(lat: number, lng: number) {
 
 export default function PublicCaptureForm() {
   const vehicleListId = useId()
+  const employeeListId = useId()
   const heldGpsRef = useRef<PrecisePosition | null>(null)
   const searchTimer = useRef<number | null>(null)
+  const empSearchTimer = useRef<number | null>(null)
   const photosRef = useRef<LocalPhoto[]>([])
 
   const [vehicleQuery, setVehicleQuery] = useState('')
@@ -96,9 +98,12 @@ export default function PublicCaptureForm() {
   const [vehicleBusy, setVehicleBusy] = useState(false)
   const [selected, setSelected] = useState<VehicleHit | null>(null)
 
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [phone, setPhone] = useState('')
+  const [employeeQuery, setEmployeeQuery] = useState('')
+  const [employeeHits, setEmployeeHits] = useState<EmployeeHit[]>([])
+  const [employeeOpen, setEmployeeOpen] = useState(false)
+  const [employeeBusy, setEmployeeBusy] = useState(false)
+  const [selectedEmployee, setSelectedEmployee] = useState<EmployeeHit | null>(null)
+
   const [photos, setPhotos] = useState<LocalPhoto[]>([])
 
   const [captureGps, setCaptureGps] = useState<PrecisePosition | null>(null)
@@ -110,6 +115,10 @@ export default function PublicCaptureForm() {
   const [error, setError] = useState('')
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [done, setDone] = useState<{ vehicle_number: string; photo_count: number } | null>(null)
+
+  const populatedEmail = String(selectedEmployee?.email || '').trim()
+  const populatedPhones = combinePhones(selectedEmployee?.mobile, selectedEmployee?.work_mobile)
+  const populatedName = String(selectedEmployee?.name || '').trim()
 
   useEffect(() => {
     photosRef.current = photos
@@ -136,8 +145,30 @@ export default function PublicCaptureForm() {
     }, 220)
   }, [])
 
+  const searchEmployees = useCallback((q: string) => {
+    if (empSearchTimer.current) window.clearTimeout(empSearchTimer.current)
+    const term = q.trim()
+    if (term.length < 1) {
+      setEmployeeHits([])
+      setEmployeeBusy(false)
+      return
+    }
+    setEmployeeBusy(true)
+    empSearchTimer.current = window.setTimeout(() => {
+      fetch(`/api/v1/public/employees/search?q=${encodeURIComponent(term)}`)
+        .then(async (r) => {
+          const data = await r.json()
+          if (!r.ok) throw new Error((data.messages || []).join(', ') || 'Search failed')
+          setEmployeeHits(Array.isArray(data.rows) ? data.rows : [])
+        })
+        .catch(() => setEmployeeHits([]))
+        .finally(() => setEmployeeBusy(false))
+    }, 220)
+  }, [])
+
   useEffect(() => () => {
     if (searchTimer.current) window.clearTimeout(searchTimer.current)
+    if (empSearchTimer.current) window.clearTimeout(empSearchTimer.current)
     photosRef.current.forEach((p) => URL.revokeObjectURL(p.previewUrl))
   }, [])
 
@@ -252,12 +283,9 @@ export default function PublicCaptureForm() {
     const next: FieldErrors = {}
     if (!selected?.id) next.vehicle = 'Select a vehicle number from the list'
     else if (selected.form_registered) next.vehicle = 'This vehicle is already registered'
-    if (!name.trim()) next.name = 'Full name is required'
-    else if (!isValidName(name)) next.name = 'Enter a valid name (letters only)'
-    if (!email.trim()) next.email = 'Email is required'
-    else if (!isValidEmail(email)) next.email = 'Enter a valid email address'
-    if (!phone.trim()) next.phone = 'Phone number is required'
-    else if (!isValidPhone(phone)) next.phone = 'Enter a valid 10-digit mobile number'
+    if (!selectedEmployee?.id) next.employee = 'Select an employee ID from the list'
+    if (!populatedEmail) next.email = 'Selected employee has no email in HRMS'
+    if (populatedPhones.length < 1) next.phone = 'Selected employee has no mobile / work mobile in HRMS'
     if (photos.length < 1) next.photos = 'Take at least one photo'
     return next
   }
@@ -266,31 +294,29 @@ export default function PublicCaptureForm() {
     if (submitting || selected?.form_registered || gpsBusy || stamping) return false
     return Boolean(
       selected?.id
-      && isValidName(name)
-      && isValidEmail(email)
-      && isValidPhone(phone)
+      && selectedEmployee?.id
+      && populatedEmail
+      && populatedPhones.length >= 1
       && photos.length >= 1,
     )
-  }, [selected, name, email, phone, photos.length, submitting, gpsBusy, stamping])
+  }, [selected, selectedEmployee, populatedEmail, populatedPhones.length, photos.length, submitting, gpsBusy, stamping])
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     const errs = validate()
     setFieldErrors(errs)
     if (Object.keys(errs).length) {
-      setError(errs.vehicle || errs.name || errs.email || errs.phone || errs.photos || 'Please fix the highlighted fields')
+      setError(errs.vehicle || errs.employee || errs.email || errs.phone || errs.photos || 'Please fix the highlighted fields')
       return
     }
-    if (!selected) return
+    if (!selected || !selectedEmployee) return
 
     setSubmitting(true)
     setError('')
     try {
       const fd = new FormData()
       fd.append('vehicle_id', String(selected.id))
-      fd.append('name', name.trim())
-      fd.append('email', email.trim())
-      fd.append('phone', phone.trim())
+      fd.append('employee_id', String(selectedEmployee.id))
       fd.append('captured_at', formatSqlDate(heldGpsRef.current?.capturedAt || new Date()))
       const lat = photos.find((p) => p.latitude != null)?.latitude ?? heldGpsRef.current?.latitude
       const lng = photos.find((p) => p.longitude != null)?.longitude ?? heldGpsRef.current?.longitude
@@ -325,9 +351,9 @@ export default function PublicCaptureForm() {
     setSelected(null)
     setVehicleQuery('')
     setVehicleHits([])
-    setName('')
-    setEmail('')
-    setPhone('')
+    setSelectedEmployee(null)
+    setEmployeeQuery('')
+    setEmployeeHits([])
     setError('')
     setFieldErrors({})
     setWebcamOpen(false)
@@ -361,7 +387,7 @@ export default function PublicCaptureForm() {
           <form onSubmit={(e) => { void onSubmit(e) }} noValidate>
             <h1>Capture vehicle photos</h1>
             <p className="pcf-lead">
-              All fields marked <span className="pcf-req">*</span> are mandatory. One tap locks GPS and opens the camera.
+              All fields marked <span className="pcf-req">*</span> are mandatory. Pick vehicle + employee ID — email and phones auto-fill from HRMS.
             </p>
 
             {error ? <div className="pcf-error" role="alert">{error}</div> : null}
@@ -435,54 +461,110 @@ export default function PublicCaptureForm() {
               ) : null}
             </div>
 
+            <ReqLabel htmlFor="pcf-employee">Employee ID</ReqLabel>
+            <div className="pcf-vehicle">
+              <input
+                id="pcf-employee"
+                className={`pcf-input${fieldErrors.employee ? ' is-invalid' : ''}`}
+                role="combobox"
+                aria-expanded={employeeOpen}
+                aria-controls={employeeListId}
+                aria-autocomplete="list"
+                placeholder="Search employee ID…"
+                value={selectedEmployee ? selectedEmployee.employee_code : employeeQuery}
+                onChange={(e) => {
+                  setSelectedEmployee(null)
+                  setEmployeeQuery(e.target.value)
+                  setEmployeeOpen(true)
+                  setFieldErrors((fe) => ({ ...fe, employee: undefined, email: undefined, phone: undefined }))
+                  searchEmployees(e.target.value)
+                }}
+                onFocus={() => {
+                  setEmployeeOpen(true)
+                  if (!selectedEmployee && employeeQuery.trim()) searchEmployees(employeeQuery)
+                }}
+                onBlur={() => {
+                  window.setTimeout(() => setEmployeeOpen(false), 180)
+                }}
+                autoComplete="off"
+                required
+              />
+              {employeeBusy ? <span className="pcf-hint">Searching…</span> : null}
+              {fieldErrors.employee ? <span className="pcf-field-error">{fieldErrors.employee}</span> : null}
+              {employeeOpen && !selectedEmployee && (employeeHits.length > 0 || employeeQuery.trim()) ? (
+                <ul id={employeeListId} className="pcf-menu" role="listbox">
+                  {employeeHits.length === 0 ? (
+                    <li className="pcf-menu__empty">{employeeBusy ? 'Searching…' : 'No active employees match'}</li>
+                  ) : employeeHits.map((hit) => (
+                    <li key={hit.id}>
+                      <button
+                        type="button"
+                        role="option"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setSelectedEmployee(hit)
+                          setEmployeeQuery(hit.employee_code)
+                          setEmployeeOpen(false)
+                          setError('')
+                          setFieldErrors((fe) => ({ ...fe, employee: undefined, email: undefined, phone: undefined }))
+                        }}
+                      >
+                        <strong>{hit.employee_code}</strong>
+                        <span>{[hit.name, hit.email].filter(Boolean).join(' · ')}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+
             <ReqLabel htmlFor="pcf-name">Full name</ReqLabel>
             <input
               id="pcf-name"
-              className={`pcf-input${fieldErrors.name ? ' is-invalid' : ''}`}
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value)
-                setFieldErrors((fe) => ({ ...fe, name: undefined }))
-              }}
-              placeholder="Your name"
-              required
-              autoComplete="name"
+              className="pcf-input pcf-input--readonly"
+              value={populatedName}
+              readOnly
+              placeholder="Auto-filled from employee ID"
+              tabIndex={-1}
             />
-            {fieldErrors.name ? <span className="pcf-field-error">{fieldErrors.name}</span> : null}
 
             <ReqLabel htmlFor="pcf-email">Email</ReqLabel>
             <input
               id="pcf-email"
               type="email"
-              className={`pcf-input${fieldErrors.email ? ' is-invalid' : ''}`}
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value)
-                setFieldErrors((fe) => ({ ...fe, email: undefined }))
-              }}
-              placeholder="you@company.com"
-              required
-              autoComplete="email"
+              className={`pcf-input pcf-input--readonly${fieldErrors.email ? ' is-invalid' : ''}`}
+              value={populatedEmail}
+              readOnly
+              placeholder="Auto-filled from HRMS"
+              tabIndex={-1}
             />
             {fieldErrors.email ? <span className="pcf-field-error">{fieldErrors.email}</span> : null}
 
-            <ReqLabel htmlFor="pcf-phone">Phone number</ReqLabel>
+            <ReqLabel htmlFor="pcf-mobile">Mobile</ReqLabel>
             <input
-              id="pcf-phone"
+              id="pcf-mobile"
               type="tel"
-              className={`pcf-input${fieldErrors.phone ? ' is-invalid' : ''}`}
-              value={phone}
-              onChange={(e) => {
-                setPhone(e.target.value)
-                setFieldErrors((fe) => ({ ...fe, phone: undefined }))
-              }}
-              placeholder="10-digit mobile"
-              required
-              autoComplete="tel"
-              inputMode="numeric"
-              maxLength={13}
+              className={`pcf-input pcf-input--readonly${fieldErrors.phone && !selectedEmployee?.mobile ? ' is-invalid' : ''}`}
+              value={String(selectedEmployee?.mobile || '').trim()}
+              readOnly
+              placeholder="Auto-filled from HRMS"
+              tabIndex={-1}
+            />
+
+            <ReqLabel htmlFor="pcf-work-mobile">Work mobile</ReqLabel>
+            <input
+              id="pcf-work-mobile"
+              type="tel"
+              className="pcf-input pcf-input--readonly"
+              value={String(selectedEmployee?.work_mobile || '').trim()}
+              readOnly
+              placeholder="Auto-filled from HRMS (if available)"
+              tabIndex={-1}
             />
             {fieldErrors.phone ? <span className="pcf-field-error">{fieldErrors.phone}</span> : null}
+            {selectedEmployee && populatedPhones.length > 1 ? (
+              <span className="pcf-hint">Both Mobile and Work mobile will be saved with this submission.</span>
+            ) : null}
 
             <div className="pcf-photos-head">
               <ReqLabel>Photos</ReqLabel>

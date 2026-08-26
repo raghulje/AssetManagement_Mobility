@@ -17,7 +17,7 @@ const MODULE_LABELS: Record<string, string> = {
   vehicles: 'Vehicles (incl. assign / unassign)',
   drivers: 'Drivers',
   masters: 'Masters (cities / models)',
-  people: 'App users',
+  people: 'Employees & App users',
   reports: 'Reports / Audit / EOL',
   settings: 'Settings',
 }
@@ -230,7 +230,7 @@ export default function RolesPermissions() {
   }, [allUsers, memberFilter])
 
   return (
-    <AppLayout title="Roles & permissions" subtitle="Mobility access — Vehicles, Drivers, Masters, App users, Audit, Settings">
+    <AppLayout title="Roles & permissions" subtitle="Mobility access — Vehicles, Drivers, Masters, Employees, App users, Audit, Settings">
       {error ? <div className="callout callout-danger"><p>{error}</p></div> : null}
 
       <div className="roles-layout">

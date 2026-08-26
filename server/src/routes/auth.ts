@@ -154,7 +154,7 @@ router.post('/password/reset', async (req, res) => {
   if (!row) return fail(res, 'This reset link is invalid or has expired', 400)
 
   const ts = now()
-  await run(`UPDATE users SET password = ?, updated_at = ? WHERE id = ?`, [
+  await run(`UPDATE users SET password = ?, must_change_password = 0, updated_at = ? WHERE id = ?`, [
     bcrypt.hashSync(password, 10), ts, row.user_id,
   ])
   await run(`UPDATE password_reset_tokens SET used_at = ? WHERE id = ?`, [ts, row.id])

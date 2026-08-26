@@ -898,6 +898,43 @@ settingsRouter.post('/migrate-asset-tags', async (req, res) => {
   }
 })
 
+/**
+ * Provision App Users for active employees of Refex Green Mobility Limited
+ * with the App Managers role and default password Welcome@2026 (must change on first login).
+ */
+settingsRouter.post('/provision-rgml-app-managers', async (req, res) => {
+  try {
+    const { provisionRgmlAppManagers, RGML_COMPANY, DEFAULT_APP_MANAGER_PASSWORD } = await import(
+      '../services/provisionRgmlAppManagers.js'
+    )
+    const result = await provisionRgmlAppManagers({
+      company: req.body?.company ? String(req.body.company) : RGML_COMPANY,
+      password: req.body?.password ? String(req.body.password) : DEFAULT_APP_MANAGER_PASSWORD,
+    })
+    await logAction({
+      userId: req.user?.id,
+      actionType: 'provision_rgml_app_managers',
+      itemType: 'settings',
+      itemId: 1,
+      note: `Created ${result.created}, updated ${result.updated}, skipped ${result.skipped} of ${result.candidates}`,
+      meta: {
+        company: result.company,
+        created: result.created,
+        updated: result.updated,
+        skipped: result.skipped,
+        errors: result.errors.slice(0, 50),
+      },
+    })
+    return okMessage(
+      res,
+      `RGML App Managers — created ${result.created}, updated ${result.updated}, skipped ${result.skipped} (of ${result.candidates} active employees). Default password ${DEFAULT_APP_MANAGER_PASSWORD}; first login requires a new password.`,
+      result,
+    )
+  } catch (e) {
+    return fail(res, e instanceof Error ? e.message : 'Provisioning failed', 500)
+  }
+})
+
 /** Clear all vehicle QR tokens/URLs/images so Print QR remints against current PUBLIC_APP_URL. */
 settingsRouter.post('/reset-vehicle-qr', async (req, res) => {
   try {
@@ -1022,17 +1059,34 @@ accountRouter.put('/profile', async (req, res) => {
 })
 
 accountRouter.put('/password', async (req, res) => {
-  const { current_password, password } = req.body || {}
+  const { current_password, password, password_confirmation } = req.body || {}
   if (!password) return fail(res, 'password required')
-  const user = await get<{ password: string }>(`SELECT password FROM users WHERE id = ?`, [req.user!.id])
+  const confirm = password_confirmation != null ? String(password_confirmation) : String(password)
+  if (String(password).length < 8) return fail(res, 'Password must be at least 8 characters')
+  if (String(password) !== confirm) return fail(res, 'Passwords do not match')
+
+  const user = await get<{ password: string; must_change_password: number }>(`
+    SELECT password, must_change_password FROM users WHERE id = ? AND deleted_at IS NULL
+  `, [req.user!.id])
   if (!user) return fail(res, 'User not found', 404)
-  if (current_password && !bcrypt.compareSync(current_password, user.password)) {
+
+  const forced = Boolean(user.must_change_password)
+  if (forced) {
+    // First login: only new + confirm (no current password)
+  } else if (!current_password) {
+    return fail(res, 'Current password is required')
+  } else if (!bcrypt.compareSync(String(current_password), user.password)) {
     return fail(res, 'Current password incorrect')
   }
-  await run(`UPDATE users SET password = ?, updated_at = ? WHERE id = ?`, [
-    bcrypt.hashSync(password, 10), now(), req.user!.id,
-  ])
-  return okMessage(res, 'Password updated')
+
+  if (bcrypt.compareSync(String(password), user.password)) {
+    return fail(res, 'New password must be different from your current password')
+  }
+
+  await run(`
+    UPDATE users SET password = ?, must_change_password = 0, updated_at = ? WHERE id = ?
+  `, [bcrypt.hashSync(String(password), 10), now(), req.user!.id])
+  return okMessage(res, 'Password updated', { must_change_password: false })
 })
 
 export const requestsRouter = Router()

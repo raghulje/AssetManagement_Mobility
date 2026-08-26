@@ -148,6 +148,7 @@ export async function transformUser(id: number, opts?: { includeDeleted?: boolea
     phone: u.phone,
     notes: u.notes,
     activated: Boolean(u.activated),
+    must_change_password: Boolean(u.must_change_password),
     deleted: Boolean(u.deleted_at),
     company: nest(u.company_id as number, u.company_name as string),
     location: nest(u.location_id as number, u.location_name as string),

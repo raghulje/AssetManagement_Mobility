@@ -111,13 +111,14 @@ async function sendToMany(emails: string[], subject: string, html: string, text:
 }
 
 export type WorkflowNotifyInput = {
-  category: 'custody' | 'maintenance' | 'inventory' | 'crud'
+  category: 'custody' | 'maintenance' | 'inventory' | 'crud' | 'form_registration'
   event: string
   subject: string
   title: string
   intro: string
   fields: NotifyField[]
   ctaPath?: string
+  ctaLabel?: string
   itemType?: string
   itemId?: number
   /** Also notify this person (assignee) */
@@ -130,12 +131,15 @@ export function notifyWorkflow(input: WorkflowNotifyInput) {
   void (async () => {
     try {
       if (!(await isEmailCategoryEnabled(input.category))) return
+      const ctaUrl = input.ctaPath
+        ? `${appBase()}${input.ctaPath.startsWith('/') ? '' : '/'}${input.ctaPath}`
+        : appBase()
       const { html, text } = brandedEmail({
         title: input.title,
         intro: input.intro,
         fields: input.fields,
-        ctaLabel: 'View record',
-        ctaUrl: input.ctaPath ? `${appBase()}${input.ctaPath.startsWith('/') ? '' : '/'}${input.ctaPath}` : appBase(),
+        ctaLabel: input.ctaLabel || 'View record',
+        ctaUrl,
       })
 
       const ops = await resolveWorkflowRecipients()
@@ -146,8 +150,8 @@ export function notifyWorkflow(input: WorkflowNotifyInput) {
           title: input.title,
           intro: input.assigneeOnlyExtraNote || input.intro,
           fields: input.fields,
-          ctaLabel: 'View record',
-          ctaUrl: input.ctaPath ? `${appBase()}${input.ctaPath.startsWith('/') ? '' : '/'}${input.ctaPath}` : appBase(),
+          ctaLabel: input.ctaLabel || 'View record',
+          ctaUrl,
           footerNote: 'You received this because an asset or license was assigned to you.',
         })
         await sendToMany(

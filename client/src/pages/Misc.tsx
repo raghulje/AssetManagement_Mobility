@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import AppLayout from '../layout/AppLayout'
 import { Box, Field } from '../components/ui'
@@ -10,6 +10,16 @@ import { useToast } from '../components/Toast'
 import { AppSelect } from '../components/formControls'
 
 export { ImportPage } from './ImportPage'
+
+/** Only allow in-app relative paths (email deep links after login). */
+function safeAppNext(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  let value = raw
+  try { value = decodeURIComponent(raw) } catch { /* keep raw */ }
+  if (!value.startsWith('/') || value.startsWith('//')) return null
+  if (value.startsWith('/login') || value.startsWith('/forgot') || value.startsWith('/reset')) return null
+  return value
+}
 
 
 export function AccountAssets() {
@@ -224,6 +234,11 @@ export function AccountProfile() {
 
 export function AccountPassword() {
   const toast = useToast()
+  const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const nextAfter = safeAppNext(params.get('next'))
+  const { user, refreshUser, logout } = useAuth()
+  const forced = Boolean(user?.must_change_password)
   const [current, setCurrent] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -247,11 +262,19 @@ export function AccountPassword() {
     try {
       await api('/account/password', {
         method: 'PUT',
-        json: { current_password: current, password },
+        json: forced
+          ? { password, password_confirmation: confirm }
+          : { current_password: current, password, password_confirmation: confirm },
       })
       setCurrent('')
       setPassword('')
       setConfirm('')
+      await refreshUser()
+      if (forced) {
+        toast.success('Password set — opening your record')
+        navigate(nextAfter || '/', { replace: true })
+        return
+      }
       setOkMsg('Password updated')
       toast.success('Password updated')
     } catch (err) {
@@ -262,15 +285,43 @@ export function AccountPassword() {
   }
 
   return (
-    <AppLayout title="Change Password">
+    <AppLayout title={forced ? 'Set New Password' : 'Change Password'}>
+      {forced ? (
+        <div className="callout callout-warning">
+          <p>
+            You signed in with a temporary password. Choose a new password to continue.
+            You will not be able to use the app until this is done.
+          </p>
+        </div>
+      ) : null}
       {error ? <div className="callout callout-danger"><p>{error}</p></div> : null}
       {okMsg ? <div className="callout callout-success"><p>{okMsg}</p></div> : null}
-      <Box title="Password" type="primary">
+      <Box title={forced ? 'Create your password' : 'Password'} type="primary">
         <form className="form-horizontal" onSubmit={(e) => { void submit(e) }}>
-          <Field label="Current Password"><input type="password" className="form-control" value={current} onChange={(e) => setCurrent(e.target.value)} required /></Field>
-          <Field label="New Password"><input type="password" className="form-control" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
-          <Field label="Confirm"><input type="password" className="form-control" value={confirm} onChange={(e) => setConfirm(e.target.value)} required /></Field>
-          <button type="submit" className="btn btn-theme" disabled={busy}>{busy ? 'Updating…' : 'Update Password'}</button>
+          {!forced ? (
+            <Field label="Current Password">
+              <input type="password" className="form-control" value={current} onChange={(e) => setCurrent(e.target.value)} required autoComplete="current-password" />
+            </Field>
+          ) : null}
+          <Field label="New Password">
+            <input type="password" className="form-control" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="new-password" minLength={8} />
+          </Field>
+          <Field label="Confirm new password">
+            <input type="password" className="form-control" value={confirm} onChange={(e) => setConfirm(e.target.value)} required autoComplete="new-password" minLength={8} />
+          </Field>
+          <button type="submit" className="btn btn-theme" disabled={busy}>
+            {busy ? 'Saving…' : forced ? 'Set password & continue' : 'Update Password'}
+          </button>
+          {forced ? (
+            <button
+              type="button"
+              className="btn btn-default"
+              style={{ marginLeft: 8 }}
+              onClick={() => logout()}
+            >
+              Sign out
+            </button>
+          ) : null}
         </form>
       </Box>
     </AppLayout>
@@ -408,13 +459,22 @@ export function RequestableItems() {
 
 export function LoginPage() {
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const next = safeAppNext(params.get('next'))
   const { login } = useAuth()
 
   return (
     <InteractiveLoginPage
       onSubmit={async ({ email, password }) => {
-        await login(email, password)
-        navigate('/')
+        const u = await login(email, password)
+        if (u?.must_change_password) {
+          const dest = next
+            ? `/account/password?next=${encodeURIComponent(next)}`
+            : '/account/password'
+          navigate(dest, { replace: true })
+          return
+        }
+        navigate(next || '/', { replace: true })
       }}
     />
   )
@@ -433,6 +493,7 @@ export function SettingsGeneral() {
   const [busy, setBusy] = useState(false)
   const [qrBusy, setQrBusy] = useState(false)
   const [schemaMigrateBusy, setSchemaMigrateBusy] = useState(false)
+  const [provisionBusy, setProvisionBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saml, setSaml] = useState<{
     enabled?: boolean
@@ -595,7 +656,8 @@ export function SettingsGeneral() {
       <Box title="Database migrations" type="primary">
         <p className="help-block" style={{ marginTop: 0 }}>
           Applies pending SQL from <code>server/src/db/mysql</code> (vehicles, captures, masters, etc.).
-          Safe to re-run — already-applied versions are skipped.
+          Safe to re-run — already-applied versions are skipped. Run this on production after deploy
+          before other one-time tools below.
         </p>
         <button
           type="button"
@@ -625,6 +687,57 @@ export function SettingsGeneral() {
           }}
         >
           {schemaMigrateBusy ? 'Migrating…' : 'Run pending DB migrations'}
+        </button>
+      </Box>
+
+      <Box title="Provision RGML App Managers" type="primary">
+        <p className="help-block" style={{ marginTop: 0 }}>
+          Finds active HRMS employees under <strong>Refex Green Mobility Limited</strong>, creates App Users
+          with the <strong>App Managers</strong> role, and sets temporary password{' '}
+          <code>Welcome@2026</code>. Existing matches (by employee ID or email) get the role updated;
+          new users must set a new password on first login.
+        </p>
+        <p className="help-block">
+          Run <strong>DB migrations</strong> first (adds <code>must_change_password</code>), and sync
+          employees from HRMS if the directory is empty. Safe to re-run — skips duplicates.
+        </p>
+        <button
+          type="button"
+          className="btn btn-theme"
+          disabled={provisionBusy || !canEdit}
+          onClick={() => {
+            if (!window.confirm(
+              'Create / update App Managers for active Refex Green Mobility Limited employees?\n\nDefault password: Welcome@2026\nFirst login will force a password change.',
+            )) return
+            setProvisionBusy(true)
+            setError('')
+            setOkMsg('')
+            api<{
+              messages?: string[]
+              payload?: {
+                created?: number
+                updated?: number
+                skipped?: number
+                candidates?: number
+                errors?: { employee_code: string; reason: string }[]
+              }
+            }>('/settings/provision-rgml-app-managers', { method: 'POST' })
+              .then((res) => {
+                const msg = Array.isArray(res.messages) ? res.messages.join(' ') : 'Provisioning complete'
+                const errs = res.payload?.errors?.length
+                  ? ` (${res.payload.errors.length} issue(s) — check audit / response)`
+                  : ''
+                setOkMsg(msg + errs)
+                toast.success(msg)
+              })
+              .catch((err: Error) => {
+                setError(err.message)
+                toast.error(err.message)
+              })
+              .finally(() => setProvisionBusy(false))
+          }}
+        >
+          {provisionBusy ? 'Provisioning…' : 'Provision RGML → App Managers'}
         </button>
       </Box>
 

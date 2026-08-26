@@ -159,6 +159,9 @@ export type Vehicle = {
   captures_count: number
   maintenances_count?: number
   last_captured_at?: string | null
+  /** Public form registration verified */
+  form_verified?: boolean
+  verification_status?: 'Verified' | 'Not Verified' | string
   created_at?: string
   updated_at?: string
 }
@@ -173,6 +176,16 @@ export type VehicleCapture = {
   submitter_email?: string | null
   submitter_phone?: string | null
   source?: string | null
+  verified_at?: string | null
+  verified_by?: number | null
+  verified_by_name?: string | null
+  verified_summary?: string | null
+  verification_log?: Array<{
+    verified_at?: string
+    verified_by?: number
+    verified_by_name?: string
+    summary?: string
+  }>
   storage_path: string
   url: string
   original_name?: string | null
@@ -233,6 +246,18 @@ export const vehiclesApi = {
   facets: (params: Record<string, string | number | undefined | null> = {}) =>
     api<VehicleFacets>(`/vehicles/facets${qs(params)}`),
   eolDue: (search?: string) => api<ApiList<Record<string, unknown>>>(`/vehicles/eol/due${qs({ search })}`),
+  pendingVerification: (limit = 100) =>
+    api<ApiList<{
+      id: number
+      vehicle_number: string
+      model?: string | null
+      location_name?: string | null
+      session_id: number
+      submitter_name?: string | null
+      submitter_email?: string | null
+      photo_count: number
+      submitted_at?: string | null
+    }>>(`/vehicles/pending-verification${qs({ limit })}`),
   get: (id: number | string) => api<Vehicle>(`/vehicles/${id}`),
   create: (body: Record<string, unknown>) =>
     api<{ payload: Vehicle }>('/vehicles', { method: 'POST', json: body }),
@@ -280,6 +305,22 @@ export const vehiclesApi = {
   },
   deleteCapture: (id: number | string, cid: number | string) =>
     api(`/vehicles/${id}/captures/${cid}`, { method: 'DELETE' }),
+  verifyCaptureSession: (id: number | string, sessionId: number | string, summary: string) =>
+    api<{
+      status: string
+      messages?: string[]
+      payload?: {
+        session_id: number
+        verified_at: string
+        verified_by: number
+        verified_by_name: string
+        verified_summary: string
+        verification_log: VehicleCapture['verification_log']
+      }
+    }>(`/vehicles/${id}/capture-sessions/${sessionId}/verify`, {
+      method: 'POST',
+      json: { summary },
+    }),
   reverseGeocode: (lat: number, lng: number) =>
     api<{
       address?: string | null

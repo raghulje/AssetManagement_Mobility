@@ -13,6 +13,7 @@ function qs(params: Record<string, string | number | boolean | undefined> = {}) 
 export const employeesApi = {
   list: (params: Record<string, string | number | boolean | undefined> = {}) =>
     api<ApiList<Record<string, unknown>>>(`/employees${qs(params)}`),
+  stats: () => api<{ total: number; active: number; inactive: number }>('/employees/stats'),
   get: (id: number | string) => api<Record<string, unknown>>(`/employees/${id}`),
   create: (body: unknown) =>
     api<{ status: string; messages: string[]; payload: Record<string, unknown> }>('/employees', {

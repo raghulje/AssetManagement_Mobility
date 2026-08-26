@@ -50,6 +50,12 @@ async function loadVehicle(id: number | string) {
       (SELECT COUNT(*) FROM vehicle_maintenances m
         WHERE m.vehicle_id = v.id AND m.deleted_at IS NULL) AS maintenances_count,
       CASE
+        WHEN EXISTS (
+          SELECT 1 FROM vehicle_capture_sessions s
+          WHERE s.vehicle_id = v.id AND s.source = 'public_form' AND s.verified_at IS NOT NULL
+        ) THEN 1 ELSE 0
+      END AS form_verified,
+      CASE
         WHEN v.assigned_type = 'user' THEN (
           SELECT TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,'')))
           FROM users u WHERE u.id = v.assigned_to)
@@ -106,6 +112,8 @@ function mapVehicle(row: Record<string, unknown>) {
     captures_count: Number(row.captures_count || 0),
     maintenances_count: Number(row.maintenances_count || 0),
     last_captured_at: row.last_captured_at || null,
+    form_verified: Boolean(Number(row.form_verified || 0)),
+    verification_status: Number(row.form_verified || 0) ? 'Verified' : 'Not Verified',
     company_name: row.company_name || null,
     legal_entity_name: row.legal_entity_name || null,
     created_at: row.created_at,
@@ -180,6 +188,15 @@ function mapCapture(row: Record<string, unknown>) {
   const url = storagePath.startsWith('public/')
     ? `/storage/${storagePath.replace(/^public\//, '')}`
     : `/storage/${storagePath}`
+
+  let verificationLog: unknown[] = []
+  const rawLog = row.verification_log
+  if (typeof rawLog === 'string' && rawLog.trim()) {
+    try { verificationLog = JSON.parse(rawLog) as unknown[] } catch { verificationLog = [] }
+  } else if (Array.isArray(rawLog)) {
+    verificationLog = rawLog
+  }
+
   return {
     id: Number(row.id),
     vehicle_id: Number(row.vehicle_id),
@@ -190,6 +207,11 @@ function mapCapture(row: Record<string, unknown>) {
     submitter_email: row.submitter_email || null,
     submitter_phone: row.submitter_phone || null,
     source: row.source || null,
+    verified_at: row.verified_at || null,
+    verified_by: row.verified_by != null ? Number(row.verified_by) : null,
+    verified_by_name: row.verified_by_name || null,
+    verified_summary: row.verified_summary || null,
+    verification_log: verificationLog,
     storage_path: storagePath,
     url,
     original_name: row.original_name,
@@ -288,6 +310,67 @@ router.get('/eol/due', async (req, res) => {
   return okList(res, rows)
 })
 
+/**
+ * Public form registrations awaiting photo verification.
+ * Must stay before /:id.
+ */
+router.get('/pending-verification', async (req, res) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500)
+  try {
+    const rows = await all<{
+      id: number
+      vehicle_number: string
+      model: string | null
+      location_name: string | null
+      session_id: number
+      submitter_name: string | null
+      submitter_email: string | null
+      photo_count: number
+      submitted_at: string | null
+    }>(`
+      SELECT
+        v.id,
+        v.vehicle_number,
+        v.model,
+        v.location_name,
+        s.id AS session_id,
+        s.submitter_name,
+        s.submitter_email,
+        s.created_at AS submitted_at,
+        (SELECT COUNT(*) FROM vehicle_captures c
+          WHERE c.session_id = s.id AND c.deleted_at IS NULL) AS photo_count
+      FROM vehicle_capture_sessions s
+      INNER JOIN vehicles v ON v.id = s.vehicle_id AND v.deleted_at IS NULL
+      WHERE s.source = 'public_form'
+        AND s.verified_at IS NULL
+      ORDER BY s.created_at DESC, s.id DESC
+      LIMIT ${limit}
+    `)
+    const totalRow = await get<{ c: number }>(`
+      SELECT COUNT(*) AS c
+      FROM vehicle_capture_sessions s
+      INNER JOIN vehicles v ON v.id = s.vehicle_id AND v.deleted_at IS NULL
+      WHERE s.source = 'public_form'
+        AND s.verified_at IS NULL
+    `)
+    return okList(res, rows.map((r) => ({
+      id: Number(r.id),
+      vehicle_number: r.vehicle_number,
+      model: r.model || null,
+      location_name: r.location_name || null,
+      session_id: Number(r.session_id),
+      submitter_name: r.submitter_name || null,
+      submitter_email: r.submitter_email || null,
+      photo_count: Number(r.photo_count || 0),
+      submitted_at: r.submitted_at || null,
+    })), Number(totalRow?.c || rows.length))
+  } catch (e) {
+    // Columns may be missing before migrations
+    console.warn('[vehicles/pending-verification]', e)
+    return okList(res, [], 0)
+  }
+})
+
 router.get('/selectlist', async (_req, res) => {
   const rows = await all<{ id: number; vehicle_number: string; model: string }>(`
     SELECT id, vehicle_number, model FROM vehicles WHERE deleted_at IS NULL ORDER BY vehicle_number LIMIT 5000
@@ -308,6 +391,7 @@ router.get('/', async (req, res) => {
   const fuelType = String(req.query.fuel_type || '').trim()
   const status = String(req.query.status || '').trim()
   const assigned = String(req.query.assigned || '').trim()
+  const verified = String(req.query.verified || req.query.verification_status || '').trim().toLowerCase()
   const sort = String(req.query.sort || 'vehicle_number')
   const order = String(req.query.order || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC'
   const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 200)
@@ -315,8 +399,16 @@ router.get('/', async (req, res) => {
 
   const allowedSort = new Set([
     'id', 'vehicle_number', 'model', 'location_name', 'category', 'fuel_type', 'status', 'created_at', 'purchase_date',
+    'verification_status', 'form_verified',
   ])
   const sortCol = allowedSort.has(sort) ? sort : 'vehicle_number'
+
+  const formVerifiedExpr = `CASE
+    WHEN EXISTS (
+      SELECT 1 FROM vehicle_capture_sessions s
+      WHERE s.vehicle_id = v.id AND s.source = 'public_form' AND s.verified_at IS NOT NULL
+    ) THEN 1 ELSE 0
+  END`
 
   const where: string[] = ['v.deleted_at IS NULL']
   const params: unknown[] = []
@@ -335,12 +427,29 @@ router.get('/', async (req, res) => {
   if (status) { where.push('v.status = ?'); params.push(status) }
   if (assigned === '1' || assigned === 'yes') where.push('v.assigned_to IS NOT NULL')
   if (assigned === '0' || assigned === 'no') where.push('v.assigned_to IS NULL')
+  if (verified === '1' || verified === 'true' || verified === 'verified' || verified === 'yes') {
+    where.push(`EXISTS (
+      SELECT 1 FROM vehicle_capture_sessions s
+      WHERE s.vehicle_id = v.id AND s.source = 'public_form' AND s.verified_at IS NOT NULL
+    )`)
+  }
+  if (verified === '0' || verified === 'false' || verified === 'not_verified' || verified === 'no' || verified === 'unverified') {
+    where.push(`NOT EXISTS (
+      SELECT 1 FROM vehicle_capture_sessions s
+      WHERE s.vehicle_id = v.id AND s.source = 'public_form' AND s.verified_at IS NOT NULL
+    )`)
+  }
+
+  const orderBy = (sortCol === 'verification_status' || sortCol === 'form_verified')
+    ? `form_verified ${order}, v.vehicle_number ASC`
+    : `v.${sortCol} ${order}`
 
   const sql = `
     SELECT v.*,
       (SELECT COUNT(*) FROM vehicle_captures c WHERE c.vehicle_id = v.id AND c.deleted_at IS NULL) AS captures_count,
       (SELECT MAX(c.captured_at) FROM vehicle_captures c WHERE c.vehicle_id = v.id AND c.deleted_at IS NULL) AS last_captured_at,
       (SELECT COUNT(*) FROM vehicle_maintenances m WHERE m.vehicle_id = v.id AND m.deleted_at IS NULL) AS maintenances_count,
+      (${formVerifiedExpr}) AS form_verified,
       CASE
         WHEN v.assigned_type = 'user' THEN (
           SELECT TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))) FROM users u WHERE u.id = v.assigned_to)
@@ -354,7 +463,7 @@ router.get('/', async (req, res) => {
       END AS assigned_name
     FROM vehicles v
     WHERE ${where.join(' AND ')}
-    ORDER BY v.${sortCol} ${order}
+    ORDER BY ${orderBy}
   `
   const { rows, total } = await paginate(sql, params, limit, offset)
   return okList(res, rows.map((r) => mapVehicle(r as Record<string, unknown>)), total)
@@ -856,14 +965,17 @@ router.get('/:id/captures', async (req, res) => {
   const rows = await all<Record<string, unknown>>(`
     SELECT c.*,
       TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))) AS captured_by_name,
-      s.submitter_name, s.submitter_email, s.submitter_phone, s.source
+      s.submitter_name, s.submitter_email, s.submitter_phone, s.source,
+      s.verified_at, s.verified_by, s.verified_summary, s.verification_log,
+      TRIM(CONCAT(COALESCE(vu.first_name,''),' ',COALESCE(vu.last_name,''))) AS verified_by_name
     FROM vehicle_captures c
     LEFT JOIN users u ON u.id = c.captured_by
     LEFT JOIN vehicle_capture_sessions s ON s.id = c.session_id
+    LEFT JOIN users vu ON vu.id = s.verified_by
     WHERE c.vehicle_id = ? AND c.deleted_at IS NULL
     ORDER BY c.captured_at DESC, c.id DESC
   `, [req.params.id]).catch(async () => {
-    // Fallback before public-form columns exist
+    // Fallback before public-form / verification columns exist
     return all<Record<string, unknown>>(`
       SELECT c.*,
         TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))) AS captured_by_name
@@ -874,6 +986,96 @@ router.get('/:id/captures', async (req, res) => {
     `, [req.params.id])
   })
   return okList(res, rows.map(mapCapture))
+})
+
+/** Mark a public form registration session as verified (photos reviewed). */
+router.post('/:id/capture-sessions/:sessionId/verify', async (req, res) => {
+  const vehicleId = Number(req.params.id)
+  const sessionId = Number(req.params.sessionId)
+  const summary = String(req.body?.summary || req.body?.verified_summary || '').trim()
+  if (!Number.isFinite(vehicleId) || !Number.isFinite(sessionId)) return fail(res, 'Invalid ids')
+  if (!summary) return fail(res, 'Verification summary is required')
+  if (summary.length > 2000) return fail(res, 'Summary is too long (max 2000 characters)')
+
+  // Soft-add columns if migration not applied yet
+  try {
+    const cols = await all<{ COLUMN_NAME: string }>(`
+      SELECT COLUMN_NAME FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'vehicle_capture_sessions'
+        AND COLUMN_NAME IN ('verified_at','verified_by','verified_summary','verification_log')
+    `)
+    const have = new Set(cols.map((c) => c.COLUMN_NAME))
+    const alters: string[] = []
+    if (!have.has('verified_at')) alters.push('ADD COLUMN `verified_at` DATETIME NULL')
+    if (!have.has('verified_by')) alters.push('ADD COLUMN `verified_by` INT UNSIGNED NULL')
+    if (!have.has('verified_summary')) alters.push('ADD COLUMN `verified_summary` TEXT NULL')
+    if (!have.has('verification_log')) alters.push('ADD COLUMN `verification_log` JSON NULL')
+    if (alters.length) await run(`ALTER TABLE vehicle_capture_sessions ${alters.join(', ')}`)
+  } catch {
+    // non-fatal
+  }
+
+  const row = await get<Record<string, unknown>>(`
+    SELECT * FROM vehicle_capture_sessions WHERE id = ? AND vehicle_id = ?
+  `, [sessionId, vehicleId])
+  if (!row) return fail(res, 'Capture session not found', 404)
+  if (String(row.source || '') !== 'public_form') {
+    return fail(res, 'Only public form registrations can be verified this way')
+  }
+
+  const verifier = await get<{ id: number; first_name: string; last_name: string; username: string }>(`
+    SELECT id, first_name, last_name, username FROM users WHERE id = ? AND deleted_at IS NULL
+  `, [req.user!.id])
+  const byName = verifier
+    ? (`${verifier.first_name || ''} ${verifier.last_name || ''}`.trim() || verifier.username)
+    : 'User'
+
+  const ts = now()
+  let prevLog: unknown[] = []
+  const rawLog = row.verification_log
+  if (typeof rawLog === 'string' && rawLog.trim()) {
+    try { prevLog = JSON.parse(rawLog) as unknown[] } catch { prevLog = [] }
+  } else if (Array.isArray(rawLog)) {
+    prevLog = rawLog
+  }
+
+  const entry = {
+    verified_at: ts,
+    verified_by: req.user!.id,
+    verified_by_name: byName,
+    summary,
+  }
+  const nextLog = [...prevLog, entry]
+
+  await run(`
+    UPDATE vehicle_capture_sessions
+    SET verified_at = ?, verified_by = ?, verified_summary = ?, verification_log = ?, updated_at = ?
+    WHERE id = ?
+  `, [ts, req.user!.id, summary, JSON.stringify(nextLog), ts, sessionId])
+
+  await logAction({
+    userId: req.user!.id,
+    actionType: 'verified',
+    itemType: 'vehicle',
+    itemId: vehicleId,
+    note: summary,
+    meta: {
+      session_id: sessionId,
+      verified_at: ts,
+      verified_by: req.user!.id,
+      verified_by_name: byName,
+      summary,
+    },
+  })
+
+  return okMessage(res, 'Registration verified', {
+    session_id: sessionId,
+    verified_at: ts,
+    verified_by: req.user!.id,
+    verified_by_name: byName,
+    verified_summary: summary,
+    verification_log: nextLog,
+  })
 })
 
 router.post('/:id/capture-sessions', async (req, res) => {

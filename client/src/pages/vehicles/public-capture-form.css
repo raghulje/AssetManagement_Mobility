@@ -118,6 +118,12 @@
   box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.18);
 }
 
+.pcf-input--readonly {
+  background: #f8fafc;
+  color: #334155;
+  cursor: default;
+}
+
 .pcf-field-error {
   display: block;
   margin-top: 5px;

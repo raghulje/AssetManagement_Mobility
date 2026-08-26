@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './api/AuthContext'
 import { ToastProvider } from './components/Toast'
 import type { ReactNode } from 'react'
@@ -17,13 +17,30 @@ import PublicCaptureForm from './pages/vehicles/PublicCaptureForm'
 import VehicleEolDue from './pages/vehicles/VehicleEolDue'
 import VehicleMastersPage from './pages/vehicles/VehicleMastersPage'
 import { UsersList, UserDetail, UserForm } from './pages/users/Users'
+import { EmployeesList, EmployeeDetail, EmployeeForm, EmployeeImport } from './pages/employees/Employees'
 import { DriversPage, DriverDetailPage } from './pages/drivers/Drivers'
 import AuditPage from './pages/AuditPage'
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
+  const location = useLocation()
   if (loading) return <div className="suite-page"><p style={{ padding: 40, textAlign: 'center' }}>Loading…</p></div>
-  if (!user) return <Navigate to="/login" replace />
+  if (!user) {
+    const next = encodeURIComponent(`${location.pathname}${location.search}`)
+    return <Navigate to={`/login?next=${next}`} replace />
+  }
+  return children
+}
+
+/** Block app access until first-login password change completes. */
+function RequirePasswordReady({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth()
+  const location = useLocation()
+  if (loading) return <div className="suite-page"><p style={{ padding: 40, textAlign: 'center' }}>Loading…</p></div>
+  if (user?.must_change_password && location.pathname !== '/account/password') {
+    const next = encodeURIComponent(`${location.pathname}${location.search}`)
+    return <Navigate to={`/account/password?next=${next}`} replace />
+  }
   return children
 }
 
@@ -59,7 +76,7 @@ function HomeRedirect() {
   if (can('vehicles.view')) return <Navigate to="/vehicles" replace />
   if (can('drivers.view')) return <Navigate to="/drivers" replace />
   if (can('masters.view')) return <Navigate to="/masters" replace />
-  if (can('people.view')) return <Navigate to="/users" replace />
+  if (can('people.view')) return <Navigate to="/employees" replace />
   if (can('reports.view')) return <Navigate to="/audit" replace />
   return <Navigate to="/account/profile" replace />
 }
@@ -78,6 +95,7 @@ export default function App() {
             <Route path="/capture" element={<PublicCaptureForm />} />
             <Route path="/*" element={
               <RequireAuth>
+                <RequirePasswordReady>
                 <Routes>
                   <Route path="/" element={<HomeRedirect />} />
                   <Route path="/vehicles" element={<RequirePerm permission="vehicles.view"><VehiclesList /></RequirePerm>} />
@@ -89,6 +107,11 @@ export default function App() {
                   <Route path="/drivers" element={<RequirePerm permission="drivers.view"><DriversPage /></RequirePerm>} />
                   <Route path="/drivers/:id" element={<RequirePerm permission="drivers.view"><DriverDetailPage /></RequirePerm>} />
                   <Route path="/audit" element={<RequirePerm permission="reports.view"><AuditPage /></RequirePerm>} />
+                  <Route path="/employees" element={<RequirePerm permission="people.view"><EmployeesList /></RequirePerm>} />
+                  <Route path="/employees/create" element={<RequirePerm permission="people.create"><EmployeeForm /></RequirePerm>} />
+                  <Route path="/employees/import" element={<RequirePerm permission="people.create"><EmployeeImport /></RequirePerm>} />
+                  <Route path="/employees/:id/edit" element={<RequirePerm permission="people.edit"><EmployeeForm /></RequirePerm>} />
+                  <Route path="/employees/:id" element={<RequirePerm permission="people.view"><EmployeeDetail /></RequirePerm>} />
                   <Route path="/users" element={<RequirePerm permission="people.view"><UsersList /></RequirePerm>} />
                   <Route path="/users/create" element={<RequirePerm permission="people.create"><UserForm /></RequirePerm>} />
                   <Route path="/users/:id/edit" element={<RequirePerm permission="people.edit"><UserForm /></RequirePerm>} />
@@ -101,6 +124,7 @@ export default function App() {
                   <Route path="/settings/notifications" element={<RequireAdmin><NotificationsSettings /></RequireAdmin>} />
                   <Route path="*" element={<HomeRedirect />} />
                 </Routes>
+                </RequirePasswordReady>
               </RequireAuth>
             }
             />
