@@ -494,6 +494,7 @@ export function SettingsGeneral() {
   const [qrBusy, setQrBusy] = useState(false)
   const [schemaMigrateBusy, setSchemaMigrateBusy] = useState(false)
   const [provisionBusy, setProvisionBusy] = useState(false)
+  const [verifierBusy, setVerifierBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saml, setSaml] = useState<{
     enabled?: boolean
@@ -742,6 +743,59 @@ export function SettingsGeneral() {
           }}
         >
           {provisionBusy ? 'Provisioning…' : 'Provision all active employees → App Managers'}
+        </button>
+      </Box>
+
+      <Box title="Provision Verifiers" type="primary">
+        <p className="help-block" style={{ marginTop: 0 }}>
+          Maps the default verifier emails to the <strong>Verifiers</strong> role (creates App Users if
+          missing). Existing App Managers keep that role and also get Verifiers. Temporary password{' '}
+          <code>Welcome@2026</code> for new accounts (must change on first login).
+        </p>
+        <p className="help-block" style={{ fontSize: '0.85rem' }}>
+          akash.c@refex.co.in · rohan.garg@refex.co.in · meet.g@refex.co.in · sasi.a@refex.co.in ·
+          pasupathinath.r@refex.co.in · anirudh.arun@refex.co.in
+        </p>
+        <button
+          type="button"
+          className="btn btn-theme"
+          disabled={verifierBusy || !canEdit}
+          onClick={() => {
+            if (!window.confirm(
+              'Map default verifier emails to the Verifiers role?\n\nNew users password: Welcome@2026',
+            )) return
+            setVerifierBusy(true)
+            setError('')
+            setOkMsg('')
+            api<{
+              messages?: string[]
+              payload?: {
+                created?: number
+                updated?: number
+                skipped?: number
+                candidates?: number
+                errors?: { email: string; reason: string }[]
+              }
+            }>('/settings/provision-verifiers', {
+              method: 'POST',
+              json: {},
+            })
+              .then((res) => {
+                const msg = Array.isArray(res.messages) ? res.messages.join(' ') : 'Verifiers mapped'
+                const errs = res.payload?.errors?.length
+                  ? ` (${res.payload.errors.length} issue(s))`
+                  : ''
+                setOkMsg(msg + errs)
+                toast.success(msg)
+              })
+              .catch((err: Error) => {
+                setError(err.message)
+                toast.error(err.message)
+              })
+              .finally(() => setVerifierBusy(false))
+          }}
+        >
+          {verifierBusy ? 'Mapping…' : 'Map default emails → Verifiers'}
         </button>
       </Box>
 

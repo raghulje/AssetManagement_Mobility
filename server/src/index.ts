@@ -19,6 +19,13 @@ try {
 } catch (e) {
   console.warn('ensureDefaultRoles failed:', e instanceof Error ? e.message : e)
 }
+try {
+  const { ensureDefaultVerifiers } = await import('./services/provisionVerifiers.js')
+  await ensureDefaultVerifiers()
+  console.log('Default Verifiers mapped')
+} catch (e) {
+  console.warn('ensureDefaultVerifiers failed:', e instanceof Error ? e.message : e)
+}
 
 const app = createApp()
 

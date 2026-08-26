@@ -944,6 +944,46 @@ settingsRouter.post('/provision-rgml-app-managers', async (req, res) => {
   }
 })
 
+/**
+ * Provision / map Verifier App Users (default email list or body.emails).
+ * Keeps existing roles (e.g. App Managers) and adds Verifiers.
+ */
+settingsRouter.post('/provision-verifiers', async (req, res) => {
+  try {
+    const { provisionVerifiers } = await import('../services/provisionVerifiers.js')
+    const { DEFAULT_APP_MANAGER_PASSWORD } = await import('../services/provisionRgmlAppManagers.js')
+    const body = req.body || {}
+    const emails = Array.isArray(body.emails)
+      ? body.emails.map((e: unknown) => String(e || '').trim()).filter(Boolean)
+      : undefined
+    const result = await provisionVerifiers({
+      emails,
+      password: body.password ? String(body.password) : DEFAULT_APP_MANAGER_PASSWORD,
+    })
+    await logAction({
+      userId: req.user?.id,
+      actionType: 'provision_verifiers',
+      itemType: 'settings',
+      itemId: 1,
+      note: `Verifiers — created ${result.created}, updated ${result.updated}, skipped ${result.skipped} of ${result.candidates}`,
+      meta: {
+        created: result.created,
+        updated: result.updated,
+        skipped: result.skipped,
+        mapped: result.mapped,
+        errors: result.errors.slice(0, 50),
+      },
+    })
+    return okMessage(
+      res,
+      `Verifiers — created ${result.created}, updated ${result.updated}, skipped ${result.skipped} (of ${result.candidates}). New users: password ${DEFAULT_APP_MANAGER_PASSWORD}; first login requires a new password.`,
+      result,
+    )
+  } catch (e) {
+    return fail(res, e instanceof Error ? e.message : 'Verifier provisioning failed', 500)
+  }
+})
+
 /** Clear all vehicle QR tokens/URLs/images so Print QR remints against current PUBLIC_APP_URL. */
 settingsRouter.post('/reset-vehicle-qr', async (req, res) => {
   try {
