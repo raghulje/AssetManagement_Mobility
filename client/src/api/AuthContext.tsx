@@ -54,7 +54,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAdmin = isTruthy(permissions.superuser) || isTruthy(permissions.admin)
 
   const can = useCallback((permission: string) => {
-    if (isTruthy(permissions.superuser) || isTruthy(permissions.admin)) return true
+    if (isTruthy(permissions.superuser)) return true
+    // Form verify UI: Verifiers role only (Admin does not auto-bypass)
+    if (permission === 'vehicles.verify') {
+      return isTruthy(permissions[permission])
+    }
+    if (isTruthy(permissions.admin)) return true
     return isTruthy(permissions[permission])
   }, [permissions])
 

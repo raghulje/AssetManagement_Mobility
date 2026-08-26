@@ -152,7 +152,6 @@ export default function VehicleDetail() {
   const [verifySummary, setVerifySummary] = useState('')
   const [verifyBusy, setVerifyBusy] = useState(false)
   const [deregisterBusy, setDeregisterBusy] = useState(false)
-  const [deverifyBusy, setDeverifyBusy] = useState(false)
   const [captureGps, setCaptureGps] = useState<PrecisePosition | null>(null)
   const [gpsBusy, setGpsBusy] = useState(false)
   const [nativeCamArmed, setNativeCamArmed] = useState(false)
@@ -781,6 +780,7 @@ export default function VehicleDetail() {
   }
 
   const canEdit = can('vehicles.edit') || can('vehicles.create')
+  const canVerify = can('vehicles.verify')
   const canDelete = can('vehicles.delete') || can('vehicles.edit')
   const v = vehicle
 
@@ -853,35 +853,6 @@ export default function VehicleDetail() {
       toast.error(e instanceof Error ? e.message : 'Verify failed')
     } finally {
       setVerifyBusy(false)
-    }
-  }
-
-  async function deverifyForm(sessionId: number) {
-    if (!id) return
-    if (!window.confirm(
-      'Clear verification for this form registration?\n\nPhotos stay; status returns to pending review.',
-    )) return
-    setDeverifyBusy(true)
-    try {
-      const res = await vehiclesApi.deverifyCaptureSession(id, sessionId)
-      const payload = res.payload
-      setCaptures((list) => list.map((c) => {
-        if (c.session_id !== sessionId) return c
-        return {
-          ...c,
-          verified_at: null,
-          verified_by: null,
-          verified_by_name: null,
-          verified_summary: null,
-          verification_log: payload?.verification_log || c.verification_log,
-        }
-      }))
-      toast.success(Array.isArray(res.messages) ? res.messages.join(' ') : 'Verification cleared')
-      vehiclesApi.formRegistrationLogs(id).then((r) => setFormLogs(r.rows || [])).catch(() => undefined)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Deverify failed')
-    } finally {
-      setDeverifyBusy(false)
     }
   }
 
@@ -1108,12 +1079,12 @@ export default function VehicleDetail() {
                         <span className="vc-form-reg__badge vc-form-reg__badge--pending">Pending review</span>
                       )}
                       <h4>Public capture submission</h4>
-                      {canEdit && reg.sessionId != null ? (
+                      {canVerify && reg.sessionId != null ? (
                         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <button
                             type="button"
                             className="btn btn-theme btn-sm"
-                            disabled={verifyBusy || deregisterBusy || deverifyBusy}
+                            disabled={verifyBusy || deregisterBusy}
                             onClick={() => {
                               setVerifySessionId(reg.sessionId)
                               setVerifySummary(reg.verifiedSummary || '')
@@ -1121,21 +1092,10 @@ export default function VehicleDetail() {
                           >
                             <i className="fas fa-check" /> {reg.verifiedAt ? 'Re-verify' : 'Verify'}
                           </button>
-                          {reg.verifiedAt ? (
-                            <button
-                              type="button"
-                              className="btn btn-default btn-sm"
-                              disabled={verifyBusy || deregisterBusy || deverifyBusy}
-                              onClick={() => { void deverifyForm(reg.sessionId!) }}
-                              title="Clear verification; keep photos"
-                            >
-                              <i className="fas fa-times" /> {deverifyBusy ? 'Clearing…' : 'Deverify'}
-                            </button>
-                          ) : null}
                           <button
                             type="button"
                             className="btn btn-danger btn-sm"
-                            disabled={verifyBusy || deregisterBusy || deverifyBusy}
+                            disabled={verifyBusy || deregisterBusy}
                             onClick={() => { void deregisterForm(reg.sessionId!, reg.photos.length) }}
                             title="Remove form photos and allow re-registration"
                           >
@@ -1163,7 +1123,7 @@ export default function VehicleDetail() {
                     </dl>
                     {reg.verificationLog.length > 0 || formLogs.length > 0 ? (
                       <p className="pcf-hint" style={{ margin: '0 0 12px' }}>
-                        Full register / verify / deverify / deregister history is on the{' '}
+                        Full register / verify / deregister history is on the{' '}
                         <button type="button" className="btn-link" style={{ padding: 0, border: 0, background: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }} onClick={() => setTab('form-logs')}>
                           Registration logs
                         </button>
@@ -1636,12 +1596,12 @@ export default function VehicleDetail() {
               <h3>Registration logs</h3>
             </div>
             <p className="vad-panel__hint" style={{ margin: '0 0 12px', color: 'var(--muted, #64748b)', fontSize: '0.9rem' }}>
-              Register, verify, deverify, and deregister events for this vehicle&apos;s public capture form.
+              Register, verify, and deregister events for this vehicle&apos;s public capture form.
             </p>
             {formLogs.length === 0 ? (
               <div className="vad-empty">
                 <strong>No registration activity yet</strong>
-                Submissions from <code>/capture</code> and verify / deverify / deregister actions appear here.
+                Submissions from <code>/capture</code> and verify / deregister actions appear here.
               </div>
             ) : (
               <ul className="vad-timeline">

@@ -13,6 +13,8 @@ import {
   UNIQUE_KEYS,
   VEHICLE_PROFILE_KEYS,
 } from '../services/vehicleProfile.js'
+import { requirePerm } from '../services/permissions.js'
+import { actorLabel, notifyWorkflow } from '../services/notify.js'
 
 const router = Router()
 
@@ -312,9 +314,9 @@ router.get('/eol/due', async (req, res) => {
 
 /**
  * Public form registrations awaiting photo verification.
- * Must stay before /:id.
+ * Must stay before /:id. Verifiers role only.
  */
-router.get('/pending-verification', async (req, res) => {
+router.get('/pending-verification', requirePerm('vehicles.verify'), async (req, res) => {
   const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500)
   try {
     const rows = await all<{
@@ -1017,7 +1019,7 @@ router.get('/:id/captures', async (req, res) => {
 })
 
 /** Mark a public form registration session as verified (photos reviewed). */
-router.post('/:id/capture-sessions/:sessionId/verify', async (req, res) => {
+router.post('/:id/capture-sessions/:sessionId/verify', requirePerm('vehicles.verify'), async (req, res) => {
   const vehicleId = Number(req.params.id)
   const sessionId = Number(req.params.sessionId)
   const summary = String(req.body?.summary || req.body?.verified_summary || '').trim()
@@ -1051,12 +1053,13 @@ router.post('/:id/capture-sessions/:sessionId/verify', async (req, res) => {
     return fail(res, 'Only public form registrations can be verified this way')
   }
 
-  const verifier = await get<{ id: number; first_name: string; last_name: string; username: string }>(`
-    SELECT id, first_name, last_name, username FROM users WHERE id = ? AND deleted_at IS NULL
+  const verifier = await get<{ id: number; first_name: string; last_name: string; username: string; email: string | null }>(`
+    SELECT id, first_name, last_name, username, email FROM users WHERE id = ? AND deleted_at IS NULL
   `, [req.user!.id])
   const byName = verifier
     ? (`${verifier.first_name || ''} ${verifier.last_name || ''}`.trim() || verifier.username)
     : 'User'
+  const wasVerified = Boolean(row.verified_at)
 
   const ts = now()
   let prevLog: unknown[] = []
@@ -1094,10 +1097,55 @@ router.post('/:id/capture-sessions/:sessionId/verify', async (req, res) => {
       verified_by: req.user!.id,
       verified_by_name: byName,
       summary,
+      reverify: wasVerified,
     },
   })
 
-  return okMessage(res, 'Registration verified', {
+  const vehicle = await get<{ vehicle_number: string; model: string | null }>(`
+    SELECT vehicle_number, model FROM vehicles WHERE id = ? AND deleted_at IS NULL
+  `, [vehicleId])
+  const plate = vehicle?.vehicle_number || `#${vehicleId}`
+  const photoCountRow = await get<{ c: number }>(`
+    SELECT COUNT(*) AS c FROM vehicle_captures
+    WHERE vehicle_id = ? AND session_id = ? AND deleted_at IS NULL
+  `, [vehicleId, sessionId])
+  const photoCount = Number(photoCountRow?.c || 0)
+  const verifierEmail = String(verifier?.email || '').trim()
+  const eventLabel = wasVerified ? 're-verified' : 'verified'
+  notifyWorkflow({
+    category: 'form_registration',
+    event: wasVerified ? 'vehicle.form_reverified' : 'vehicle.form_verified',
+    subject: `Form ${eventLabel} · ${plate}`,
+    title: wasVerified ? 'Form registration re-verified' : 'Form registration verified',
+    intro: wasVerified
+      ? 'A previously verified public capture form was re-verified. Comments from the verifier are included below.'
+      : 'A public capture form registration was verified after photo review.',
+    fields: [
+      { label: 'Vehicle', value: plate },
+      ...(vehicle?.model ? [{ label: 'Model', value: String(vehicle.model) }] : []),
+      { label: 'Name', value: String(row.submitter_name || '—') },
+      { label: 'Email', value: String(row.submitter_email || '—') },
+      { label: 'Phone', value: String(row.submitter_phone || '—') },
+      { label: 'Photos', value: String(photoCount) },
+      { label: 'Action', value: wasVerified ? 'Re-verify' : 'Verify' },
+      { label: 'Verified by', value: byName },
+      { label: 'Comments', value: summary },
+      { label: 'When', value: ts },
+    ],
+    ctaPath: `/vehicles/${vehicleId}?tab=captures&focus=verify`,
+    ctaLabel: 'Open vehicle photos',
+    itemType: 'vehicle',
+    itemId: vehicleId,
+    ...(wasVerified && verifierEmail.includes('@')
+      ? {
+          assigneeEmail: verifierEmail,
+          assigneeOnlyExtraNote:
+            'You re-verified this form registration. Your comments are included below for your records.',
+        }
+      : {}),
+  })
+
+  return okMessage(res, wasVerified ? 'Registration re-verified' : 'Registration verified', {
     session_id: sessionId,
     verified_at: ts,
     verified_by: req.user!.id,
@@ -1108,7 +1156,7 @@ router.post('/:id/capture-sessions/:sessionId/verify', async (req, res) => {
 })
 
 /** Clear verification so the form registration is pending again (photos kept). */
-router.post('/:id/capture-sessions/:sessionId/deverify', async (req, res) => {
+router.post('/:id/capture-sessions/:sessionId/deverify', requirePerm('vehicles.verify'), async (req, res) => {
   const vehicleId = Number(req.params.id)
   const sessionId = Number(req.params.sessionId)
   const summary = String(req.body?.summary || req.body?.note || '').trim()
@@ -1189,7 +1237,7 @@ router.post('/:id/capture-sessions/:sessionId/deverify', async (req, res) => {
  * Remove a public form registration: soft-delete photos, delete files, delete session
  * so the vehicle can be registered again via /capture.
  */
-router.delete('/:id/capture-sessions/:sessionId/form-registration', async (req, res) => {
+router.delete('/:id/capture-sessions/:sessionId/form-registration', requirePerm('vehicles.verify'), async (req, res) => {
   const vehicleId = Number(req.params.id)
   const sessionId = Number(req.params.sessionId)
   if (!Number.isFinite(vehicleId) || !Number.isFinite(sessionId)) return fail(res, 'Invalid ids')
@@ -1246,6 +1294,36 @@ router.delete('/:id/capture-sessions/:sessionId/form-registration', async (req, 
       submitter_name: session.submitter_name || null,
       submitter_email: session.submitter_email || null,
     },
+  })
+
+  const vehicle = await get<{ vehicle_number: string; model: string | null }>(`
+    SELECT vehicle_number, model FROM vehicles WHERE id = ? AND deleted_at IS NULL
+  `, [vehicleId])
+  const plate = vehicle?.vehicle_number || `#${vehicleId}`
+  const actor = await get<{ first_name: string; last_name: string; username: string; email: string | null }>(`
+    SELECT first_name, last_name, username, email FROM users WHERE id = ? AND deleted_at IS NULL
+  `, [req.user!.id])
+  notifyWorkflow({
+    category: 'form_registration',
+    event: 'vehicle.form_deregistered',
+    subject: `Form deregistered · ${plate}`,
+    title: 'Form registration removed',
+    intro: 'A public capture form registration was deregistered. Photos were cleared so the vehicle can be submitted again via /capture.',
+    fields: [
+      { label: 'Vehicle', value: plate },
+      ...(vehicle?.model ? [{ label: 'Model', value: String(vehicle.model) }] : []),
+      { label: 'Name', value: String(session.submitter_name || '—') },
+      { label: 'Email', value: String(session.submitter_email || '—') },
+      { label: 'Phone', value: String(session.submitter_phone || '—') },
+      { label: 'Photos removed', value: String(captures.length) },
+      { label: 'Action', value: 'Deregister' },
+      { label: 'By', value: actorLabel(actor) },
+      { label: 'When', value: ts },
+    ],
+    ctaPath: `/vehicles/${vehicleId}?tab=captures`,
+    ctaLabel: 'Open vehicle',
+    itemType: 'vehicle',
+    itemId: vehicleId,
   })
 
   return okMessage(res, `Form registration removed — ${captures.length} photo(s) cleared. Vehicle can be registered again.`, {

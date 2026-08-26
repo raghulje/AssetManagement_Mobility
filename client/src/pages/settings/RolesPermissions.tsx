@@ -31,9 +31,10 @@ const ACTION_LABELS: Record<string, string> = {
   edit: 'Edit',
   delete: 'Delete',
   checkout: 'Assign / Unassign',
+  verify: 'Verify form',
 }
 
-const BUILTIN = new Set(['Superusers', 'Admin', 'Fleet Ops', 'IT Asset Manager', 'Viewer', 'App Managers'])
+const BUILTIN = new Set(['Superusers', 'Admin', 'Fleet Ops', 'IT Asset Manager', 'Viewer', 'App Managers', 'Verifiers'])
 
 const ROLE_BLURBS: Record<string, string> = {
   Superusers: 'Full bypass — entire Mobility app including Settings.',
@@ -42,8 +43,9 @@ const ROLE_BLURBS: Record<string, string> = {
   'IT Asset Manager': 'Legacy name — renamed to Fleet Ops on next server start.',
   Viewer: 'Read-only across Mobility modules.',
   'App Managers': 'Vehicles, Drivers, and Masters only (no App users / Audit / Settings).',
+  Verifiers: 'Can verify / re-verify / deregister public form registrations (can combine with App Managers).',
 }
-const ACTIONS = ['view', 'create', 'edit', 'delete', 'checkout'] as const
+const ACTIONS = ['view', 'create', 'edit', 'delete', 'checkout', 'verify'] as const
 
 function userCountLabel(n: number) {
   const count = Number(n) || 0

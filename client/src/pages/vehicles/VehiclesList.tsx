@@ -5,6 +5,7 @@ import AppLayout from '../../layout/AppLayout'
 import { AppSelect } from '../../components/formControls'
 import { vehiclesApi, type Vehicle, type VehicleFacets } from '../../api/vehicles'
 import { formatAppDateTime } from '../../lib/datetime'
+import { useAuth } from '../../api/AuthContext'
 
 const PAGE_SIZE = 25
 
@@ -200,6 +201,8 @@ function SortHead({
 }
 
 export default function VehiclesList() {
+  const { can } = useAuth()
+  const canVerify = can('vehicles.verify')
   const [params] = useSearchParams()
   const qParam = params.get('q') || ''
   const [searchInput, setSearchInput] = useState(qParam)
@@ -413,7 +416,7 @@ export default function VehiclesList() {
     <AppLayout
       title="Vehicles"
       subtitle="Manage and monitor your Refex Mobility fleet"
-      headerAside={<PendingVerifyAlert refreshKey={pendingRefresh} />}
+      headerAside={canVerify ? <PendingVerifyAlert refreshKey={pendingRefresh} /> : undefined}
     >
       <div className="rm-page">
         <div className="rm-kpi-row">

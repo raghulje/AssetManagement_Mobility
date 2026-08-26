@@ -19,12 +19,12 @@ export const MODULES = [
 
 export type ModuleKey = (typeof MODULES)[number]
 
-export const ACTIONS = ['view', 'create', 'edit', 'delete', 'checkout'] as const
+export const ACTIONS = ['view', 'create', 'edit', 'delete', 'checkout', 'verify'] as const
 export type ActionKey = (typeof ACTIONS)[number]
 
 /** Actions that apply per module (checkout only for inventory-like modules). */
 export const MODULE_ACTIONS: Record<ModuleKey, ActionKey[]> = {
-  vehicles: ['view', 'create', 'edit', 'delete', 'checkout'],
+  vehicles: ['view', 'create', 'edit', 'delete', 'checkout', 'verify'],
   drivers: ['view', 'create', 'edit', 'delete'],
   masters: ['view', 'create', 'edit', 'delete'],
   assets: ['view', 'create', 'edit', 'delete', 'checkout'],
@@ -45,6 +45,8 @@ export function mobilityFullPerms(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const mod of MOBILITY_MODULES) {
     for (const act of MODULE_ACTIONS[mod]) {
+      // Form verify/deregister is Verifiers-only (not App Managers / Fleet Ops by default)
+      if (act === 'verify') continue
       out[`${mod}.${act}`] = '1'
     }
   }
@@ -80,6 +82,8 @@ export function allModulePerms(opts?: { notifyOps?: boolean; includeCheckout?: b
   for (const mod of MODULES) {
     for (const act of MODULE_ACTIONS[mod]) {
       if (!opts?.includeCheckout && act === 'checkout') continue
+      // Form verification stays on the Verifiers role (admins still bypass via admin flag)
+      if (act === 'verify') continue
       out[`${mod}.${act}`] = '1'
     }
   }
@@ -132,6 +136,10 @@ export function isTruthyPerm(v: unknown): boolean {
 export function hasPermission(perms: Record<string, unknown> | null | undefined, permission: string): boolean {
   const p = perms || {}
   if (isTruthyPerm(p.superuser)) return true
+  // Form verify/deregister: Verifiers role only (Admin does not auto-bypass)
+  if (permission === 'vehicles.verify') {
+    return isTruthyPerm(p[permission])
+  }
   if (isTruthyPerm(p.admin)) return true
   if (isTruthyPerm(p[permission])) return true
   return false
@@ -230,6 +238,7 @@ export async function ensureDefaultRoles() {
     { name: 'Fleet Ops', permissions: itAssetManagerPerms() },
     { name: 'Viewer', permissions: viewerPerms() },
     { name: 'App Managers', permissions: appManagerPerms() },
+    { name: 'Verifiers', permissions: { 'vehicles.view': '1', 'vehicles.verify': '1' } },
   ]
 
   // Soft rename legacy IT Asset Manager → Fleet Ops (Mobility)
@@ -264,6 +273,7 @@ export async function ensureDefaultRoles() {
   await grantMissingPermsToRole('IT Asset Manager', { ...mobilityFullPerms(), 'settings.view': '1', 'settings.edit': '1', 'vehicles.checkout': '1' }, ts)
   await grantMissingPermsToRole('Viewer', mobilityViewPerms(), ts)
   await grantMissingPermsToRole('App Managers', { ...mobilityFullPerms(), 'vehicles.checkout': '1' }, ts)
+  await grantMissingPermsToRole('Verifiers', { 'vehicles.view': '1', 'vehicles.verify': '1' }, ts)
 
   // Any role that can edit vehicles should be able to assign/unassign
   const editRoles = await all<{ id: number; permissions: unknown }>(`
@@ -342,6 +352,8 @@ export function moduleGate(module: ModuleKey) {
     } else if (req.method === 'POST') {
       if (/\/(checkout|checkin|replace|checkinbytag)\b/i.test(path) || /\/(checkout|checkin|replace)\b/i.test(req.path)) {
         action = 'checkout'
+      } else if (/\/(verify|deverify)\b/i.test(path) || /\/(verify|deverify)\b/i.test(req.path)) {
+        action = 'verify'
       } else if (/\/(complete|audit)\b/i.test(req.path)) {
         action = 'edit'
       } else if (/\/labels\b/i.test(path) || /\/labels\b/i.test(req.baseUrl || '')) {
@@ -350,6 +362,10 @@ export function moduleGate(module: ModuleKey) {
       } else {
         action = 'create'
       }
+    }
+    // Form deregister is Verifiers-only (not vehicles.delete)
+    if (req.method === 'DELETE' && /form-registration\b/i.test(path)) {
+      action = 'verify'
     }
     const permission = `${module}.${action}`
     const perms = req.user?.permissions || {}

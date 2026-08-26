@@ -188,7 +188,7 @@ export async function notificationAdminSnapshot() {
     categories: [
       { key: 'eol_warranty', label: 'Vehicle EOL & warranty reminders (30d / 7d / 1d)' },
       { key: 'maintenance', label: 'Vehicle maintenance scheduled / updated / completed' },
-      { key: 'form_registration', label: 'Public form registration submitted (photos to verify)' },
+      { key: 'form_registration', label: 'Public form register / verify / re-verify / deregister emails' },
     ],
   }
 }

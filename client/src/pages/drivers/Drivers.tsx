@@ -7,6 +7,7 @@ import { AppSelect, DateField } from '../../components/formControls'
 import { driversApi, type Driver } from '../../api/drivers'
 import { vehicleMastersApi } from '../../api/vehicleMasters'
 import { downloadCsv } from '../../utils/csv'
+import { useAuth } from '../../api/AuthContext'
 
 type View = 'list' | 'holding'
 
@@ -14,6 +15,8 @@ export function DriversPage() {
   const [params, setParams] = useSearchParams()
   const view = (params.get('view') as View) || 'list'
   const toast = useToast()
+  const { can } = useAuth()
+  const canDelete = can('drivers.delete')
   const [search, setSearch] = useState('')
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('')
@@ -109,6 +112,23 @@ export function DriversPage() {
       notes: d.notes || '',
     })
     setModalOpen(true)
+  }
+
+  async function deleteDriver(d: { id: number | string; name?: string; first_name?: string }) {
+    const label = d.name || d.first_name || 'this driver'
+    if (!window.confirm(`Delete driver ${label}?\n\nThis cannot be undone from the list. Unassign any vehicles first.`)) return
+    setBusy(true)
+    try {
+      await driversApi.remove(d.id)
+      toast.success('Driver deleted')
+      setModalOpen(false)
+      setRows((list) => list.filter((row) => Number(row.id) !== Number(d.id)))
+      setTotal((n) => Math.max(0, n - 1))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Delete failed')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function save(e: FormEvent) {
@@ -242,6 +262,19 @@ export function DriversPage() {
                         <td className="text-right" style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
                           <button type="button" className="btn btn-xs btn-default" onClick={() => openEdit(d)}>Edit</button>{' '}
                           <Link className="btn btn-xs btn-default" to={`/drivers/${d.id}`}>History</Link>
+                          {canDelete ? (
+                            <>
+                              {' '}
+                              <button
+                                type="button"
+                                className="btn btn-xs btn-danger"
+                                disabled={busy}
+                                onClick={() => { void deleteDriver(d) }}
+                              >
+                                Delete
+                              </button>
+                            </>
+                          ) : null}
                         </td>
                       </tr>
                     ))}
@@ -276,6 +309,16 @@ export function DriversPage() {
                     <div className="data-card-actions" onClick={(e) => e.stopPropagation()}>
                       <button type="button" className="btn btn-sm btn-default" onClick={() => openEdit(d)}>Edit</button>
                       <Link className="btn btn-sm btn-default" to={`/drivers/${d.id}`}>History</Link>
+                      {canDelete ? (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-danger"
+                          disabled={busy}
+                          onClick={() => { void deleteDriver(d) }}
+                        >
+                          Delete
+                        </button>
+                      ) : null}
                     </div>
                   </article>
                 ))}
@@ -397,6 +440,16 @@ export function DriversPage() {
               </label>
               <div className="rm-field--full" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap', paddingTop: 4 }}>
                 {form.id ? <Link className="btn btn-default" to={`/drivers/${form.id}`} style={{ marginRight: 'auto' }}>Assignment history</Link> : null}
+                {form.id && canDelete ? (
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    disabled={busy}
+                    onClick={() => { void deleteDriver({ id: form.id, name: `${form.first_name} ${form.last_name}`.trim() }) }}
+                  >
+                    Delete
+                  </button>
+                ) : null}
                 <button type="button" className="btn btn-default" onClick={() => setModalOpen(false)}>Cancel</button>
                 <button className="btn btn-primary" disabled={busy}>{form.id ? 'Save' : 'Create'}</button>
               </div>
@@ -413,6 +466,8 @@ export function DriverDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const toast = useToast()
+  const { can } = useAuth()
+  const canDelete = can('drivers.delete')
   const [driver, setDriver] = useState<Driver | null>(null)
   const [current, setCurrent] = useState<Record<string, unknown>[]>([])
   const [history, setHistory] = useState<Record<string, unknown>[]>([])
@@ -438,22 +493,24 @@ export function DriverDetailPage() {
       <div className="rm-page">
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <Link to="/drivers" className="btn btn-default btn-sm">← Drivers</Link>
-          <button
-            type="button"
-            className="btn btn-danger btn-sm"
-            onClick={async () => {
-              if (!window.confirm(`Delete driver ${driver.name}?`)) return
-              try {
-                await driversApi.remove(driver.id)
-                toast.success('Deleted')
-                navigate('/drivers')
-              } catch (e) {
-                toast.error(e instanceof Error ? e.message : 'Delete failed')
-              }
-            }}
-          >
-            Delete
-          </button>
+          {canDelete ? (
+            <button
+              type="button"
+              className="btn btn-danger btn-sm"
+              onClick={async () => {
+                if (!window.confirm(`Delete driver ${driver.name}?`)) return
+                try {
+                  await driversApi.remove(driver.id)
+                  toast.success('Deleted')
+                  navigate('/drivers')
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : 'Delete failed')
+                }
+              }}
+            >
+              Delete
+            </button>
+          ) : null}
         </div>
 
         <div className="rm-panel" style={{ padding: 16 }}>
