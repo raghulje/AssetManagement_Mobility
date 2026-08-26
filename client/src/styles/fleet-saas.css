@@ -653,6 +653,13 @@ a.rm-fleet-thumb {
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
 }
 
+.rm-pending-verify__panel--portal {
+  position: fixed;
+  top: auto;
+  right: auto;
+  z-index: 30050;
+}
+
 .rm-pending-verify__panel-head {
   padding: 12px 14px 8px;
   border-bottom: 1px solid #fee2e2;

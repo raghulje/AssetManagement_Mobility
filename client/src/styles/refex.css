@@ -317,6 +317,8 @@ img { max-width: 100%; }
   flex-wrap: wrap;
   gap: 8px;
   animation: rise-in 420ms var(--ease) both;
+  position: relative;
+  z-index: 60;
 }
 .content-header h1 {
   margin: 0;

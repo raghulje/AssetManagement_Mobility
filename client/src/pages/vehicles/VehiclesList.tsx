@@ -1,5 +1,6 @@
 import { Link, useSearchParams } from 'react-router-dom'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import AppLayout from '../../layout/AppLayout'
 import { AppSelect } from '../../components/formControls'
 import { vehiclesApi, type Vehicle, type VehicleFacets } from '../../api/vehicles'
@@ -31,7 +32,10 @@ function PendingVerifyAlert({ refreshKey }: { refreshKey: number }) {
   const [rows, setRows] = useState<PendingRow[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [panelStyle, setPanelStyle] = useState<CSSProperties>({})
   const rootRef = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -55,9 +59,35 @@ function PendingVerifyAlert({ refreshKey }: { refreshKey: number }) {
   }, [refreshKey])
 
   useEffect(() => {
+    if (!open || !btnRef.current) return
+    const place = () => {
+      const r = btnRef.current!.getBoundingClientRect()
+      const width = Math.min(380, window.innerWidth - 24)
+      const right = Math.max(12, window.innerWidth - r.right)
+      const top = Math.min(r.bottom + 8, window.innerHeight - 120)
+      setPanelStyle({
+        position: 'fixed',
+        top,
+        right,
+        width,
+        zIndex: 30050,
+      })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open])
+
+  useEffect(() => {
     if (!open) return
     const onDoc = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
+      const t = e.target as Node
+      if (rootRef.current?.contains(t) || panelRef.current?.contains(t)) return
+      setOpen(false)
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false)
@@ -79,6 +109,7 @@ function PendingVerifyAlert({ refreshKey }: { refreshKey: number }) {
   return (
     <div className="rm-pending-verify" ref={rootRef}>
       <button
+        ref={btnRef}
         type="button"
         className="rm-pending-verify__btn"
         aria-expanded={open}
@@ -90,35 +121,44 @@ function PendingVerifyAlert({ refreshKey }: { refreshKey: number }) {
         </span>
         <i className={`fas fa-chevron-${open ? 'up' : 'down'}`} aria-hidden />
       </button>
-      {open ? (
-        <div className="rm-pending-verify__panel" role="dialog" aria-label="Vehicles pending verification">
-          <div className="rm-pending-verify__panel-head">
-            Pending form registrations · click plate to open Photos
-          </div>
-          {rows.length === 0 ? (
-            <div className="rm-pending-verify__empty">Nothing pending right now.</div>
-          ) : (
-            <ul className="rm-pending-verify__list">
-              {rows.map((r) => (
-                <li key={`${r.id}-${r.session_id}`}>
-                  <Link
-                    to={`/vehicles/${r.id}?tab=captures`}
-                    onClick={() => setOpen(false)}
-                  >
-                    <span className="rm-pending-verify__plate">{r.vehicle_number}</span>
-                    <span className="rm-pending-verify__meta">
-                      {[r.model, r.location_name].filter(Boolean).join(' · ') || '—'}
-                      {r.photo_count ? ` · ${r.photo_count} photo${r.photo_count === 1 ? '' : 's'}` : ''}
-                      {r.submitter_name ? ` · ${r.submitter_name}` : ''}
-                      {r.submitted_at ? ` · ${formatAppDateTime(r.submitted_at)}` : ''}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ) : null}
+      {open
+        ? createPortal(
+          <div
+            ref={panelRef}
+            className="rm-pending-verify__panel rm-pending-verify__panel--portal"
+            style={panelStyle}
+            role="dialog"
+            aria-label="Vehicles pending verification"
+          >
+            <div className="rm-pending-verify__panel-head">
+              Pending form registrations · click plate to open Photos
+            </div>
+            {rows.length === 0 ? (
+              <div className="rm-pending-verify__empty">Nothing pending right now.</div>
+            ) : (
+              <ul className="rm-pending-verify__list">
+                {rows.map((r) => (
+                  <li key={`${r.id}-${r.session_id}`}>
+                    <Link
+                      to={`/vehicles/${r.id}?tab=captures`}
+                      onClick={() => setOpen(false)}
+                    >
+                      <span className="rm-pending-verify__plate">{r.vehicle_number}</span>
+                      <span className="rm-pending-verify__meta">
+                        {[r.model, r.location_name].filter(Boolean).join(' · ') || '—'}
+                        {r.photo_count ? ` · ${r.photo_count} photo${r.photo_count === 1 ? '' : 's'}` : ''}
+                        {r.submitter_name ? ` · ${r.submitter_name}` : ''}
+                        {r.submitted_at ? ` · ${formatAppDateTime(r.submitted_at)}` : ''}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>,
+          document.body,
+        )
+        : null}
     </div>
   )
 }
