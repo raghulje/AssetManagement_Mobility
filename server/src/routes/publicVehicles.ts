@@ -142,6 +142,22 @@ router.get('/vehicles/search', async (req, res) => {
   })))
 })
 
+/** Example Employee ID shown on the public capture form. */
+const EMPLOYEE_ID_FORMAT_SAMPLE = 'RGML011182'
+
+/**
+ * Sample Employee ID format for the public capture form placeholder.
+ * GET /api/v1/public/employees/id-format-hint
+ */
+router.get('/employees/id-format-hint', async (_req, res) => {
+  const sample = EMPLOYEE_ID_FORMAT_SAMPLE
+  return okItem(res, {
+    sample,
+    placeholder: `e.g. ${sample}`,
+    hint: `Enter your HRMS Employee ID exactly as shown in payroll (example: ${sample}).`,
+  })
+})
+
 /**
  * Exact active employee lookup by employee code (typed ID on public form).
  * GET /api/v1/public/employees/lookup?code=
@@ -266,20 +282,20 @@ router.post('/capture-form', (req, res) => {
       }
 
       if (Number.isFinite(employeeIdRaw) && employeeIdRaw > 0) {
-        employee = await get(`
+        employee = (await get(`
           SELECT id, employee_code, first_name, last_name, email, mobile, work_mobile,
                  employment_status, employment_status_description
           FROM employees
           WHERE id = ? AND deleted_at IS NULL
-        `, [employeeIdRaw])
+        `, [employeeIdRaw])) ?? null
       } else if (employeeCodeRaw) {
-        employee = await get(`
+        employee = (await get(`
           SELECT id, employee_code, first_name, last_name, email, mobile, work_mobile,
                  employment_status, employment_status_description
           FROM employees
           WHERE deleted_at IS NULL AND UPPER(TRIM(employee_code)) = UPPER(?)
           LIMIT 1
-        `, [employeeCodeRaw])
+        `, [employeeCodeRaw])) ?? null
       } else {
         for (const f of files) fs.unlink(f.path, () => undefined)
         return fail(res, 'Enter your employee ID')

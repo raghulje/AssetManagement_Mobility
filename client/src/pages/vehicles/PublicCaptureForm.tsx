@@ -98,6 +98,8 @@ export default function PublicCaptureForm() {
   const [selected, setSelected] = useState<VehicleHit | null>(null)
 
   const [employeeCode, setEmployeeCode] = useState('')
+  const [employeeIdPlaceholder, setEmployeeIdPlaceholder] = useState('e.g. RGML011182')
+  const [employeeIdHint, setEmployeeIdHint] = useState('Enter your HRMS Employee ID exactly as shown in payroll (example: RGML011182).')
   const [employeeBusy, setEmployeeBusy] = useState(false)
   const [employeeLookupError, setEmployeeLookupError] = useState('')
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeHit | null>(null)
@@ -121,6 +123,20 @@ export default function PublicCaptureForm() {
   useEffect(() => {
     photosRef.current = photos
   }, [photos])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/v1/public/employees/id-format-hint')
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return
+        const item = data?.item || data?.data || data
+        if (item?.placeholder) setEmployeeIdPlaceholder(String(item.placeholder))
+        if (item?.hint) setEmployeeIdHint(String(item.hint))
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [])
 
   const searchVehicles = useCallback((q: string) => {
     if (searchTimer.current) window.clearTimeout(searchTimer.current)
@@ -482,10 +498,11 @@ export default function PublicCaptureForm() {
             </div>
 
             <ReqLabel htmlFor="pcf-employee">Employee ID</ReqLabel>
+            <p className="pcf-hint pcf-hint--block">{employeeIdHint}</p>
             <input
               id="pcf-employee"
               className={`pcf-input${fieldErrors.employee || employeeLookupError ? ' is-invalid' : ''}`}
-              placeholder="Enter your full employee ID"
+              placeholder={employeeIdPlaceholder}
               value={employeeCode}
               onChange={(e) => {
                 const v = e.target.value

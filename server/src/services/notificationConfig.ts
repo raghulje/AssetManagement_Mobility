@@ -116,6 +116,16 @@ function splitEmails(raw: string): string[] {
     .filter((s) => s.includes('@'))
 }
 
+/** Form registration / capture alerts — client-approved list only. */
+export const FORM_REGISTRATION_RECIPIENTS = [
+  'rohan.garg@refex.co.in',
+  'meet.g@refex.co.in',
+] as const
+
+export async function resolveFormRegistrationRecipients(): Promise<string[]> {
+  return [...FORM_REGISTRATION_RECIPIENTS]
+}
+
 export async function resolveWorkflowRecipients(): Promise<string[]> {
   const cfg = await getNotificationConfig()
   const emails = new Set<string>()
@@ -188,7 +198,7 @@ export async function notificationAdminSnapshot() {
     categories: [
       { key: 'eol_warranty', label: 'Vehicle EOL & warranty reminders (30d / 7d / 1d)' },
       { key: 'maintenance', label: 'Vehicle maintenance scheduled / updated / completed' },
-      { key: 'form_registration', label: 'Public form register / verify / re-verify / deregister emails' },
+      { key: 'form_registration', label: 'Public form register / verify / re-verify / deregister emails (Rohan + Meet only)' },
     ],
   }
 }

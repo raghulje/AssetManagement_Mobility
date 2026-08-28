@@ -6,6 +6,7 @@ import { AppSelect } from '../../components/formControls'
 import { vehiclesApi, type Vehicle, type VehicleFacets } from '../../api/vehicles'
 import { formatAppDateTime } from '../../lib/datetime'
 import { useAuth } from '../../api/AuthContext'
+import { downloadCsv } from '../../utils/csv'
 
 const PAGE_SIZE = 25
 
@@ -26,6 +27,11 @@ type PendingRow = {
 function fmt(n: number | null | undefined) {
   if (n == null || Number.isNaN(n)) return '—'
   return Number(n).toLocaleString('en-IN')
+}
+
+function captureStatusLabel(v: Vehicle) {
+  return v.verification_status
+    || (v.form_verified ? 'Verified' : v.form_registered ? 'Pending review' : 'Capture pending')
 }
 
 function PendingVerifyAlert({ refreshKey }: { refreshKey: number }) {
@@ -225,6 +231,7 @@ export default function VehiclesList() {
   /** Cascading counts for chips / dropdowns under current filters */
   const [facets, setFacets] = useState<VehicleFacets | null>(null)
   const [loading, setLoading] = useState(false)
+  const [exportBusy, setExportBusy] = useState(false)
   const [error, setError] = useState('')
   const [drill, setDrill] = useState<Drill>('none')
   const [pendingRefresh, setPendingRefresh] = useState(0)
@@ -311,6 +318,61 @@ export default function VehiclesList() {
     else {
       setSort(col)
       setOrder(col === 'verification_status' ? 'desc' : 'asc')
+    }
+  }
+
+  const exportCsv = async () => {
+    setExportBusy(true)
+    setError('')
+    try {
+      const data = await vehiclesApi.list({
+        search: search || undefined,
+        location: cityId ? undefined : (location || undefined),
+        city_id: cityId || undefined,
+        model: modelId ? undefined : (model || undefined),
+        model_id: modelId || undefined,
+        category: category || undefined,
+        fuel_type: fuelType || undefined,
+        verified: verified || undefined,
+        registered: registered || undefined,
+        limit: 5000,
+        offset: 0,
+        sort,
+        order,
+      })
+      const headers = [
+        'Vehicle',
+        'Model',
+        'Fuel',
+        'Location',
+        'Category',
+        'Status',
+        'Assigned',
+        'Capture status',
+        'Photo count',
+        'Last captured',
+      ]
+      const csvRows = (data.rows || []).map((v) => [
+        v.vehicle_number || '',
+        v.model || '',
+        v.fuel_type || '',
+        v.location_name || '',
+        v.category || '',
+        v.status || '',
+        v.assigned_name || 'Unassigned',
+        captureStatusLabel(v),
+        String(v.captures_count ?? 0),
+        v.last_captured_at ? formatAppDateTime(v.last_captured_at) : '',
+      ])
+      downloadCsv(
+        `vehicles-fleet-${new Date().toISOString().slice(0, 10)}.csv`,
+        headers,
+        csvRows,
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'CSV export failed')
+    } finally {
+      setExportBusy(false)
     }
   }
 
@@ -650,6 +712,14 @@ export default function VehiclesList() {
               </span>
             </h2>
             <div className="rm-page-actions">
+              <button
+                type="button"
+                className="btn btn-default btn-sm"
+                onClick={exportCsv}
+                disabled={exportBusy || loading}
+              >
+                <i className="fas fa-download" /> {exportBusy ? 'Exporting…' : 'Export CSV'}
+              </button>
               <Link className="btn btn-primary btn-sm" to="/vehicles/create">
                 <i className="fas fa-plus" /> Add vehicle
               </Link>
@@ -808,8 +878,7 @@ export default function VehiclesList() {
                         ? 'rm-verify-badge--pending'
                         : 'rm-verify-badge--no'
                   }`}>
-                    {v.verification_status
-                      || (v.form_verified ? 'Verified' : v.form_registered ? 'Pending review' : 'Capture pending')}
+                    {captureStatusLabel(v)}
                   </span>
                 </div>
                 <div className="rm-fleet-actions" onClick={(e) => e.stopPropagation()}>

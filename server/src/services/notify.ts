@@ -1,6 +1,10 @@
 import { get, run, now } from '../db/index.js'
 import { sendMail } from './mail.js'
-import { isEmailCategoryEnabled, resolveWorkflowRecipients } from './notificationConfig.js'
+import {
+  isEmailCategoryEnabled,
+  resolveFormRegistrationRecipients,
+  resolveWorkflowRecipients,
+} from './notificationConfig.js'
 
 function appBase() {
   return (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'http://localhost:3073').replace(/\/$/, '')
@@ -142,10 +146,12 @@ export function notifyWorkflow(input: WorkflowNotifyInput) {
         ctaUrl,
       })
 
-      const ops = await resolveWorkflowRecipients()
+      const ops = input.category === 'form_registration'
+        ? await resolveFormRegistrationRecipients()
+        : await resolveWorkflowRecipients()
       await sendToMany(ops, input.subject, html, text)
 
-      if (input.assigneeEmail && input.assigneeEmail.includes('@')) {
+      if (input.assigneeEmail && input.assigneeEmail.includes('@') && input.category !== 'form_registration') {
         const assigneeMail = brandedEmail({
           title: input.title,
           intro: input.assigneeOnlyExtraNote || input.intro,
