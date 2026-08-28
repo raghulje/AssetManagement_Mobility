@@ -703,6 +703,24 @@ a.rm-fleet-thumb {
   top: auto;
   right: auto;
   z-index: 30050;
+  box-sizing: border-box;
+}
+
+@media (max-width: 640px) {
+  .rm-pending-verify__btn {
+    flex-wrap: wrap;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .rm-pending-verify__text {
+    flex: 1 1 100%;
+    font-size: 12px;
+  }
+
+  .rm-pending-verify__panel--portal {
+    max-height: min(360px, calc(100vh - 140px));
+  }
 }
 
 .rm-pending-verify__panel-head {
@@ -746,11 +764,14 @@ a.rm-fleet-thumb {
   font-weight: 800;
   color: #0f172a;
   letter-spacing: 0.02em;
+  word-break: break-all;
 }
 
 .rm-pending-verify__meta {
   font-size: 12px;
   color: #64748b;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .rm-pending-verify__empty {

@@ -234,6 +234,7 @@ function mapCapture(row: Record<string, unknown>) {
     latitude: row.latitude != null ? Number(row.latitude) : null,
     longitude: row.longitude != null ? Number(row.longitude) : null,
     address: row.address || null,
+    capture_kind: row.capture_kind || 'vehicle',
     created_at: row.created_at,
   }
 }

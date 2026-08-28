@@ -11,8 +11,13 @@ export type SchemaMigrateResult = {
   table_count: number
 }
 
-/** Apply pending SQL files under db/mysql (same logic as CLI migrate). */
-export async function runPendingSchemaMigrations(): Promise<SchemaMigrateResult> {
+export type SchemaMigrationStatus = {
+  pending: string[]
+  applied: string[]
+  total_files: number
+}
+
+async function openMigrationConnection() {
   const host = process.env.DB_HOST || 'localhost'
   const port = Number(process.env.DB_PORT || 3306)
   const user = process.env.DB_USER || 'root'
@@ -28,24 +33,61 @@ export async function runPendingSchemaMigrations(): Promise<SchemaMigrateResult>
     charset: 'utf8mb4',
   })
 
+  await root.query(
+    `CREATE DATABASE IF NOT EXISTS \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+  )
+  await root.changeUser({ database })
+
+  await root.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+      version VARCHAR(191) NOT NULL,
+      applied_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uk_schema_migrations_version (version)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `).catch(() => undefined)
+
+  return { root, database }
+}
+
+function migrationSqlFiles() {
+  const dir = path.join(__dirname, '../db/mysql')
+  return fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()
+}
+
+/** List applied vs pending numbered migrations (read-only). */
+export async function getSchemaMigrationStatus(): Promise<SchemaMigrationStatus> {
+  const { root } = await openMigrationConnection()
   try {
-    await root.query(
-      `CREATE DATABASE IF NOT EXISTS \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
-    )
-    await root.changeUser({ database })
+    const files = migrationSqlFiles()
+    const pending: string[] = []
+    const applied: string[] = []
 
-    await root.query(`
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-        version VARCHAR(191) NOT NULL,
-        applied_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (id),
-        UNIQUE KEY uk_schema_migrations_version (version)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `).catch(() => undefined)
+    for (const file of files) {
+      const versionName = file.replace(/\.sql$/, '')
+      if (/^\d{3}_/.test(file) && !file.startsWith('001')) {
+        const [rows] = await root.query<mysql.RowDataPacket[]>(
+          `SELECT id FROM schema_migrations WHERE version = ? LIMIT 1`,
+          [versionName],
+        ).catch(() => [[] as mysql.RowDataPacket[]])
+        if (rows.length) applied.push(versionName)
+        else pending.push(versionName)
+      }
+    }
 
-    const dir = path.join(__dirname, '../db/mysql')
-    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()
+    return { pending, applied, total_files: files.length }
+  } finally {
+    await root.end()
+  }
+}
+
+/** Apply pending SQL files under db/mysql (same logic as CLI migrate). */
+export async function runPendingSchemaMigrations(): Promise<SchemaMigrateResult> {
+  const { root } = await openMigrationConnection()
+
+  try {
+    const files = migrationSqlFiles()
     const applied: string[] = []
     const skipped: string[] = []
 
@@ -63,14 +105,13 @@ export async function runPendingSchemaMigrations(): Promise<SchemaMigrateResult>
         }
       }
 
-      let sql = fs.readFileSync(path.join(dir, file), 'utf8')
+      let sql = fs.readFileSync(path.join(__dirname, '../db/mysql', file), 'utf8')
         .replace(/CREATE DATABASE[\s\S]*?;/i, '')
         .replace(/USE\s+`?[\w]+`?\s*;/gi, '')
       try {
         await root.query(sql)
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
-        // Columns may already exist from soft-migrates / partial prior runs
         const dup =
           /Duplicate column name/i.test(msg)
           || /Duplicate key name/i.test(msg)
@@ -86,6 +127,7 @@ export async function runPendingSchemaMigrations(): Promise<SchemaMigrateResult>
       applied.push(versionName)
     }
 
+    const database = process.env.DB_NAME || 'ITAssetManagement_2026'
     const [tables] = await root.query<mysql.RowDataPacket[]>(
       `SELECT TABLE_NAME as name FROM information_schema.TABLES
        WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME`,

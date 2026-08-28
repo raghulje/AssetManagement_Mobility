@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
 import VehicleWebcamCapture from '../../components/VehicleWebcamCapture'
+import VehicleVideoCapture from '../../components/VehicleVideoCapture'
 import { stampGpsOnImage, fetchGpsStaticMapUrl } from '../../lib/stampGpsOnImage'
 import {
   requestLocationAccess,
@@ -26,6 +27,8 @@ type EmployeeHit = {
   text: string
 }
 
+type PhotoBucket = 'vehicle' | 'odometer' | 'extra1' | 'extra2' | 'chassis'
+
 type LocalPhoto = {
   id: string
   file: File
@@ -40,10 +43,70 @@ type FieldErrors = {
   employee?: string
   email?: string
   phone?: string
-  photos?: string
+  vehiclePhotos?: string
+  odometer?: string
+  extra1?: string
+  extra2?: string
+  chassis?: string
+  video?: string
 }
 
-const MAX_PHOTOS = 20
+const MAX_VEHICLE_PHOTOS = 20
+const CHASSIS_REQUIRED = 3
+
+const PHOTO_BUCKETS: Record<PhotoBucket, {
+  label: string
+  hint: string
+  min: number
+  max: number
+  field: string
+  errorKey: keyof FieldErrors
+}> = {
+  vehicle: {
+    label: 'Vehicle photos',
+    hint: 'Take at least one GPS-stamped photo of the vehicle.',
+    min: 1,
+    max: MAX_VEHICLE_PHOTOS,
+    field: 'photos',
+    errorKey: 'vehiclePhotos',
+  },
+  odometer: {
+    label: 'Odometer reading',
+    hint: 'Capture one clear photo of the odometer / mileage display.',
+    min: 1,
+    max: 1,
+    field: 'odometer_photo',
+    errorKey: 'odometer',
+  },
+  extra1: {
+    label: 'Additional photo 1',
+    hint: 'Capture one extra vehicle photo (different angle or detail).',
+    min: 1,
+    max: 1,
+    field: 'extra_photo_1',
+    errorKey: 'extra1',
+  },
+  extra2: {
+    label: 'Additional photo 2',
+    hint: 'Capture one more vehicle photo (different angle or detail).',
+    min: 1,
+    max: 1,
+    field: 'extra_photo_2',
+    errorKey: 'extra2',
+  },
+  chassis: {
+    label: 'Capture chassis',
+    hint: 'Take exactly 3 clear photos of the engine chassis.',
+    min: CHASSIS_REQUIRED,
+    max: CHASSIS_REQUIRED,
+    field: 'chassis_photos',
+    errorKey: 'chassis',
+  },
+}
+
+function emptyBuckets(): Record<PhotoBucket, LocalPhoto[]> {
+  return { vehicle: [], odometer: [], extra1: [], extra2: [], chassis: [] }
+}
 
 function formatSqlDate(d = new Date()) {
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -89,7 +152,7 @@ export default function PublicCaptureForm() {
   const heldGpsRef = useRef<PrecisePosition | null>(null)
   const searchTimer = useRef<number | null>(null)
   const empLookupTimer = useRef<number | null>(null)
-  const photosRef = useRef<LocalPhoto[]>([])
+  const photosRef = useRef<Record<PhotoBucket, LocalPhoto[]>>(emptyBuckets())
 
   const [vehicleQuery, setVehicleQuery] = useState('')
   const [vehicleHits, setVehicleHits] = useState<VehicleHit[]>([])
@@ -104,11 +167,14 @@ export default function PublicCaptureForm() {
   const [employeeLookupError, setEmployeeLookupError] = useState('')
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeHit | null>(null)
 
-  const [photos, setPhotos] = useState<LocalPhoto[]>([])
+  const [photoBuckets, setPhotoBuckets] = useState<Record<PhotoBucket, LocalPhoto[]>>(emptyBuckets)
+  const [activeBucket, setActiveBucket] = useState<PhotoBucket | null>(null)
+  const [walkaroundVideo, setWalkaroundVideo] = useState<{ file: File; previewUrl: string } | null>(null)
 
   const [captureGps, setCaptureGps] = useState<PrecisePosition | null>(null)
   const [gpsBusy, setGpsBusy] = useState(false)
   const [webcamOpen, setWebcamOpen] = useState(false)
+  const [videoOpen, setVideoOpen] = useState(false)
   const [stamping, setStamping] = useState(false)
 
   const [submitting, setSubmitting] = useState(false)
@@ -121,8 +187,8 @@ export default function PublicCaptureForm() {
   const populatedName = String(selectedEmployee?.name || '').trim()
 
   useEffect(() => {
-    photosRef.current = photos
-  }, [photos])
+    photosRef.current = photoBuckets
+  }, [photoBuckets])
 
   useEffect(() => {
     let cancelled = false
@@ -200,17 +266,19 @@ export default function PublicCaptureForm() {
   useEffect(() => () => {
     if (searchTimer.current) window.clearTimeout(searchTimer.current)
     if (empLookupTimer.current) window.clearTimeout(empLookupTimer.current)
-    photosRef.current.forEach((p) => URL.revokeObjectURL(p.previewUrl))
+    Object.values(photosRef.current).flat().forEach((p) => URL.revokeObjectURL(p.previewUrl))
   }, [])
 
-  /** One tap: GPS loader → automatically open in-app GPS camera */
-  async function startGpsCamera() {
+  async function startGpsCamera(bucket: PhotoBucket) {
     if (selected?.form_registered) return
-    if (photos.length >= MAX_PHOTOS) {
-      setError(`Maximum ${MAX_PHOTOS} photos`)
+    const cfg = PHOTO_BUCKETS[bucket]
+    const current = photosRef.current[bucket]
+    if (current.length >= cfg.max) {
+      setError(`Maximum ${cfg.max} photo${cfg.max === 1 ? '' : 's'} for ${cfg.label.toLowerCase()}`)
       return
     }
     setError('')
+    setActiveBucket(bucket)
 
     const warm = gpsIsFresh(captureGps)
       ? captureGps
@@ -242,9 +310,10 @@ export default function PublicCaptureForm() {
     }
   }
 
-  async function stampAndAdd(file: File, pos: PrecisePosition | null) {
-    if (photosRef.current.length >= MAX_PHOTOS) {
-      setError(`Maximum ${MAX_PHOTOS} photos`)
+  async function stampAndAdd(bucket: PhotoBucket, file: File, pos: PrecisePosition | null) {
+    const cfg = PHOTO_BUCKETS[bucket]
+    if (photosRef.current[bucket].length >= cfg.max) {
+      setError(`Maximum ${cfg.max} photo${cfg.max === 1 ? '' : 's'} for ${cfg.label.toLowerCase()}`)
       return
     }
     setStamping(true)
@@ -286,15 +355,18 @@ export default function PublicCaptureForm() {
       if (mapImageUrl) URL.revokeObjectURL(mapImageUrl)
 
       const previewUrl = URL.createObjectURL(stamped)
-      setPhotos((prev) => [...prev, {
-        id: `p-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        file: stamped,
-        previewUrl,
-        latitude,
-        longitude,
-        address,
-      }].slice(0, MAX_PHOTOS))
-      setFieldErrors((fe) => ({ ...fe, photos: undefined }))
+      setPhotoBuckets((prev) => ({
+        ...prev,
+        [bucket]: [...prev[bucket], {
+          id: `p-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          file: stamped,
+          previewUrl,
+          latitude,
+          longitude,
+          address,
+        }].slice(0, cfg.max),
+      }))
+      setFieldErrors((fe) => ({ ...fe, [cfg.errorKey]: undefined }))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not stamp GPS photo')
     } finally {
@@ -302,11 +374,11 @@ export default function PublicCaptureForm() {
     }
   }
 
-  function removePhoto(id: string) {
-    setPhotos((prev) => {
-      const hit = prev.find((p) => p.id === id)
+  function removePhoto(bucket: PhotoBucket, id: string) {
+    setPhotoBuckets((prev) => {
+      const hit = prev[bucket].find((p) => p.id === id)
       if (hit) URL.revokeObjectURL(hit.previewUrl)
-      return prev.filter((p) => p.id !== id)
+      return { ...prev, [bucket]: prev[bucket].filter((p) => p.id !== id) }
     })
   }
 
@@ -321,9 +393,19 @@ export default function PublicCaptureForm() {
     }
     if (!populatedEmail) next.email = 'Selected employee has no email in HRMS'
     if (populatedPhones.length < 1) next.phone = 'Selected employee has no mobile / work mobile in HRMS'
-    if (photos.length < 1) next.photos = 'Take at least one photo'
+    if (photoBuckets.vehicle.length < PHOTO_BUCKETS.vehicle.min) next.vehiclePhotos = 'Take at least one vehicle photo'
+    if (photoBuckets.odometer.length < PHOTO_BUCKETS.odometer.min) next.odometer = 'Odometer photo is required'
+    if (photoBuckets.extra1.length < PHOTO_BUCKETS.extra1.min) next.extra1 = 'Additional photo 1 is required'
+    if (photoBuckets.extra2.length < PHOTO_BUCKETS.extra2.min) next.extra2 = 'Additional photo 2 is required'
+    if (photoBuckets.chassis.length < PHOTO_BUCKETS.chassis.min) next.chassis = `Take exactly ${CHASSIS_REQUIRED} chassis photos`
+    if (!walkaroundVideo) next.video = 'Record the 30 second walkaround video'
     return next
   }
+
+  const totalFiles = useMemo(
+    () => Object.values(photoBuckets).reduce((n, arr) => n + arr.length, 0) + (walkaroundVideo ? 1 : 0),
+    [photoBuckets, walkaroundVideo],
+  )
 
   const canSubmit = useMemo(() => {
     if (submitting || selected?.form_registered || gpsBusy || stamping) return false
@@ -332,16 +414,25 @@ export default function PublicCaptureForm() {
       && selectedEmployee?.id
       && populatedEmail
       && populatedPhones.length >= 1
-      && photos.length >= 1,
+      && photoBuckets.vehicle.length >= PHOTO_BUCKETS.vehicle.min
+      && photoBuckets.odometer.length >= PHOTO_BUCKETS.odometer.min
+      && photoBuckets.extra1.length >= PHOTO_BUCKETS.extra1.min
+      && photoBuckets.extra2.length >= PHOTO_BUCKETS.extra2.min
+      && photoBuckets.chassis.length >= PHOTO_BUCKETS.chassis.min
+      && walkaroundVideo,
     )
-  }, [selected, selectedEmployee, populatedEmail, populatedPhones.length, photos.length, submitting, gpsBusy, stamping])
+  }, [selected, selectedEmployee, populatedEmail, populatedPhones.length, photoBuckets, walkaroundVideo, submitting, gpsBusy, stamping])
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     const errs = validate()
     setFieldErrors(errs)
     if (Object.keys(errs).length) {
-      setError(errs.vehicle || errs.employee || errs.email || errs.phone || errs.photos || 'Please fix the highlighted fields')
+      setError(
+        errs.vehicle || errs.employee || errs.email || errs.phone
+        || errs.vehiclePhotos || errs.odometer || errs.extra1 || errs.extra2 || errs.chassis || errs.video
+        || 'Please fix the highlighted fields',
+      )
       return
     }
     if (!selected || !selectedEmployee) return
@@ -354,26 +445,33 @@ export default function PublicCaptureForm() {
       fd.append('employee_id', String(selectedEmployee.id))
       fd.append('employee_code', selectedEmployee.employee_code || employeeCode.trim())
       fd.append('captured_at', formatSqlDate(heldGpsRef.current?.capturedAt || new Date()))
-      const lat = photos.find((p) => p.latitude != null)?.latitude ?? heldGpsRef.current?.latitude
-      const lng = photos.find((p) => p.longitude != null)?.longitude ?? heldGpsRef.current?.longitude
-      const address = photos.find((p) => p.address)?.address || null
+      const lat = Object.values(photoBuckets).flat().find((p) => p.latitude != null)?.latitude ?? heldGpsRef.current?.latitude
+      const lng = Object.values(photoBuckets).flat().find((p) => p.longitude != null)?.longitude ?? heldGpsRef.current?.longitude
+      const address = Object.values(photoBuckets).flat().find((p) => p.address)?.address || null
       if (lat != null && lng != null) {
         fd.append('latitude', String(lat))
         fd.append('longitude', String(lng))
       }
       if (address) fd.append('address', address)
-      for (const p of photos) fd.append('photos', p.file, p.file.name || 'photo.jpg')
+      for (const p of photoBuckets.vehicle) fd.append('photos', p.file, p.file.name || 'photo.jpg')
+      for (const p of photoBuckets.odometer) fd.append('odometer_photo', p.file, p.file.name || 'odometer.jpg')
+      for (const p of photoBuckets.extra1) fd.append('extra_photo_1', p.file, p.file.name || 'extra-1.jpg')
+      for (const p of photoBuckets.extra2) fd.append('extra_photo_2', p.file, p.file.name || 'extra-2.jpg')
+      for (const p of photoBuckets.chassis) fd.append('chassis_photos', p.file, p.file.name || 'chassis.jpg')
+      if (walkaroundVideo) fd.append('walkaround_video', walkaroundVideo.file, walkaroundVideo.file.name || 'walkaround.webm')
 
       const r = await fetch('/api/v1/public/capture-form', { method: 'POST', body: fd })
       const data = await r.json().catch(() => ({}))
       if (!r.ok) {
         throw new Error((data.messages || []).join(', ') || 'Submit failed')
       }
-      photos.forEach((p) => URL.revokeObjectURL(p.previewUrl))
-      setPhotos([])
+      Object.values(photoBuckets).flat().forEach((p) => URL.revokeObjectURL(p.previewUrl))
+      if (walkaroundVideo) URL.revokeObjectURL(walkaroundVideo.previewUrl)
+      setPhotoBuckets(emptyBuckets())
+      setWalkaroundVideo(null)
       setDone({
         vehicle_number: String(data.payload?.vehicle_number || selected.vehicle_number),
-        photo_count: Number(data.payload?.photo_count || photos.length),
+        photo_count: Number(data.payload?.photo_count || totalFiles),
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Submit failed')
@@ -393,6 +491,9 @@ export default function PublicCaptureForm() {
     setError('')
     setFieldErrors({})
     setWebcamOpen(false)
+    setVideoOpen(false)
+    setPhotoBuckets(emptyBuckets())
+    setWalkaroundVideo(null)
   }
 
   return (
@@ -412,7 +513,7 @@ export default function PublicCaptureForm() {
             <div className="pcf-success__icon" aria-hidden>✓</div>
             <h1>Submitted</h1>
             <p>
-              {done.photo_count} photo{done.photo_count === 1 ? '' : 's'} added to{' '}
+              {done.photo_count} file{done.photo_count === 1 ? '' : 's'} added to{' '}
               <strong>{done.vehicle_number}</strong>.
             </p>
             <button type="button" className="pcf-btn pcf-btn--primary" onClick={resetForm}>
@@ -423,7 +524,7 @@ export default function PublicCaptureForm() {
           <form onSubmit={(e) => { void onSubmit(e) }} noValidate>
             <h1>Capture vehicle photos</h1>
             <p className="pcf-lead">
-              All fields marked <span className="pcf-req">*</span> are mandatory. Pick vehicle, enter your employee ID — email and phones auto-fill from HRMS.
+              All fields marked <span className="pcf-req">*</span> are mandatory — vehicle photos, odometer, two additional photos, a 30s walkaround video, and 3 chassis photos.
             </p>
 
             {error ? <div className="pcf-error" role="alert">{error}</div> : null}
@@ -577,10 +678,91 @@ export default function PublicCaptureForm() {
               <span className="pcf-hint">Both Mobile and Work mobile will be saved with this submission.</span>
             ) : null}
 
-            <div className="pcf-photos-head">
-              <ReqLabel>Photos</ReqLabel>
-              <span className="pcf-hint">{photos.length}/{MAX_PHOTOS}</span>
-            </div>
+            {(Object.keys(PHOTO_BUCKETS) as PhotoBucket[]).map((bucket) => {
+              const cfg = PHOTO_BUCKETS[bucket]
+              const items = photoBuckets[bucket]
+              const err = fieldErrors[cfg.errorKey]
+              return (
+                <section key={bucket} className="pcf-capture-section">
+                  <div className="pcf-photos-head">
+                    <ReqLabel>{cfg.label}</ReqLabel>
+                    <span className="pcf-hint">{items.length}/{cfg.max}{cfg.min > 0 ? ` · min ${cfg.min}` : ''}</span>
+                  </div>
+                  <p className="pcf-hint pcf-hint--block">{cfg.hint}</p>
+                  <div className="pcf-photo-actions">
+                    <button
+                      type="button"
+                      className="pcf-btn pcf-btn--primary"
+                      disabled={Boolean(selected?.form_registered) || gpsBusy || items.length >= cfg.max}
+                      onClick={() => { void startGpsCamera(bucket) }}
+                    >
+                      {gpsBusy && activeBucket === bucket ? 'Getting GPS…' : items.length > 0 ? 'Open camera again' : 'Take photo'}
+                    </button>
+                  </div>
+                  {err ? <span className="pcf-field-error">{err}</span> : null}
+                  {items.length > 0 ? (
+                    <ul className="pcf-thumbs pcf-thumbs--gallery">
+                      {items.map((p, i) => (
+                        <li key={p.id}>
+                          <img src={p.previewUrl} alt={`${cfg.label} ${i + 1}`} />
+                          <span className="pcf-thumb-num">{i + 1}</span>
+                          <button type="button" aria-label="Remove photo" onClick={() => removePhoto(bucket, p.id)}>×</button>
+                        </li>
+                      ))}
+                      {items.length < cfg.max ? (
+                        <li className="pcf-thumb-add">
+                          <button
+                            type="button"
+                            disabled={gpsBusy || Boolean(selected?.form_registered)}
+                            onClick={() => { void startGpsCamera(bucket) }}
+                            aria-label={`Add more ${cfg.label.toLowerCase()}`}
+                          >
+                            <span>+</span>
+                            <em>Add more</em>
+                          </button>
+                        </li>
+                      ) : null}
+                    </ul>
+                  ) : null}
+                </section>
+              )
+            })}
+
+            <section className="pcf-capture-section">
+              <div className="pcf-photos-head">
+                <ReqLabel>Walkaround video</ReqLabel>
+                <span className="pcf-hint">{walkaroundVideo ? '1/1' : '0/1 · 30 sec max'}</span>
+              </div>
+              <p className="pcf-hint pcf-hint--block">
+                Record up to 30 seconds while slowly walking around the vehicle. Rotate the camera to capture all sides (180° or more).
+              </p>
+              <div className="pcf-photo-actions">
+                <button
+                  type="button"
+                  className="pcf-btn pcf-btn--primary"
+                  disabled={Boolean(selected?.form_registered) || Boolean(walkaroundVideo)}
+                  onClick={() => setVideoOpen(true)}
+                >
+                  {walkaroundVideo ? 'Video recorded' : 'Record walkaround video'}
+                </button>
+              </div>
+              {fieldErrors.video ? <span className="pcf-field-error">{fieldErrors.video}</span> : null}
+              {walkaroundVideo ? (
+                <div className="pcf-video-preview">
+                  <video src={walkaroundVideo.previewUrl} controls playsInline className="pcf-video-preview__player" />
+                  <button
+                    type="button"
+                    className="pcf-btn pcf-btn--ghost"
+                    onClick={() => {
+                      URL.revokeObjectURL(walkaroundVideo.previewUrl)
+                      setWalkaroundVideo(null)
+                    }}
+                  >
+                    Remove video
+                  </button>
+                </div>
+              ) : null}
+            </section>
 
             {gpsBusy ? (
               <div className="pcf-gps-overlay" role="status">
@@ -594,69 +776,44 @@ export default function PublicCaptureForm() {
               <div className="pcf-hint pcf-hint--block">Stamping GPS on photo…</div>
             ) : null}
 
-            <div className="pcf-photo-actions">
-              <button
-                type="button"
-                className="pcf-btn pcf-btn--primary"
-                disabled={Boolean(selected?.form_registered) || gpsBusy || photos.length >= MAX_PHOTOS}
-                onClick={() => { void startGpsCamera() }}
-              >
-                {gpsBusy ? 'Getting GPS…' : photos.length > 0 ? 'Open camera again' : 'Take photo'}
-              </button>
-            </div>
-
             <VehicleWebcamCapture
               open={webcamOpen}
               vehicleLabel={selected?.vehicle_number}
               initialPos={captureGps}
               confirmShot
-              onClose={() => setWebcamOpen(false)}
+              onClose={() => {
+                setWebcamOpen(false)
+                setActiveBucket(null)
+              }}
               onCapture={(file, position) => {
+                if (!activeBucket) return
                 if (position) {
                   heldGpsRef.current = position
                   setCaptureGps(position)
                 }
-                // Keep camera open for + more shots; stamp in background
-                void stampAndAdd(file, position || heldGpsRef.current)
+                void stampAndAdd(activeBucket, file, position || heldGpsRef.current)
               }}
             />
-            {fieldErrors.photos ? <span className="pcf-field-error">{fieldErrors.photos}</span> : null}
 
-            {photos.length > 0 ? (
-              <ul className="pcf-thumbs pcf-thumbs--gallery">
-                {photos.map((p, i) => (
-                  <li key={p.id}>
-                    <img src={p.previewUrl} alt={`Photo ${i + 1}`} />
-                    <span className="pcf-thumb-num">{i + 1}</span>
-                    <button type="button" aria-label="Remove photo" onClick={() => removePhoto(p.id)}>×</button>
-                  </li>
-                ))}
-                {photos.length < MAX_PHOTOS ? (
-                  <li className="pcf-thumb-add">
-                    <button
-                      type="button"
-                      disabled={gpsBusy || Boolean(selected?.form_registered)}
-                      onClick={() => { void startGpsCamera() }}
-                      aria-label="Add more photos"
-                    >
-                      <span>+</span>
-                      <em>Add more</em>
-                    </button>
-                  </li>
-                ) : null}
-              </ul>
-            ) : (
-              <p className="pcf-hint pcf-hint--block">
-                Tap Take photo once — GPS loads, then the camera opens. After a shot: ✕ discard, + keep &amp; add more, ✓ finish.
-              </p>
-            )}
+            <VehicleVideoCapture
+              open={videoOpen}
+              vehicleLabel={selected?.vehicle_number}
+              onClose={() => setVideoOpen(false)}
+              onCapture={(file) => {
+                setWalkaroundVideo((prev) => {
+                  if (prev) URL.revokeObjectURL(prev.previewUrl)
+                  return { file, previewUrl: URL.createObjectURL(file) }
+                })
+                setFieldErrors((fe) => ({ ...fe, video: undefined }))
+              }}
+            />
 
             <button
               type="submit"
               className="pcf-btn pcf-btn--primary pcf-btn--block"
               disabled={!canSubmit}
             >
-              {submitting ? 'Submitting…' : 'Submit photos'}
+              {submitting ? 'Submitting…' : 'Submit capture'}
             </button>
           </form>
         )}

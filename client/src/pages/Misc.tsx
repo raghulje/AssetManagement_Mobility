@@ -493,6 +493,10 @@ export function SettingsGeneral() {
   const [busy, setBusy] = useState(false)
   const [qrBusy, setQrBusy] = useState(false)
   const [schemaMigrateBusy, setSchemaMigrateBusy] = useState(false)
+  const [schemaMigrationStatus, setSchemaMigrationStatus] = useState<{
+    pending?: string[]
+    applied?: string[]
+  } | null>(null)
   const [provisionBusy, setProvisionBusy] = useState(false)
   const [verifierBusy, setVerifierBusy] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -521,6 +525,17 @@ export function SettingsGeneral() {
     }>('/settings/saml')
       .then((s) => setSaml(s))
       .catch(() => setSaml(null))
+    api<{ item?: { pending?: string[]; applied?: string[] }; pending?: string[]; applied?: string[] }>(
+      '/settings/schema-migration-status',
+    )
+      .then((res) => {
+        const item = res.item || res
+        setSchemaMigrationStatus({
+          pending: item.pending || [],
+          applied: item.applied || [],
+        })
+      })
+      .catch(() => setSchemaMigrationStatus(null))
   }, [])
 
   const submit = async (e: FormEvent) => {
@@ -660,6 +675,34 @@ export function SettingsGeneral() {
           Safe to re-run — already-applied versions are skipped. Run this on production after deploy
           before other one-time tools below.
         </p>
+        <p className="help-block">
+          <strong>Capture form support:</strong> migration <code>038_capture_kind</code> adds a{' '}
+          <code>capture_kind</code> column on <code>vehicle_captures</code> so public form uploads
+          (vehicle photos, odometer, extras, chassis, walkaround video) show with labels on each
+          vehicle&apos;s <strong>Photos</strong> tab. Run migrations here once after deploy — the server
+          can also auto-add the column on first submit, but running it from here is recommended.
+        </p>
+        {schemaMigrationStatus ? (
+          <div className="help-block" style={{ marginBottom: 12 }}>
+            {schemaMigrationStatus.pending?.length ? (
+              <p style={{ margin: '0 0 6px' }}>
+                <strong>Pending ({schemaMigrationStatus.pending.length}):</strong>{' '}
+                {schemaMigrationStatus.pending.join(', ')}
+              </p>
+            ) : (
+              <p style={{ margin: '0 0 6px' }}><strong>Pending:</strong> none — schema is up to date.</p>
+            )}
+            {schemaMigrationStatus.applied?.includes('038_capture_kind') ? (
+              <p style={{ margin: 0, color: '#15803d' }}>
+                ✓ <code>038_capture_kind</code> applied — form photos/videos will display on vehicle records.
+              </p>
+            ) : schemaMigrationStatus.pending?.includes('038_capture_kind') ? (
+              <p style={{ margin: 0, color: '#9a3412' }}>
+                ⚠ <code>038_capture_kind</code> not applied yet — click the button below before using the new capture form fields.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         <button
           type="button"
           className="btn btn-theme"
@@ -679,6 +722,23 @@ export function SettingsGeneral() {
                 const msg = Array.isArray(res.messages) ? res.messages.join(' ') : 'Migrations complete'
                 setOkMsg(msg)
                 toast.success(msg)
+                const applied = res.payload?.applied || []
+                const skipped = res.payload?.skipped || []
+                setSchemaMigrationStatus((prev) => ({
+                  pending: (prev?.pending || []).filter((v) => !applied.includes(v)),
+                  applied: [...new Set([...(prev?.applied || []), ...applied, ...skipped])],
+                }))
+                return api<{ item?: { pending?: string[]; applied?: string[] } }>(
+                  '/settings/schema-migration-status',
+                )
+              })
+              .then((res) => {
+                if (!res) return
+                const item = res.item || res
+                setSchemaMigrationStatus({
+                  pending: item.pending || [],
+                  applied: item.applied || [],
+                })
               })
               .catch((err: Error) => {
                 setError(err.message)

@@ -32,9 +32,29 @@ type Props = {
   latitude?: number | null
   longitude?: number | null
   address?: string | null
+  mimeType?: string | null
+  captureKind?: string | null
   onRemove?: () => void
   busy?: boolean
   formBadge?: boolean
+}
+
+const KIND_LABELS: Record<string, string> = {
+  vehicle: 'Vehicle',
+  odometer: 'Odometer',
+  extra_1: 'Extra 1',
+  extra_2: 'Extra 2',
+  chassis: 'Chassis',
+  walkaround_video: 'Walkaround',
+}
+
+export const CAPTURE_KIND_ORDER: Record<string, number> = {
+  vehicle: 0,
+  odometer: 1,
+  extra_1: 2,
+  extra_2: 3,
+  chassis: 4,
+  walkaround_video: 5,
 }
 
 /** Exact VEHICLE CAPTURE frame from the product mock */
@@ -44,11 +64,15 @@ export function VehicleCaptureFrame({
   latitude,
   longitude,
   address,
+  mimeType,
+  captureKind,
   onRemove,
   busy,
   formBadge,
 }: Props) {
   const [lightboxOpen, setLightboxOpen] = useState(false)
+  const isVideo = String(mimeType || '').startsWith('video/') || captureKind === 'walkaround_video'
+  const kindLabel = captureKind ? (KIND_LABELS[captureKind] || captureKind) : null
 
   useEffect(() => {
     if (!lightboxOpen) return
@@ -74,7 +98,8 @@ export function VehicleCaptureFrame({
 
         <header className="vc-frame__header">
           <span className="vc-frame__title">CAPTURE</span>
-          {formBadge ? <span className="vc-frame__form-badge">Form</span> : null}
+          {kindLabel ? <span className="vc-frame__form-badge">{kindLabel}</span> : null}
+          {formBadge && !kindLabel ? <span className="vc-frame__form-badge">Form</span> : null}
           {onRemove ? (
             <button
               type="button"
@@ -89,13 +114,23 @@ export function VehicleCaptureFrame({
         </header>
 
         <div className="vc-frame__photo-wrap">
-          <img
-            src={photoUrl}
-            alt="Vehicle capture"
-            className="vc-frame__photo vc-frame__photo--zoomable"
-            title="Double-click to view full screen"
-            onDoubleClick={() => setLightboxOpen(true)}
-          />
+          {isVideo ? (
+            <video
+              src={photoUrl}
+              className="vc-frame__photo vc-frame__photo--video"
+              controls
+              playsInline
+              preload="metadata"
+            />
+          ) : (
+            <img
+              src={photoUrl}
+              alt="Vehicle capture"
+              className="vc-frame__photo vc-frame__photo--zoomable"
+              title="Double-click to view full screen"
+              onDoubleClick={() => setLightboxOpen(true)}
+            />
+          )}
         </div>
 
         <dl className="vc-frame__meta">
@@ -118,7 +153,7 @@ export function VehicleCaptureFrame({
         </dl>
       </article>
 
-      {lightboxOpen && createPortal(
+      {lightboxOpen && !isVideo && createPortal(
         <div
           className="vc-lightbox"
           role="dialog"
@@ -154,5 +189,7 @@ export function captureToFrameProps(c: VehicleCapture) {
     latitude: c.latitude,
     longitude: c.longitude,
     address: c.address,
+    mimeType: c.mime_type,
+    captureKind: c.capture_kind,
   }
 }

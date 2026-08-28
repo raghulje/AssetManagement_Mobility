@@ -80,6 +80,47 @@ export function makeMultiUploader(subdir: string, field = 'photos', maxCount = 2
   }).array(field, maxCount)
 }
 
+/** Public capture form: vehicle photos, extra photos, chassis images, walkaround video. */
+export function makeCaptureFormUploader(subdir: string) {
+  const dest = path.join(storageRoot, subdir)
+  fs.mkdirSync(dest, { recursive: true })
+  const storage = multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, dest),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname) || ''
+      const base = path.basename(file.originalname, ext)
+      cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName(base)}${ext}`)
+    },
+  })
+  const imageFields = new Set(['photos', 'odometer_photo', 'extra_photo_1', 'extra_photo_2', 'chassis_photos'])
+  return multer({
+    storage,
+    limits: { fileSize: 100 * 1024 * 1024, files: 28 },
+    fileFilter: (_req, file, cb) => {
+      const field = file.fieldname
+      if (field === 'walkaround_video') {
+        if (!String(file.mimetype || '').startsWith('video/')) {
+          cb(new Error('Walkaround must be a video file'))
+          return
+        }
+      } else if (imageFields.has(field)) {
+        if (!String(file.mimetype || '').startsWith('image/')) {
+          cb(new Error('Only image files are allowed'))
+          return
+        }
+      }
+      cb(null, true)
+    },
+  }).fields([
+    { name: 'photos', maxCount: 20 },
+    { name: 'odometer_photo', maxCount: 1 },
+    { name: 'extra_photo_1', maxCount: 1 },
+    { name: 'extra_photo_2', maxCount: 1 },
+    { name: 'chassis_photos', maxCount: 3 },
+    { name: 'walkaround_video', maxCount: 1 },
+  ])
+}
+
 export async function recordUpload(opts: {
   type: string
   id: number

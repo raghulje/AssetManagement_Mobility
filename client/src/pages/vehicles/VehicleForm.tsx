@@ -418,6 +418,11 @@ export default function VehicleForm() {
       setTab('basic')
       return
     }
+    if (!form.chassis_number.trim()) {
+      toast.error('Chassis number is required')
+      setTab('identity')
+      return
+    }
     setSaving(true)
     try {
       const body: Record<string, unknown> = {
@@ -731,8 +736,8 @@ export default function VehicleForm() {
                   <Field label="VIN / Chassis number">
                     <input className="form-control" value={form.vin} onChange={(e) => set('vin', e.target.value)} />
                   </Field>
-                  <Field label="Chassis number (if different)">
-                    <input className="form-control" value={form.chassis_number} onChange={(e) => set('chassis_number', e.target.value)} />
+                  <Field label="Chassis number" required>
+                    <input className="form-control" required value={form.chassis_number} onChange={(e) => set('chassis_number', e.target.value)} />
                   </Field>
                   <Field label="Engine number">
                     <input className="form-control" value={form.engine_number} onChange={(e) => set('engine_number', e.target.value)} />

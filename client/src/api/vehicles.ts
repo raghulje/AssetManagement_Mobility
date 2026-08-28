@@ -198,6 +198,7 @@ export type VehicleCapture = {
   latitude?: number | null
   longitude?: number | null
   address?: string | null
+  capture_kind?: string | null
   created_at?: string
 }
 

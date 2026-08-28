@@ -4,7 +4,7 @@ import { Router } from 'express'
 import { all, get, run, now } from '../db/index.js'
 import { fail, okItem, okList, okMessage } from '../utils/response.js'
 import { ensureVehicleQr } from '../services/vehicleQr.js'
-import { makeMultiUploader, storageRoot } from '../services/uploads.js'
+import { makeCaptureFormUploader, storageRoot } from '../services/uploads.js'
 import { logAction } from '../services/actionLog.js'
 import { notifyWorkflow } from '../services/notify.js'
 
@@ -74,6 +74,39 @@ async function ensureSubmitterColumns() {
     await run(`ALTER TABLE vehicle_capture_sessions ${alters.join(', ')}`)
   }
   submitterColumnsReady = true
+}
+
+let captureKindColumnReady = false
+
+async function ensureCaptureKindColumn() {
+  if (captureKindColumnReady) return
+  const cols = await all<{ COLUMN_NAME: string }>(`
+    SELECT COLUMN_NAME FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'vehicle_captures'
+      AND COLUMN_NAME = 'capture_kind'
+  `).catch(() => [])
+  if (!cols.length) {
+    await run(`
+      ALTER TABLE vehicle_captures
+      ADD COLUMN capture_kind VARCHAR(32) NOT NULL DEFAULT 'vehicle'
+      COMMENT 'vehicle | odometer | extra_1 | extra_2 | chassis | walkaround_video'
+      AFTER address
+    `)
+  }
+  captureKindColumnReady = true
+}
+
+function flattenUploadedFiles(
+  files: Express.Multer.File[] | { [fieldname: string]: Express.Multer.File[] } | undefined,
+): Express.Multer.File[] {
+  if (!files) return []
+  if (Array.isArray(files)) return files
+  return Object.values(files).flat()
+}
+
+function unlinkAll(files: Express.Multer.File[]) {
+  for (const f of files) fs.unlink(f.path, () => undefined)
 }
 
 function isEmail(v: string) {
@@ -243,7 +276,8 @@ router.get('/employees/search', async (req, res) => {
 /**
  * Public multi-photo capture submit (no auth).
  * POST /api/v1/public/capture-form
- * multipart: vehicle_id, employee_id, photos[]  (name/email/phone resolved from employee)
+ * multipart: vehicle_id, employee_id, photos[], odometer_photo[], extra_photo_1[], extra_photo_2[],
+ *           chassis_photos[], walkaround_video
  */
 router.post('/capture-form', (req, res) => {
   const ip = clientIp(req as { ip?: string; headers: Record<string, unknown> })
@@ -251,21 +285,32 @@ router.post('/capture-form', (req, res) => {
     return fail(res, 'Too many submissions from this network. Try again later.', 429)
   }
 
-  const upload = makeMultiUploader('public/vehicles', 'photos', 20)
+  const upload = makeCaptureFormUploader('public/vehicles')
   upload(req, res, async (err) => {
     if (err) return fail(res, err.message || 'Upload failed')
 
+    const allFiles = flattenUploadedFiles(req.files as Express.Multer.File[] | { [fieldname: string]: Express.Multer.File[] })
+    const byField = (req.files && !Array.isArray(req.files))
+      ? req.files as { [fieldname: string]: Express.Multer.File[] }
+      : { photos: (req.files as Express.Multer.File[] | undefined) || [] }
+
     try {
       await ensureSubmitterColumns()
+      await ensureCaptureKindColumn()
 
       const body = req.body || {}
       const vehicleId = Number(body.vehicle_id)
       const employeeIdRaw = Number(body.employee_id)
       const employeeCodeRaw = String(body.employee_code || body.employee_id_code || '').trim()
-      const files = Array.isArray(req.files) ? req.files as Express.Multer.File[] : []
+      const vehiclePhotos = byField.photos || []
+      const odometerPhoto = byField.odometer_photo || []
+      const extraPhoto1 = byField.extra_photo_1 || []
+      const extraPhoto2 = byField.extra_photo_2 || []
+      const chassisPhotos = byField.chassis_photos || []
+      const walkaroundVideo = byField.walkaround_video || []
 
       if (!Number.isFinite(vehicleId) || vehicleId <= 0) {
-        for (const f of files) fs.unlink(f.path, () => undefined)
+        unlinkAll(allFiles)
         return fail(res, 'Select a vehicle number')
       }
 
@@ -297,18 +342,18 @@ router.post('/capture-form', (req, res) => {
           LIMIT 1
         `, [employeeCodeRaw])) ?? null
       } else {
-        for (const f of files) fs.unlink(f.path, () => undefined)
+        unlinkAll(allFiles)
         return fail(res, 'Enter your employee ID')
       }
 
       if (!employee) {
-        for (const f of files) fs.unlink(f.path, () => undefined)
+        unlinkAll(allFiles)
         return fail(res, 'Employee not found', 404)
       }
       const isActive = String(employee.employment_status_description || '') === 'Active'
         || String(employee.employment_status || '') === '1'
       if (!isActive) {
-        for (const f of files) fs.unlink(f.path, () => undefined)
+        unlinkAll(allFiles)
         return fail(res, 'Only active employees can submit this form')
       }
 
@@ -321,26 +366,47 @@ router.post('/capture-form', (req, res) => {
       const phone = phoneParts.join(' / ')
 
       if (!email || !isEmail(email)) {
-        for (const f of files) fs.unlink(f.path, () => undefined)
+        unlinkAll(allFiles)
         return fail(res, 'This employee has no valid email in HRMS')
       }
       if (!phone) {
-        for (const f of files) fs.unlink(f.path, () => undefined)
+        unlinkAll(allFiles)
         return fail(res, 'This employee has no mobile / work mobile in HRMS')
       }
-      if (files.length < 1) {
-        return fail(res, 'At least one photo is required')
+      if (vehiclePhotos.length < 1) {
+        unlinkAll(allFiles)
+        return fail(res, 'At least one vehicle photo is required')
       }
-      if (files.length > 20) {
-        for (const f of files) fs.unlink(f.path, () => undefined)
-        return fail(res, 'Maximum 20 photos per submission')
+      if (odometerPhoto.length !== 1) {
+        unlinkAll(allFiles)
+        return fail(res, 'Odometer photo is required')
+      }
+      if (extraPhoto1.length !== 1) {
+        unlinkAll(allFiles)
+        return fail(res, 'Additional photo 1 is required')
+      }
+      if (extraPhoto2.length !== 1) {
+        unlinkAll(allFiles)
+        return fail(res, 'Additional photo 2 is required')
+      }
+      if (chassisPhotos.length !== 3) {
+        unlinkAll(allFiles)
+        return fail(res, 'Exactly 3 chassis photos are required')
+      }
+      if (walkaroundVideo.length !== 1) {
+        unlinkAll(allFiles)
+        return fail(res, 'Walkaround video is required')
+      }
+      if (vehiclePhotos.length > 20) {
+        unlinkAll(allFiles)
+        return fail(res, 'Maximum 20 vehicle photos per submission')
       }
 
       const vehicle = await get<{ id: number; vehicle_number: string }>(`
         SELECT id, vehicle_number FROM vehicles WHERE id = ? AND deleted_at IS NULL
       `, [vehicleId])
       if (!vehicle) {
-        for (const f of files) fs.unlink(f.path, () => undefined)
+        unlinkAll(allFiles)
         return fail(res, 'Vehicle not found', 404)
       }
 
@@ -350,7 +416,7 @@ router.post('/capture-form', (req, res) => {
         LIMIT 1
       `, [vehicleId]).catch(() => null)
       if (already) {
-        for (const f of files) fs.unlink(f.path, () => undefined)
+        unlinkAll(allFiles)
         return fail(res, 'This vehicle is already registered via the capture form', 409)
       }
 
@@ -358,11 +424,11 @@ router.post('/capture-form', (req, res) => {
       const lng = body.longitude !== undefined && body.longitude !== '' ? Number(body.longitude) : null
       const address = String(body.address || '').trim() || null
       if (lat != null && !Number.isFinite(lat)) {
-        for (const f of files) fs.unlink(f.path, () => undefined)
+        unlinkAll(allFiles)
         return fail(res, 'Invalid latitude')
       }
       if (lng != null && !Number.isFinite(lng)) {
-        for (const f of files) fs.unlink(f.path, () => undefined)
+        unlinkAll(allFiles)
         return fail(res, 'Invalid longitude')
       }
 
@@ -376,20 +442,28 @@ router.post('/capture-form', (req, res) => {
       const sessionId = Number(session.insertId)
 
       const captureIds: number[] = []
-      for (const file of files) {
+      const capturedAt = String(body.captured_at || '').trim() || ts
+
+      async function saveCapture(file: Express.Multer.File, kind: string) {
         const rel = path.relative(storageRoot, file.path).replace(/\\/g, '/')
-        const capturedAt = String(body.captured_at || '').trim() || ts
         const result = await run(`
           INSERT INTO vehicle_captures
             (vehicle_id, session_id, captured_by, storage_path, original_name, mime_type, file_size,
-             captured_at, latitude, longitude, address, created_at, updated_at)
-          VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             captured_at, latitude, longitude, address, capture_kind, created_at, updated_at)
+          VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           vehicleId, sessionId, rel, file.originalname, file.mimetype,
-          file.size, capturedAt, lat, lng, address, ts, ts,
+          file.size, capturedAt, lat, lng, address, kind, ts, ts,
         ])
         captureIds.push(Number(result.insertId))
       }
+
+      for (const file of vehiclePhotos) await saveCapture(file, 'vehicle')
+      for (const file of odometerPhoto) await saveCapture(file, 'odometer')
+      for (const file of extraPhoto1) await saveCapture(file, 'extra_1')
+      for (const file of extraPhoto2) await saveCapture(file, 'extra_2')
+      for (const file of chassisPhotos) await saveCapture(file, 'chassis')
+      for (const file of walkaroundVideo) await saveCapture(file, 'walkaround_video')
 
       await logAction({
         actionType: 'registered',
@@ -419,7 +493,7 @@ router.post('/capture-form', (req, res) => {
           { label: 'Name', value: name },
           { label: 'Email', value: email },
           { label: 'Phone', value: phone },
-          { label: 'Photos', value: String(captureIds.length) },
+          { label: 'Files', value: String(captureIds.length) },
         ],
         ctaPath: `/vehicles/${vehicleId}?tab=captures`,
         ctaLabel: 'Open photos to verify',
@@ -427,7 +501,7 @@ router.post('/capture-form', (req, res) => {
         itemId: vehicleId,
       })
 
-      return okMessage(res, `Submitted ${captureIds.length} photo(s) for ${vehicle.vehicle_number}`, {
+      return okMessage(res, `Submitted ${captureIds.length} file(s) for ${vehicle.vehicle_number}`, {
         session_id: sessionId,
         vehicle_id: vehicleId,
         vehicle_number: vehicle.vehicle_number,
@@ -435,9 +509,9 @@ router.post('/capture-form', (req, res) => {
         capture_ids: captureIds,
       }, 201)
     } catch (e) {
-      const files = Array.isArray(req.files) ? req.files as Express.Multer.File[] : []
-      for (const f of files) fs.unlink(f.path, () => undefined)
-      return fail(res, e instanceof Error ? e.message : 'Submit failed', 500)
+      unlinkAll(allFiles)
+      console.error('[public/capture-form]', e)
+      return fail(res, 'Could not save capture submission')
     }
   })
 })

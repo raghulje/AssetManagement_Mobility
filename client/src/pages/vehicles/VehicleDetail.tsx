@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import AppLayout from '../../layout/AppLayout'
 import { useToast } from '../../components/Toast'
-import { VehicleCaptureFrame, captureToFrameProps } from '../../components/VehicleCaptureFrame'
+import { VehicleCaptureFrame, captureToFrameProps, CAPTURE_KIND_ORDER } from '../../components/VehicleCaptureFrame'
 import VehicleWebcamCapture from '../../components/VehicleWebcamCapture'
 import { stampGpsOnImage, fetchGpsStaticMapUrl } from '../../lib/stampGpsOnImage'
 import { readGpsFromImageFile } from '../../lib/imageGps'
@@ -784,6 +784,15 @@ export default function VehicleDetail() {
   const canDelete = can('vehicles.delete') || can('vehicles.edit')
   const v = vehicle
 
+  function sortCapturesByKind<T extends { capture_kind?: string | null; id: number }>(list: T[]) {
+    return [...list].sort((a, b) => {
+      const ao = CAPTURE_KIND_ORDER[a.capture_kind || 'vehicle'] ?? 99
+      const bo = CAPTURE_KIND_ORDER[b.capture_kind || 'vehicle'] ?? 99
+      if (ao !== bo) return ao - bo
+      return a.id - b.id
+    })
+  }
+
   const formRegistrations = (() => {
     const map = new Map<string, {
       key: string
@@ -819,7 +828,10 @@ export default function VehicleDetail() {
         })
       }
     }
-    return Array.from(map.values())
+    return Array.from(map.values()).map((reg) => ({
+      ...reg,
+      photos: sortCapturesByKind(reg.photos),
+    }))
   })()
   const appCaptures = captures.filter((c) => String(c.source || '') !== 'public_form')
 
@@ -1059,7 +1071,8 @@ export default function VehicleDetail() {
                 <strong>No photos yet</strong>
                 Tap Take photo to capture from the app, or wait for a public form registration
                 (<code>/capture</code>). After a form is submitted, a <strong>Form registration</strong> block
-                appears here with photos and a <strong>Verify</strong> button (verified on / by / summary).
+                appears here with all uploads (vehicle, odometer, chassis photos, walkaround video) and a{' '}
+                <strong>Verify</strong> button.
               </div>
             ) : (
               <>
@@ -1109,7 +1122,7 @@ export default function VehicleDetail() {
                       <div><dt>Full name</dt><dd>{reg.name || '—'}</dd></div>
                       <div><dt>Email</dt><dd>{reg.email || '—'}</dd></div>
                       <div><dt>Phone number</dt><dd>{reg.phone || '—'}</dd></div>
-                      <div><dt>Photos</dt><dd>{reg.photos.length}</dd></div>
+                      <div><dt>Files</dt><dd>{reg.photos.length} (photos + video)</dd></div>
                       {reg.verifiedAt ? (
                         <>
                           <div><dt>Verified at</dt><dd>{formatAppDateTime(reg.verifiedAt)}</dd></div>

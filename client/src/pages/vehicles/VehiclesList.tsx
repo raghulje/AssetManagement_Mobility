@@ -69,14 +69,16 @@ function PendingVerifyAlert({ refreshKey }: { refreshKey: number }) {
     if (!open || !btnRef.current) return
     const place = () => {
       const r = btnRef.current!.getBoundingClientRect()
-      const width = Math.min(380, window.innerWidth - 24)
-      const right = Math.max(12, window.innerWidth - r.right)
+      const margin = 12
+      const width = Math.min(380, window.innerWidth - margin * 2)
+      const left = Math.max(margin, Math.min(r.left, window.innerWidth - width - margin))
       const top = Math.min(r.bottom + 8, window.innerHeight - 120)
       setPanelStyle({
         position: 'fixed',
         top,
-        right,
+        left,
         width,
+        maxWidth: `calc(100vw - ${margin * 2}px)`,
         zIndex: 30050,
       })
     }

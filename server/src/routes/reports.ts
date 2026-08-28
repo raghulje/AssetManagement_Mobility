@@ -851,6 +851,17 @@ settingsRouter.get('/saml', async (_req, res) => {
 })
 
 /** Apply pending SQL files from server/src/db/mysql (admin / settings.edit). */
+settingsRouter.get('/schema-migration-status', async (_req, res) => {
+  try {
+    const { getSchemaMigrationStatus } = await import('../services/schemaMigrate.js')
+    const status = await getSchemaMigrationStatus()
+    return okItem(res, status)
+  } catch (e) {
+    return fail(res, e instanceof Error ? e.message : 'Could not read migration status', 500)
+  }
+})
+
+/** Apply pending SQL files from server/src/db/mysql (admin / settings.edit). */
 settingsRouter.post('/run-migrations', async (req, res) => {
   try {
     const { runPendingSchemaMigrations } = await import('../services/schemaMigrate.js')
