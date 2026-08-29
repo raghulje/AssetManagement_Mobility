@@ -529,10 +529,10 @@ export function SettingsGeneral() {
       '/settings/schema-migration-status',
     )
       .then((res) => {
-        const item = res.item || res
+        const data = res.item ?? res
         setSchemaMigrationStatus({
-          pending: item.pending || [],
-          applied: item.applied || [],
+          pending: data.pending || [],
+          applied: data.applied || [],
         })
       })
       .catch(() => setSchemaMigrationStatus(null))
@@ -728,16 +728,16 @@ export function SettingsGeneral() {
                   pending: (prev?.pending || []).filter((v) => !applied.includes(v)),
                   applied: [...new Set([...(prev?.applied || []), ...applied, ...skipped])],
                 }))
-                return api<{ item?: { pending?: string[]; applied?: string[] } }>(
+                return api<{ item?: { pending?: string[]; applied?: string[] }; pending?: string[]; applied?: string[] }>(
                   '/settings/schema-migration-status',
                 )
               })
               .then((res) => {
                 if (!res) return
-                const item = res.item || res
+                const data = res.item ?? res
                 setSchemaMigrationStatus({
-                  pending: item.pending || [],
-                  applied: item.applied || [],
+                  pending: data.pending || [],
+                  applied: data.applied || [],
                 })
               })
               .catch((err: Error) => {

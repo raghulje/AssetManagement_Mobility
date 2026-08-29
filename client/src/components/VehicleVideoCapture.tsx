@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 
 const MAX_MS = 30_000
+const MAX_DURATION_SEC = 45
+const MIN_MS = 2_000
+const MIN_BLOB_BYTES = 8_192
+const TIMESLICE_MS = 1_000
 
 type Props = {
   open: boolean
@@ -12,30 +16,121 @@ type Props = {
 type PendingVideo = {
   file: File
   previewUrl: string
+  mimeType: string
+}
+
+function isAppleMobile() {
+  if (typeof navigator === 'undefined') return false
+  return /iPad|iPhone|iPod/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+}
+
+function isMobileDevice() {
+  if (typeof navigator === 'undefined') return false
+  if (isAppleMobile()) return true
+  return /Android/i.test(navigator.userAgent) && /Mobile/i.test(navigator.userAgent)
+}
+
+/** Phone browsers often produce MediaRecorder blobs that won't preview — use native camera instead. */
+function preferNativeCapture() {
+  return isMobileDevice()
 }
 
 function pickMime() {
-  const types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4']
-  for (const t of types) {
-    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)) return t
+  if (typeof MediaRecorder === 'undefined') return ''
+  const candidates = isAppleMobile()
+    ? ['video/mp4', 'video/webm;codecs=vp8', 'video/webm']
+    : ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4']
+  for (const t of candidates) {
+    if (MediaRecorder.isTypeSupported(t)) return t
   }
   return ''
 }
 
 function extForMime(mime: string) {
-  if (mime.includes('mp4')) return '.mp4'
-  return '.webm'
+  const lower = mime.toLowerCase()
+  if (lower.includes('mp4') || lower.includes('quicktime')) return '.mp4'
+  if (lower.includes('webm')) return '.webm'
+  return '.mp4'
+}
+
+function createRecorder(stream: MediaStream, preferredMime: string) {
+  if (preferredMime) {
+    try {
+      return new MediaRecorder(stream, { mimeType: preferredMime })
+    } catch {
+      // fall through
+    }
+  }
+  return new MediaRecorder(stream)
+}
+
+function probeVideoFile(file: File): Promise<{ ok: boolean; durationSec: number }> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file)
+    const video = document.createElement('video')
+    video.preload = 'metadata'
+    video.playsInline = true
+    video.muted = true
+
+    const finish = (ok: boolean, durationSec = 0) => {
+      URL.revokeObjectURL(url)
+      video.removeAttribute('src')
+      video.load()
+      resolve({ ok, durationSec })
+    }
+
+    video.onloadedmetadata = () => {
+      const durationSec = Number.isFinite(video.duration) ? video.duration : 0
+      finish(durationSec > 0, durationSec)
+    }
+    video.onerror = () => finish(false)
+    video.src = url
+  })
+}
+
+async function validateVideoFile(file: File): Promise<string | null> {
+  if (file.size < MIN_BLOB_BYTES) {
+    return 'Video file is empty or too small — please record again'
+  }
+  const { ok, durationSec } = await probeVideoFile(file)
+  if (!ok) {
+    return 'This video cannot be played on this device — please record again'
+  }
+  if (durationSec < MIN_MS / 1000) {
+    return 'Video is too short — record at least 2 seconds'
+  }
+  if (durationSec > MAX_DURATION_SEC) {
+    return `Video is too long (${Math.round(durationSec)}s) — please keep it under 30 seconds`
+  }
+  return null
+}
+
+function normalizeVideoFile(file: File) {
+  const mime = file.type || 'video/mp4'
+  const ext = extForMime(mime)
+  const name = file.name && /\.\w+$/.test(file.name)
+    ? file.name
+    : `walkaround-${Date.now()}${ext}`
+  if (file.name === name && file.type === mime) return file
+  return new File([file], name, { type: mime, lastModified: file.lastModified })
 }
 
 export default function VehicleVideoCapture({ open, vehicleLabel, onClose, onCapture }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
+  const mimeRef = useRef('')
+  const startedAtRef = useRef(0)
   const timerRef = useRef<number | null>(null)
+  const nativeMode = preferNativeCapture()
+
   const [ready, setReady] = useState(false)
   const [error, setError] = useState('')
   const [recording, setRecording] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [elapsedMs, setElapsedMs] = useState(0)
   const [pending, setPending] = useState<PendingVideo | null>(null)
   const [facing, setFacing] = useState<'user' | 'environment'>('environment')
@@ -54,8 +149,16 @@ export default function VehicleVideoCapture({ open, vehicleLabel, onClose, onCap
     setError('')
     setReady(false)
     setRecording(false)
+    setBusy(false)
     setElapsedMs(0)
     setPending(null)
+
+    if (nativeMode) {
+      setReady(true)
+      return () => {
+        cancelled = true
+      }
+    }
 
     async function startCamera() {
       try {
@@ -72,8 +175,8 @@ export default function VehicleVideoCapture({ open, vehicleLabel, onClose, onCap
             audio: false,
             video: {
               facingMode: { ideal: facing },
-              width: { ideal: 1920 },
-              height: { ideal: 1080 },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
             },
           })
         } catch {
@@ -89,6 +192,7 @@ export default function VehicleVideoCapture({ open, vehicleLabel, onClose, onCap
           video.setAttribute('playsinline', 'true')
           video.setAttribute('webkit-playsinline', 'true')
           video.srcObject = stream
+          video.muted = true
           await video.play()
         }
         setReady(true)
@@ -112,43 +216,117 @@ export default function VehicleVideoCapture({ open, vehicleLabel, onClose, onCap
         streamRef.current = null
       }
     }
-  }, [open, facing])
+  }, [open, facing, nativeMode])
 
   if (!open) return null
+
+  async function acceptFile(raw: File) {
+    setBusy(true)
+    setError('')
+    const file = normalizeVideoFile(raw)
+    const validationError = await validateVideoFile(file)
+    if (validationError) {
+      setBusy(false)
+      setError(validationError)
+      setPending(null)
+      return
+    }
+    const previewUrl = URL.createObjectURL(file)
+    setPending({
+      file,
+      previewUrl,
+      mimeType: file.type || 'video/mp4',
+    })
+    setBusy(false)
+    setError('')
+  }
+
+  async function finalizeRecording(recorder: MediaRecorder) {
+    const mimeType = recorder.mimeType || mimeRef.current || 'video/webm'
+    const blob = new Blob(chunksRef.current, { type: mimeType })
+    if (blob.size < MIN_BLOB_BYTES) {
+      setError('Recording failed or was too short. Hold Record for at least 2 seconds, then Stop.')
+      setPending(null)
+      setBusy(false)
+      return
+    }
+    const file = new File(
+      [blob],
+      `walkaround-${Date.now()}${extForMime(mimeType)}`,
+      { type: mimeType },
+    )
+    await acceptFile(file)
+  }
 
   function stopRecording() {
     if (timerRef.current) {
       window.clearInterval(timerRef.current)
       timerRef.current = null
     }
-    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
-      recorderRef.current.stop()
+    const recorder = recorderRef.current
+    if (!recorder || recorder.state === 'inactive') {
+      setRecording(false)
+      return
     }
+
+    const recordedMs = Date.now() - startedAtRef.current
+    if (recordedMs < MIN_MS) {
+      setError('Please record for at least 2 seconds before stopping.')
+      return
+    }
+
     setRecording(false)
+    setBusy(true)
+    try {
+      if (typeof recorder.requestData === 'function') recorder.requestData()
+    } catch { /* ignore */ }
+    recorder.stop()
   }
 
   function startRecording() {
     const stream = streamRef.current
-    if (!stream || recording || pending) return
-    const mime = pickMime()
-    if (!mime) {
+    if (!stream || recording || pending || busy) return
+    const preferredMime = pickMime()
+    if (!preferredMime && typeof MediaRecorder === 'undefined') {
       setError('Video recording is not supported in this browser')
       return
     }
     setError('')
     chunksRef.current = []
-    const recorder = new MediaRecorder(stream, { mimeType: mime })
+    mimeRef.current = preferredMime
+
+    let recorder: MediaRecorder
+    try {
+      recorder = createRecorder(stream, preferredMime)
+    } catch {
+      setError('Could not start video recorder on this device')
+      return
+    }
+
+    mimeRef.current = recorder.mimeType || preferredMime || 'video/webm'
     recorderRef.current = recorder
     recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data)
+      if (e.data && e.data.size > 0) chunksRef.current.push(e.data)
+    }
+    recorder.onerror = () => {
+      setError('Recording error — please try again')
+      setRecording(false)
+      setBusy(false)
     }
     recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: mime })
-      const file = new File([blob], `walkaround-${Date.now()}${extForMime(mime)}`, { type: blob.type })
-      setPending({ file, previewUrl: URL.createObjectURL(blob) })
+      void finalizeRecording(recorder)
       recorderRef.current = null
     }
-    recorder.start(500)
+
+    try {
+      recorder.start(TIMESLICE_MS)
+    } catch {
+      setError('Could not start recording')
+      recorderRef.current = null
+      return
+    }
+
+    startedAtRef.current = Date.now()
     setRecording(true)
     setElapsedMs(0)
     timerRef.current = window.setInterval(() => {
@@ -158,6 +336,18 @@ export default function VehicleVideoCapture({ open, vehicleLabel, onClose, onCap
         return Math.min(next, MAX_MS)
       })
     }, 250)
+  }
+
+  function openNativePicker() {
+    setError('')
+    fileInputRef.current?.click()
+  }
+
+  async function onNativeFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const raw = e.target.files?.[0]
+    e.target.value = ''
+    if (!raw) return
+    await acceptFile(raw)
   }
 
   const secondsLeft = Math.max(0, Math.ceil((MAX_MS - elapsedMs) / 1000))
@@ -170,15 +360,41 @@ export default function VehicleVideoCapture({ open, vehicleLabel, onClose, onCap
             <strong>Walkaround video</strong>
             <span>{vehicleLabel || 'Slowly rotate around the vehicle (180°+)'}</span>
           </div>
-          <button type="button" className="btn btn-default btn-sm" onClick={onClose} disabled={recording}>
+          <button type="button" className="btn btn-default btn-sm" onClick={onClose} disabled={recording || busy}>
             Done
           </button>
         </header>
 
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="video/*"
+          capture="environment"
+          className="vc-native-video-input"
+          onChange={(e) => { void onNativeFileChange(e) }}
+        />
+
         <div className="vc-webcam-stage">
           {error ? <div className="vc-webcam-error">{error}</div> : null}
           {pending ? (
-            <video src={pending.previewUrl} className="vc-webcam-preview" controls playsInline />
+            <video
+              key={pending.previewUrl}
+              src={pending.previewUrl}
+              className="vc-webcam-preview vc-webcam-preview--playback"
+              controls
+              playsInline
+              preload="auto"
+              onError={() => setError('Could not play preview — tap Discard and record again')}
+            />
+          ) : nativeMode ? (
+            <div className="vc-native-video-prompt">
+              <i className="fas fa-video vc-native-video-prompt__icon" aria-hidden />
+              <p>Use your phone camera to record up to <strong>30 seconds</strong>.</p>
+              <p className="vc-native-video-prompt__sub">
+                Walk slowly around the vehicle and capture all sides (180° or more).
+              </p>
+              {busy ? <div className="vc-native-video-prompt__busy">Checking video…</div> : null}
+            </div>
           ) : (
             <>
               <video
@@ -208,6 +424,7 @@ export default function VehicleVideoCapture({ open, vehicleLabel, onClose, onCap
                   if (p) URL.revokeObjectURL(p.previewUrl)
                   return null
                 })
+                setError('')
               }}
               aria-label="Discard video"
             >
@@ -216,8 +433,12 @@ export default function VehicleVideoCapture({ open, vehicleLabel, onClose, onCap
             <button
               type="button"
               className="vc-review-btn vc-review-btn--keep"
+              disabled={busy}
               onClick={() => {
-                if (!pending) return
+                if (!pending || pending.file.size < MIN_BLOB_BYTES) {
+                  setError('Video file is empty — please record again')
+                  return
+                }
                 onCapture(pending.file)
                 URL.revokeObjectURL(pending.previewUrl)
                 setPending(null)
@@ -229,12 +450,26 @@ export default function VehicleVideoCapture({ open, vehicleLabel, onClose, onCap
             </button>
             <p className="vc-webcam-hint">✕ Discard · ✓ Use this video</p>
           </footer>
+        ) : nativeMode ? (
+          <footer className="vc-webcam-foot">
+            <button
+              type="button"
+              className="btn btn-primary vc-webcam-shutter"
+              disabled={!ready || busy}
+              onClick={openNativePicker}
+            >
+              {busy ? 'Checking video…' : 'Open camera & record'}
+            </button>
+            <p className="vc-webcam-hint">
+              Your phone&apos;s camera app opens for recording. When finished, confirm the video here before submitting.
+            </p>
+          </footer>
         ) : (
           <footer className="vc-webcam-foot">
             <button
               type="button"
               className="btn btn-default btn-sm"
-              disabled={recording}
+              disabled={recording || busy}
               onClick={() => setFacing((f) => (f === 'environment' ? 'user' : 'environment'))}
             >
               <i className="fas fa-sync-alt" /> Flip
@@ -247,14 +482,22 @@ export default function VehicleVideoCapture({ open, vehicleLabel, onClose, onCap
               <button
                 type="button"
                 className="btn btn-primary vc-webcam-shutter"
-                disabled={!ready}
+                disabled={!ready || busy}
                 onClick={startRecording}
               >
                 Record 30s walkaround
               </button>
             )}
+            <button
+              type="button"
+              className="btn btn-default btn-sm"
+              disabled={recording || busy}
+              onClick={openNativePicker}
+            >
+              Upload / phone camera
+            </button>
             <p className="vc-webcam-hint">
-              Walk slowly around the vehicle and rotate the camera to capture all sides. Recording stops at 30 seconds.
+              Walk slowly around the vehicle. Record at least 2 seconds (up to 30s), then tap Stop and ✓ Use this video.
             </p>
           </footer>
         )}

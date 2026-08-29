@@ -92,10 +92,10 @@ export function makeCaptureFormUploader(subdir: string) {
       cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName(base)}${ext}`)
     },
   })
-  const imageFields = new Set(['photos', 'odometer_photo', 'extra_photo_1', 'extra_photo_2', 'chassis_photos'])
+  const imageFields = new Set(['photos', 'odometer_photo', 'chassis_photos'])
   return multer({
     storage,
-    limits: { fileSize: 100 * 1024 * 1024, files: 28 },
+    limits: { fileSize: 100 * 1024 * 1024, files: 26 },
     fileFilter: (_req, file, cb) => {
       const field = file.fieldname
       if (field === 'walkaround_video') {
@@ -114,8 +114,6 @@ export function makeCaptureFormUploader(subdir: string) {
   }).fields([
     { name: 'photos', maxCount: 20 },
     { name: 'odometer_photo', maxCount: 1 },
-    { name: 'extra_photo_1', maxCount: 1 },
-    { name: 'extra_photo_2', maxCount: 1 },
     { name: 'chassis_photos', maxCount: 3 },
     { name: 'walkaround_video', maxCount: 1 },
   ])

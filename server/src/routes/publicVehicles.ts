@@ -276,7 +276,7 @@ router.get('/employees/search', async (req, res) => {
 /**
  * Public multi-photo capture submit (no auth).
  * POST /api/v1/public/capture-form
- * multipart: vehicle_id, employee_id, photos[], odometer_photo[], extra_photo_1[], extra_photo_2[],
+ * multipart: vehicle_id, employee_id, photos[], odometer_photo[],
  *           chassis_photos[], walkaround_video
  */
 router.post('/capture-form', (req, res) => {
@@ -304,10 +304,8 @@ router.post('/capture-form', (req, res) => {
       const employeeCodeRaw = String(body.employee_code || body.employee_id_code || '').trim()
       const vehiclePhotos = byField.photos || []
       const odometerPhoto = byField.odometer_photo || []
-      const extraPhoto1 = byField.extra_photo_1 || []
-      const extraPhoto2 = byField.extra_photo_2 || []
       const chassisPhotos = byField.chassis_photos || []
-      const walkaroundVideo = byField.walkaround_video || []
+      // const walkaroundVideo = byField.walkaround_video || [] // walkaround video disabled
 
       if (!Number.isFinite(vehicleId) || vehicleId <= 0) {
         unlinkAll(allFiles)
@@ -373,30 +371,23 @@ router.post('/capture-form', (req, res) => {
         unlinkAll(allFiles)
         return fail(res, 'This employee has no mobile / work mobile in HRMS')
       }
-      if (vehiclePhotos.length < 1) {
+      if (vehiclePhotos.length < 4) {
         unlinkAll(allFiles)
-        return fail(res, 'At least one vehicle photo is required')
+        return fail(res, 'At least 4 vehicle photos are required')
       }
       if (odometerPhoto.length !== 1) {
         unlinkAll(allFiles)
         return fail(res, 'Odometer photo is required')
       }
-      if (extraPhoto1.length !== 1) {
-        unlinkAll(allFiles)
-        return fail(res, 'Additional photo 1 is required')
-      }
-      if (extraPhoto2.length !== 1) {
-        unlinkAll(allFiles)
-        return fail(res, 'Additional photo 2 is required')
-      }
       if (chassisPhotos.length !== 3) {
         unlinkAll(allFiles)
         return fail(res, 'Exactly 3 chassis photos are required')
       }
-      if (walkaroundVideo.length !== 1) {
-        unlinkAll(allFiles)
-        return fail(res, 'Walkaround video is required')
-      }
+      // Walkaround video disabled — no longer required on public form
+      // if (walkaroundVideo.length !== 1) {
+      //   unlinkAll(allFiles)
+      //   return fail(res, 'Walkaround video is required')
+      // }
       if (vehiclePhotos.length > 20) {
         unlinkAll(allFiles)
         return fail(res, 'Maximum 20 vehicle photos per submission')
@@ -460,10 +451,8 @@ router.post('/capture-form', (req, res) => {
 
       for (const file of vehiclePhotos) await saveCapture(file, 'vehicle')
       for (const file of odometerPhoto) await saveCapture(file, 'odometer')
-      for (const file of extraPhoto1) await saveCapture(file, 'extra_1')
-      for (const file of extraPhoto2) await saveCapture(file, 'extra_2')
       for (const file of chassisPhotos) await saveCapture(file, 'chassis')
-      for (const file of walkaroundVideo) await saveCapture(file, 'walkaround_video')
+      // for (const file of walkaroundVideo) await saveCapture(file, 'walkaround_video')
 
       await logAction({
         actionType: 'registered',

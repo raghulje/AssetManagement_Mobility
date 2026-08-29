@@ -4527,6 +4527,31 @@ table.table tr.is-selected td { background: rgba(255, 107, 74, 0.08); }
   margin-top: 4px;
 }
 
+.vc-form-reg-captures {
+  margin-top: 8px;
+}
+
+.vc-form-reg-captures__tabs {
+  margin: 0 0 12px;
+  border-bottom-color: #e2e8f0;
+}
+
+.vc-form-reg-captures__tabs button span {
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.vc-form-reg-captures__panel {
+  min-height: 80px;
+}
+
+.vc-form-reg-captures__empty {
+  margin: 0;
+  border: 0;
+  background: transparent;
+  padding: 28px 16px;
+}
+
 .vc-frame__remove {
   position: static;
   transform: none;
@@ -4902,6 +4927,54 @@ table.table tr.is-selected td { background: rgba(255, 107, 74, 0.08); }
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.vc-webcam-preview--playback {
+  object-fit: contain;
+  background: #000;
+}
+
+.vc-native-video-input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.vc-native-video-prompt {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  text-align: center;
+  color: #e2e8f0;
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+}
+
+.vc-native-video-prompt__icon {
+  font-size: 2.5rem;
+  color: #fb923c;
+}
+
+.vc-native-video-prompt p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.vc-native-video-prompt__sub {
+  font-size: 0.92rem;
+  color: #94a3b8;
+}
+
+.vc-native-video-prompt__busy {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  color: #fbbf24;
 }
 
 .vc-webcam-review {

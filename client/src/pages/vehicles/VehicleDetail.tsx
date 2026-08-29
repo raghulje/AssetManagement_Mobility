@@ -3,7 +3,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import AppLayout from '../../layout/AppLayout'
 import { useToast } from '../../components/Toast'
-import { VehicleCaptureFrame, captureToFrameProps, CAPTURE_KIND_ORDER } from '../../components/VehicleCaptureFrame'
+import { CAPTURE_KIND_ORDER } from '../../components/VehicleCaptureFrame'
+import FormRegistrationCaptures, { countFormRegistrationPhotos } from '../../components/FormRegistrationCaptures'
 import VehicleWebcamCapture from '../../components/VehicleWebcamCapture'
 import { stampGpsOnImage, fetchGpsStaticMapUrl } from '../../lib/stampGpsOnImage'
 import { readGpsFromImageFile } from '../../lib/imageGps'
@@ -833,7 +834,6 @@ export default function VehicleDetail() {
       photos: sortCapturesByKind(reg.photos),
     }))
   })()
-  const appCaptures = captures.filter((c) => String(c.source || '') !== 'public_form')
 
   async function submitVerify() {
     if (!id || verifySessionId == null) return
@@ -1066,16 +1066,7 @@ export default function VehicleDetail() {
               onClose={() => setWebcamOpen(false)}
               onCapture={(file, position) => { void processFile(file, position) }}
             />
-            {captures.length === 0 && pending.length === 0 && !nativeCamArmed && !gpsBusy ? (
-              <div className="vad-empty">
-                <strong>No photos yet</strong>
-                Tap Take photo to capture from the app, or wait for a public form registration
-                (<code>/capture</code>). After a form is submitted, a <strong>Form registration</strong> block
-                appears here with all uploads (vehicle, odometer, chassis photos, walkaround video) and a{' '}
-                <strong>Verify</strong> button.
-              </div>
-            ) : (
-              <>
+            <>
                 {formRegistrations.map((reg, idx) => (
                   <section
                     key={reg.key}
@@ -1122,7 +1113,7 @@ export default function VehicleDetail() {
                       <div><dt>Full name</dt><dd>{reg.name || '—'}</dd></div>
                       <div><dt>Email</dt><dd>{reg.email || '—'}</dd></div>
                       <div><dt>Phone number</dt><dd>{reg.phone || '—'}</dd></div>
-                      <div><dt>Files</dt><dd>{reg.photos.length} (photos + video)</dd></div>
+                      <div><dt>Files</dt><dd>{countFormRegistrationPhotos(reg.photos)} photo(s)</dd></div>
                       {reg.verifiedAt ? (
                         <>
                           <div><dt>Verified at</dt><dd>{formatAppDateTime(reg.verifiedAt)}</dd></div>
@@ -1143,22 +1134,6 @@ export default function VehicleDetail() {
                         {' '}tab.
                       </p>
                     ) : null}
-                    <div className="vad-gallery">
-                      {reg.photos.map((c) => (
-                        <VehicleCaptureFrame
-                          key={c.id}
-                          {...captureToFrameProps(c)}
-                          formBadge
-                          busy={busy}
-                          onRemove={async () => {
-                            if (!window.confirm('Delete capture?')) return
-                            await vehiclesApi.deleteCapture(id!, c.id)
-                            setCaptures((list) => list.filter((x) => x.id !== c.id))
-                            setVehicle((cur) => (cur ? { ...cur, captures_count: Math.max(0, (cur.captures_count || 1) - 1) } : cur))
-                          }}
-                        />
-                      ))}
-                    </div>
                   </section>
                 ))}
 
@@ -1201,43 +1176,29 @@ export default function VehicleDetail() {
                   document.body,
                 ) : null}
 
-                {(pending.length > 0 || appCaptures.length > 0) ? (
-                  <div className="vad-gallery">
-                    {pending.map((p) => (
-                      <div key={p.localId} className="vc-pending-wrap">
-                        <VehicleCaptureFrame photoUrl={p.previewUrl} capturedAt={p.capturedAt} latitude={p.latitude} longitude={p.longitude} address={p.address} />
-                        {p.uploading ? <div className="vc-pending-badge">{p.statusText || 'Saving…'}</div> : null}
-                        {p.error ? (
-                          <div className="vc-pending-badge vc-pending-badge--error">
-                            <span>{p.error}</span>
-                            <button
-                              type="button"
-                              className="vc-pending-dismiss"
-                              onClick={() => setPending((list) => list.filter((x) => x.localId !== p.localId))}
-                            >
-                              Dismiss
-                            </button>
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                    {appCaptures.map((c) => (
-                      <VehicleCaptureFrame
-                        key={c.id}
-                        {...captureToFrameProps(c)}
-                        busy={busy}
-                        onRemove={async () => {
-                          if (!window.confirm('Delete capture?')) return
-                          await vehiclesApi.deleteCapture(id!, c.id)
-                          setCaptures((list) => list.filter((x) => x.id !== c.id))
-                          setVehicle((cur) => (cur ? { ...cur, captures_count: Math.max(0, (cur.captures_count || 1) - 1) } : cur))
-                        }}
-                      />
-                    ))}
-                  </div>
-                ) : null}
+                <FormRegistrationCaptures
+                  photos={captures}
+                  pending={pending.map((p) => ({
+                    localId: p.localId,
+                    previewUrl: p.previewUrl,
+                    capturedAt: p.capturedAt,
+                    latitude: p.latitude,
+                    longitude: p.longitude,
+                    address: p.address,
+                    uploading: p.uploading,
+                    statusText: p.statusText,
+                    error: p.error,
+                    onDismiss: () => setPending((list) => list.filter((x) => x.localId !== p.localId)),
+                  }))}
+                  busy={busy}
+                  onRemove={async (captureId) => {
+                    if (!window.confirm('Delete capture?')) return
+                    await vehiclesApi.deleteCapture(id!, captureId)
+                    setCaptures((list) => list.filter((x) => x.id !== captureId))
+                    setVehicle((cur) => (cur ? { ...cur, captures_count: Math.max(0, (cur.captures_count || 1) - 1) } : cur))
+                  }}
+                />
               </>
-            )}
           </div>
         ) : null}
 
