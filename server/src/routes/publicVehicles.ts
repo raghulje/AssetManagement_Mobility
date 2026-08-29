@@ -303,8 +303,8 @@ router.post('/capture-form', (req, res) => {
       const employeeIdRaw = Number(body.employee_id)
       const employeeCodeRaw = String(body.employee_code || body.employee_id_code || '').trim()
       const vehiclePhotos = byField.photos || []
-      const odometerPhoto = byField.odometer_photo || []
-      const chassisPhotos = byField.chassis_photos || []
+      // const odometerPhoto = byField.odometer_photo || [] // disabled — re-enable later
+      // const chassisPhotos = byField.chassis_photos || []
       // const walkaroundVideo = byField.walkaround_video || [] // walkaround video disabled
 
       if (!Number.isFinite(vehicleId) || vehicleId <= 0) {
@@ -375,14 +375,15 @@ router.post('/capture-form', (req, res) => {
         unlinkAll(allFiles)
         return fail(res, 'At least 4 vehicle photos are required')
       }
-      if (odometerPhoto.length !== 1) {
-        unlinkAll(allFiles)
-        return fail(res, 'Odometer photo is required')
-      }
-      if (chassisPhotos.length !== 3) {
-        unlinkAll(allFiles)
-        return fail(res, 'Exactly 3 chassis photos are required')
-      }
+      // Odometer + chassis capture disabled on public form — re-enable later
+      // if (odometerPhoto.length !== 1) {
+      //   unlinkAll(allFiles)
+      //   return fail(res, 'Odometer photo is required')
+      // }
+      // if (chassisPhotos.length !== 3) {
+      //   unlinkAll(allFiles)
+      //   return fail(res, 'Exactly 3 chassis photos are required')
+      // }
       // Walkaround video disabled — no longer required on public form
       // if (walkaroundVideo.length !== 1) {
       //   unlinkAll(allFiles)
@@ -450,8 +451,8 @@ router.post('/capture-form', (req, res) => {
       }
 
       for (const file of vehiclePhotos) await saveCapture(file, 'vehicle')
-      for (const file of odometerPhoto) await saveCapture(file, 'odometer')
-      for (const file of chassisPhotos) await saveCapture(file, 'chassis')
+      // for (const file of odometerPhoto) await saveCapture(file, 'odometer')
+      // for (const file of chassisPhotos) await saveCapture(file, 'chassis')
       // for (const file of walkaroundVideo) await saveCapture(file, 'walkaround_video')
 
       await logAction({

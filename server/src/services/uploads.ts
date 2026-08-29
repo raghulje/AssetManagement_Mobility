@@ -113,9 +113,9 @@ export function makeCaptureFormUploader(subdir: string) {
     },
   }).fields([
     { name: 'photos', maxCount: 20 },
-    { name: 'odometer_photo', maxCount: 1 },
-    { name: 'chassis_photos', maxCount: 3 },
-    { name: 'walkaround_video', maxCount: 1 },
+    // { name: 'odometer_photo', maxCount: 1 }, // disabled — re-enable later
+    // { name: 'chassis_photos', maxCount: 3 },
+    // { name: 'walkaround_video', maxCount: 1 },
   ])
 }
 

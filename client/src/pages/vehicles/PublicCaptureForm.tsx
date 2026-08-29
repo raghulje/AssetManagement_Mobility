@@ -44,8 +44,8 @@ type FieldErrors = {
   email?: string
   phone?: string
   vehiclePhotos?: string
-  odometer?: string
-  chassis?: string
+  odometer?: string // kept for PHOTO_BUCKETS — section disabled in form
+  chassis?: string // kept for PHOTO_BUCKETS — section disabled in form
   // video?: string // walkaround video disabled
 }
 
@@ -93,8 +93,8 @@ function emptyBuckets(): Record<PhotoBucket, LocalPhoto[]> {
 
 const CAPTURE_SECTION_ORDER: PhotoBucket[] = [
   'vehicle',
-  'odometer',
-  'chassis',
+  // 'odometer', // disabled — re-enable later
+  // 'chassis',  // disabled — re-enable later
 ]
 // Walkaround video section disabled — unreliable on mobile browsers.
 // const CAPTURE_SECTION_ORDER: Array<PhotoBucket | 'video'> = ['vehicle', 'odometer', 'video', 'chassis']
@@ -387,15 +387,15 @@ export default function PublicCaptureForm() {
     if (photoBuckets.vehicle.length < PHOTO_BUCKETS.vehicle.min) {
       next.vehiclePhotos = `Take at least ${MIN_VEHICLE_PHOTOS} vehicle photos`
     }
-    if (photoBuckets.odometer.length < PHOTO_BUCKETS.odometer.min) next.odometer = 'Odometer photo is required'
-    if (photoBuckets.chassis.length < PHOTO_BUCKETS.chassis.min) next.chassis = `Take exactly ${CHASSIS_REQUIRED} chassis photos`
+    // if (photoBuckets.odometer.length < PHOTO_BUCKETS.odometer.min) next.odometer = 'Odometer photo is required'
+    // if (photoBuckets.chassis.length < PHOTO_BUCKETS.chassis.min) next.chassis = `Take exactly ${CHASSIS_REQUIRED} chassis photos`
     // if (!walkaroundVideo) next.video = 'Record the 30 second walkaround video'
     return next
   }
 
   const totalFiles = useMemo(
-    () => Object.values(photoBuckets).reduce((n, arr) => n + arr.length, 0),
-    [photoBuckets],
+    () => photoBuckets.vehicle.length,
+    [photoBuckets.vehicle.length],
   )
 
   const canSubmit = useMemo(() => {
@@ -405,11 +405,11 @@ export default function PublicCaptureForm() {
       && selectedEmployee?.id
       && populatedEmail
       && populatedPhones.length >= 1
-      && photoBuckets.vehicle.length >= PHOTO_BUCKETS.vehicle.min
-      && photoBuckets.odometer.length >= PHOTO_BUCKETS.odometer.min
-      && photoBuckets.chassis.length >= PHOTO_BUCKETS.chassis.min,
+      && photoBuckets.vehicle.length >= PHOTO_BUCKETS.vehicle.min,
+      // && photoBuckets.odometer.length >= PHOTO_BUCKETS.odometer.min
+      // && photoBuckets.chassis.length >= PHOTO_BUCKETS.chassis.min,
     )
-  }, [selected, selectedEmployee, populatedEmail, populatedPhones.length, photoBuckets, submitting, gpsBusy, stamping])
+  }, [selected, selectedEmployee, populatedEmail, populatedPhones.length, photoBuckets.vehicle.length, submitting, gpsBusy, stamping])
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -418,7 +418,8 @@ export default function PublicCaptureForm() {
     if (Object.keys(errs).length) {
       setError(
         errs.vehicle || errs.employee || errs.email || errs.phone
-        || errs.vehiclePhotos || errs.odometer || errs.chassis
+        || errs.vehiclePhotos
+        // || errs.odometer || errs.chassis
         || 'Please fix the highlighted fields',
       )
       return
@@ -442,8 +443,8 @@ export default function PublicCaptureForm() {
       }
       if (address) fd.append('address', address)
       for (const p of photoBuckets.vehicle) fd.append('photos', p.file, p.file.name || 'photo.jpg')
-      for (const p of photoBuckets.odometer) fd.append('odometer_photo', p.file, p.file.name || 'odometer.jpg')
-      for (const p of photoBuckets.chassis) fd.append('chassis_photos', p.file, p.file.name || 'chassis.jpg')
+      // for (const p of photoBuckets.odometer) fd.append('odometer_photo', p.file, p.file.name || 'odometer.jpg')
+      // for (const p of photoBuckets.chassis) fd.append('chassis_photos', p.file, p.file.name || 'chassis.jpg')
       /* walkaround video disabled
       if (walkaroundVideo) {
         const ext = walkaroundVideo.file.type.includes('mp4') ? '.mp4' : '.webm'
@@ -675,8 +676,10 @@ export default function PublicCaptureForm() {
                 <li className={photoBuckets.vehicle.length >= MIN_VEHICLE_PHOTOS ? 'is-done' : ''}>
                   {MIN_VEHICLE_PHOTOS}+ vehicle photos
                 </li>
+                {/* odometer + chassis disabled — re-enable later
                 <li className={photoBuckets.odometer.length >= 1 ? 'is-done' : ''}>Odometer photo</li>
                 <li className={photoBuckets.chassis.length >= 3 ? 'is-done' : ''}>3 chassis photos</li>
+                */}
               </ul>
             </div>
 
