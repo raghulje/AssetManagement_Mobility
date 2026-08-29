@@ -123,13 +123,18 @@ export function VehicleCaptureFrame({
               preload="metadata"
             />
           ) : (
-            <img
-              src={photoUrl}
-              alt="Vehicle capture"
-              className="vc-frame__photo vc-frame__photo--zoomable"
-              title="Double-click to view full screen"
-              onDoubleClick={() => setLightboxOpen(true)}
-            />
+            <button
+              type="button"
+              className="vc-frame__photo-open"
+              onClick={() => setLightboxOpen(true)}
+              aria-label="View full screen photo"
+            >
+              <img
+                src={photoUrl}
+                alt="Vehicle capture"
+                className="vc-frame__photo vc-frame__photo--zoomable"
+              />
+            </button>
           )}
         </div>
 
