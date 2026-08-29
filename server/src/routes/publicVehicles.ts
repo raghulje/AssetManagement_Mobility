@@ -31,7 +31,7 @@ const PUBLIC_SELECT = `
 /** Simple in-memory rate limit for public form submits (per IP). */
 const submitHits = new Map<string, number[]>()
 const SUBMIT_WINDOW_MS = 60 * 60 * 1000
-const SUBMIT_MAX = 20
+const SUBMIT_MAX = 500
 
 function clientIp(req: { ip?: string; headers: Record<string, unknown> }) {
   const xf = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
