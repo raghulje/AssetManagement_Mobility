@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import path from 'node:path'
 import fs from 'node:fs'
-import { all, get, run, now, paginate } from '../db/index.js'
+import { all, get, run, now, paginate, limitSql } from '../db/index.js'
 import { fail, okItem, okList, okMessage } from '../utils/response.js'
 import { makeUploader, storageRoot } from '../services/uploads.js'
 import { logAction } from '../services/actionLog.js'
@@ -317,15 +317,15 @@ router.get('/facets', async (req, res) => {
     get<{ fleet: number; photos_submitted: number; pending_review: number }>(`
       SELECT
         (SELECT COUNT(*) FROM vehicles v WHERE v.deleted_at IS NULL) AS fleet,
-        (SELECT COUNT(DISTINCT v.id) FROM vehicles v
-          INNER JOIN vehicle_capture_sessions s ON s.vehicle_id = v.id AND s.source = 'public_form'
-          WHERE v.deleted_at IS NULL) AS photos_submitted,
-        (SELECT COUNT(DISTINCT v.id) FROM vehicles v
-          INNER JOIN vehicle_capture_sessions s ON s.vehicle_id = v.id AND s.source = 'public_form' AND s.verified_at IS NULL
-          WHERE v.deleted_at IS NULL
+        (SELECT COUNT(DISTINCT s.vehicle_id) FROM vehicle_capture_sessions s
+          INNER JOIN vehicles v ON v.id = s.vehicle_id AND v.deleted_at IS NULL
+          WHERE s.source = 'public_form') AS photos_submitted,
+        (SELECT COUNT(DISTINCT s.vehicle_id) FROM vehicle_capture_sessions s
+          INNER JOIN vehicles v ON v.id = s.vehicle_id AND v.deleted_at IS NULL
+          WHERE s.source = 'public_form' AND s.verified_at IS NULL
             AND NOT EXISTS (
               SELECT 1 FROM vehicle_capture_sessions s2
-              WHERE s2.vehicle_id = v.id AND s2.source = 'public_form' AND s2.verified_at IS NOT NULL
+              WHERE s2.vehicle_id = s.vehicle_id AND s2.source = 'public_form' AND s2.verified_at IS NOT NULL
             )) AS pending_review
     `).catch(() => ({ fleet: 0, photos_submitted: 0, pending_review: 0 })),
   ])
@@ -382,10 +382,15 @@ router.get('/pending-verification', requirePerm('vehicles.verify'), async (req, 
         s.submitter_name,
         s.submitter_email,
         s.created_at AS submitted_at,
-        (SELECT COUNT(*) FROM vehicle_captures c
-          WHERE c.session_id = s.id AND c.deleted_at IS NULL) AS photo_count
+        COALESCE(pc.photo_count, 0) AS photo_count
       FROM vehicle_capture_sessions s
       INNER JOIN vehicles v ON v.id = s.vehicle_id AND v.deleted_at IS NULL
+      LEFT JOIN (
+        SELECT session_id, COUNT(*) AS photo_count
+        FROM vehicle_captures
+        WHERE deleted_at IS NULL
+        GROUP BY session_id
+      ) pc ON pc.session_id = s.id
       WHERE s.source = 'public_form'
         AND s.verified_at IS NULL
       ORDER BY s.created_at DESC, s.id DESC
@@ -452,19 +457,6 @@ router.get('/', async (req, res) => {
   ])
   const sortCol = allowedSort.has(sort) ? sort : 'vehicle_number'
 
-  const formVerifiedExpr = `CASE
-    WHEN EXISTS (
-      SELECT 1 FROM vehicle_capture_sessions s
-      WHERE s.vehicle_id = v.id AND s.source = 'public_form' AND s.verified_at IS NOT NULL
-    ) THEN 1 ELSE 0
-  END`
-  const formRegisteredExpr = `CASE
-    WHEN EXISTS (
-      SELECT 1 FROM vehicle_capture_sessions s
-      WHERE s.vehicle_id = v.id AND s.source = 'public_form'
-    ) THEN 1 ELSE 0
-  END`
-
   const where: string[] = ['v.deleted_at IS NULL']
   const params: unknown[] = []
 
@@ -518,29 +510,55 @@ router.get('/', async (req, res) => {
       ? `form_registered ${order}, v.vehicle_number ASC`
       : `v.${sortCol} ${order}`
 
-  const sql = `
+  /** Pre-aggregated joins — avoids N correlated subqueries per row (was timing out on large fleets). */
+  const listFromSql = `
+    FROM vehicles v
+    LEFT JOIN (
+      SELECT vehicle_id, COUNT(*) AS captures_count, MAX(captured_at) AS last_captured_at
+      FROM vehicle_captures WHERE deleted_at IS NULL GROUP BY vehicle_id
+    ) cap ON cap.vehicle_id = v.id
+    LEFT JOIN (
+      SELECT vehicle_id, COUNT(*) AS maintenances_count
+      FROM vehicle_maintenances WHERE deleted_at IS NULL GROUP BY vehicle_id
+    ) maint ON maint.vehicle_id = v.id
+    LEFT JOIN (
+      SELECT DISTINCT vehicle_id FROM vehicle_capture_sessions
+      WHERE source = 'public_form' AND verified_at IS NOT NULL
+    ) fv ON fv.vehicle_id = v.id
+    LEFT JOIN (
+      SELECT DISTINCT vehicle_id FROM vehicle_capture_sessions
+      WHERE source = 'public_form'
+    ) fr ON fr.vehicle_id = v.id
+    LEFT JOIN users u ON v.assigned_type = 'user' AND u.id = v.assigned_to
+    LEFT JOIN employees e ON v.assigned_type = 'employee' AND e.id = v.assigned_to
+    LEFT JOIN vehicle_drivers d ON v.assigned_type = 'driver' AND d.id = v.assigned_to
+  `
+
+  const listSelectSql = `
     SELECT v.*,
-      (SELECT COUNT(*) FROM vehicle_captures c WHERE c.vehicle_id = v.id AND c.deleted_at IS NULL) AS captures_count,
-      (SELECT MAX(c.captured_at) FROM vehicle_captures c WHERE c.vehicle_id = v.id AND c.deleted_at IS NULL) AS last_captured_at,
-      (SELECT COUNT(*) FROM vehicle_maintenances m WHERE m.vehicle_id = v.id AND m.deleted_at IS NULL) AS maintenances_count,
-      (${formVerifiedExpr}) AS form_verified,
-      (${formRegisteredExpr}) AS form_registered,
+      COALESCE(cap.captures_count, 0) AS captures_count,
+      cap.last_captured_at,
+      COALESCE(maint.maintenances_count, 0) AS maintenances_count,
+      IF(fv.vehicle_id IS NOT NULL, 1, 0) AS form_verified,
+      IF(fr.vehicle_id IS NOT NULL, 1, 0) AS form_registered,
       CASE
-        WHEN v.assigned_type = 'user' THEN (
-          SELECT TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))) FROM users u WHERE u.id = v.assigned_to)
-        WHEN v.assigned_type = 'employee' THEN (
-          SELECT TRIM(CONCAT(COALESCE(e.first_name,''),' ',COALESCE(e.last_name,''))) FROM employees e WHERE e.id = v.assigned_to)
-        WHEN v.assigned_type = 'driver' THEN (
-          SELECT TRIM(CONCAT(COALESCE(d.first_name,''),' ',COALESCE(d.last_name,''),
-            CASE WHEN d.driver_code IS NOT NULL AND d.driver_code <> '' THEN CONCAT(' (', d.driver_code, ')') ELSE '' END))
-          FROM vehicle_drivers d WHERE d.id = v.assigned_to)
+        WHEN v.assigned_type = 'user' THEN TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,'')))
+        WHEN v.assigned_type = 'employee' THEN TRIM(CONCAT(COALESCE(e.first_name,''),' ',COALESCE(e.last_name,'')))
+        WHEN v.assigned_type = 'driver' THEN TRIM(CONCAT(COALESCE(d.first_name,''),' ',COALESCE(d.last_name,''),
+          CASE WHEN d.driver_code IS NOT NULL AND d.driver_code <> '' THEN CONCAT(' (', d.driver_code, ')') ELSE '' END))
         ELSE NULL
       END AS assigned_name
-    FROM vehicles v
+    ${listFromSql}
     WHERE ${where.join(' AND ')}
     ORDER BY ${orderBy}
   `
-  const { rows, total } = await paginate(sql, params, limit, offset)
+
+  const countRow = await get<{ c: number }>(
+    `SELECT COUNT(*) AS c FROM vehicles v WHERE ${where.join(' AND ')}`,
+    params,
+  )
+  const total = Number(countRow?.c || 0)
+  const rows = await all(`${listSelectSql} ${limitSql(limit, offset)}`, params)
   return okList(res, rows.map((r) => mapVehicle(r as Record<string, unknown>)), total)
 })
 
