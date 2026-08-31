@@ -440,7 +440,10 @@ router.get('/', async (req, res) => {
   const registered = String(req.query.registered || req.query.form_registered || '').trim().toLowerCase()
   const sort = String(req.query.sort || 'vehicle_number')
   const order = String(req.query.order || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC'
-  const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 200)
+  const isExport = ['1', 'true', 'yes'].includes(String(req.query.export || '').trim().toLowerCase())
+  const maxLimit = isExport ? 10_000 : 200
+  const defaultLimit = isExport ? 5000 : 25
+  const limit = Math.min(Math.max(Number(req.query.limit) || defaultLimit, 1), maxLimit)
   const offset = Math.max(Number(req.query.offset) || 0, 0)
 
   const allowedSort = new Set([

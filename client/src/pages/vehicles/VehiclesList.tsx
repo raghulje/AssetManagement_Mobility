@@ -327,7 +327,7 @@ export default function VehiclesList() {
     setExportBusy(true)
     setError('')
     try {
-      const data = await vehiclesApi.list({
+      const baseParams = {
         search: search || undefined,
         location: cityId ? undefined : (location || undefined),
         city_id: cityId || undefined,
@@ -337,11 +337,26 @@ export default function VehiclesList() {
         fuel_type: fuelType || undefined,
         verified: verified || undefined,
         registered: registered || undefined,
-        limit: 5000,
-        offset: 0,
         sort,
         order,
-      })
+        export: 1,
+      }
+      const batchSize = 500
+      let offset = 0
+      let totalCount = 0
+      const allRows: Vehicle[] = []
+      for (;;) {
+        const data = await vehiclesApi.list({
+          ...baseParams,
+          limit: batchSize,
+          offset,
+        })
+        const batch = data.rows || []
+        if (!offset) totalCount = data.total || batch.length
+        allRows.push(...batch)
+        offset += batch.length
+        if (batch.length === 0 || allRows.length >= totalCount) break
+      }
       const headers = [
         'Vehicle',
         'Model',
@@ -354,7 +369,7 @@ export default function VehiclesList() {
         'Photo count',
         'Last captured',
       ]
-      const csvRows = (data.rows || []).map((v) => [
+      const csvRows = allRows.map((v) => [
         v.vehicle_number || '',
         v.model || '',
         v.fuel_type || '',
