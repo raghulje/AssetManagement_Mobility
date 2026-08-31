@@ -228,9 +228,7 @@ export default function VehiclesList() {
   const [page, setPage] = useState(0)
   const [rows, setRows] = useState<Vehicle[]>([])
   const [total, setTotal] = useState(0)
-  /** Unfiltered — KPI strip only */
-  const [kpiFacets, setKpiFacets] = useState<VehicleFacets | null>(null)
-  /** Cascading counts for chips / dropdowns under current filters */
+  /** Facet counts + KPI capture stats (respect current filters) */
   const [facets, setFacets] = useState<VehicleFacets | null>(null)
   const [loading, setLoading] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
@@ -255,24 +253,23 @@ export default function VehiclesList() {
   }, [])
 
   useEffect(() => {
-    vehiclesApi.facets().then(setKpiFacets).catch(() => undefined)
-  }, [pendingRefresh])
-
-  useEffect(() => {
     let cancelled = false
     vehiclesApi
       .facets({
+        search: search || undefined,
         fuel_type: fuelType || undefined,
         city_id: cityId || undefined,
         location: cityId ? undefined : (location || undefined),
         model_id: modelId || undefined,
         model: modelId ? undefined : (model || undefined),
         category: category || undefined,
+        verified: verified || undefined,
+        registered: registered || undefined,
       })
       .then((f) => { if (!cancelled) setFacets(f) })
       .catch(() => undefined)
     return () => { cancelled = true }
-  }, [fuelType, cityId, location, modelId, model, category])
+  }, [search, fuelType, cityId, location, modelId, model, category, verified, registered, pendingRefresh])
 
   useEffect(() => {
     setPage(0)
@@ -394,22 +391,28 @@ export default function VehiclesList() {
   }
 
   const fleetTotal = useMemo(() => {
-    if (!kpiFacets) return null
-    return kpiFacets.fuel_types.reduce((s, f) => s + Number(f.c || 0), 0)
-  }, [kpiFacets])
+    const fromStats = facets?.capture_stats?.fleet
+    if (fromStats != null) return Number(fromStats)
+    if (!facets) return null
+    return facets.fuel_types.reduce((s, f) => s + Number(f.c || 0), 0)
+  }, [facets])
 
   const evCount = useMemo(
-    () => kpiFacets?.fuel_types.find((f) => f.value === 'EV')?.c ?? null,
-    [kpiFacets],
+    () => facets?.fuel_types.find((f) => f.value === 'EV')?.c ?? null,
+    [facets],
   )
 
-  const cityCount = kpiFacets?.locations.length ?? null
-  const modelCount = kpiFacets?.models.length ?? null
+  const cityCount = (cityId || location)
+    ? 1
+    : (facets?.locations.length ?? null)
+  const modelCount = (modelId || model)
+    ? 1
+    : (facets?.models.length ?? null)
   const evShare = fleetTotal && evCount != null && fleetTotal > 0
-    ? `${((evCount / fleetTotal) * 100).toFixed(1)}% of total fleet`
+    ? `${((evCount / fleetTotal) * 100).toFixed(1)}% of filtered fleet`
     : 'Electric vehicles in fleet'
 
-  const hasActiveFilter = Boolean(cityId || location || modelId || model || category || fuelType || verified || registered)
+  const hasActiveFilter = Boolean(search || cityId || location || modelId || model || category || fuelType || verified || registered)
 
   const clearFilters = () => {
     setCityId('')
@@ -425,9 +428,9 @@ export default function VehiclesList() {
     setDrill('none')
   }
 
-  const photosSubmitted = kpiFacets?.capture_stats?.photos_submitted ?? null
-  const capturePending = kpiFacets?.capture_stats?.capture_pending ?? null
-  const pendingReview = kpiFacets?.capture_stats?.pending_review ?? null
+  const photosSubmitted = facets?.capture_stats?.photos_submitted ?? null
+  const capturePending = facets?.capture_stats?.capture_pending ?? null
+  const pendingReview = facets?.capture_stats?.pending_review ?? null
 
   const filterPhotosSubmitted = () => {
     setDrill('none')
@@ -514,14 +517,14 @@ export default function VehiclesList() {
     setDrill('models')
   }
 
-  const chipFacets = facets || kpiFacets
+  const chipFacets = facets
 
   const activeCityLabel =
-    (chipFacets?.locations || []).find((o) => String(o.id) === cityId || o.value === location)?.value
-    || (kpiFacets?.locations || []).find((o) => String(o.id) === cityId || o.value === location)?.value
+    (facets?.locations || []).find((o) => String(o.id) === cityId || o.value === location)?.value
+    || (cityId || location ? (location || undefined) : undefined)
   const activeModelLabel =
-    (chipFacets?.models || []).find((o) => String(o.id) === modelId || o.value === model)?.value
-    || (kpiFacets?.models || []).find((o) => String(o.id) === modelId || o.value === model)?.value
+    (facets?.models || []).find((o) => String(o.id) === modelId || o.value === model)?.value
+    || (modelId || model ? model : undefined)
 
   const filterSummary = [
     fuelType ? `${fuelType} fleet` : null,
@@ -531,6 +534,8 @@ export default function VehiclesList() {
     registered === '0' ? 'Capture pending' : null,
     verified === '1' ? 'Verified' : verified === '0' ? 'Pending review' : null,
   ].filter(Boolean).join(' · ')
+
+  const kpiScopeHint = filterSummary || (hasActiveFilter ? 'Matching current filters' : null)
 
   return (
     <AppLayout
@@ -547,7 +552,7 @@ export default function VehiclesList() {
           >
             <span className="rm-kpi__label">Vehicles</span>
             <span className="rm-kpi__value">{fmt(fleetTotal)}</span>
-            <span className="rm-kpi__hint">Full fleet inventory</span>
+            <span className="rm-kpi__hint">{kpiScopeHint || 'Full fleet inventory'}</span>
             <span className="rm-kpi__icon" aria-hidden><i className="fas fa-car" /></span>
           </button>
 
@@ -570,9 +575,9 @@ export default function VehiclesList() {
             <span className="rm-kpi__label">Cities</span>
             <span className="rm-kpi__value">{fmt(cityCount)}</span>
             <span className="rm-kpi__hint">
-              {fuelType || modelId || model
-                ? `${fmt(chipFacets?.locations?.length)} with current filters`
-                : 'Active operating locations'}
+              {kpiScopeHint || (fuelType || cityId || location || modelId || model
+                ? `${fmt(chipFacets?.locations?.length)} cities · ${fmt(chipFacets?.models?.length)} models`
+                : 'Active operating locations')}
             </span>
             <span className="rm-kpi__icon" aria-hidden><i className="fas fa-map-marker-alt" /></span>
           </button>
@@ -585,9 +590,9 @@ export default function VehiclesList() {
             <span className="rm-kpi__label">Models</span>
             <span className="rm-kpi__value">{fmt(modelCount)}</span>
             <span className="rm-kpi__hint">
-              {fuelType || cityId || location
+              {kpiScopeHint || (fuelType || cityId || location
                 ? `${fmt(chipFacets?.models?.length)} with current filters`
-                : 'Platforms in operation'}
+                : 'Platforms in operation')}
             </span>
             <span className="rm-kpi__icon" aria-hidden><i className="fas fa-car-side" /></span>
           </button>
@@ -601,7 +606,7 @@ export default function VehiclesList() {
           >
             <span className="rm-kpi__label">Photos submitted</span>
             <span className="rm-kpi__value">{fmt(photosSubmitted)}</span>
-            <span className="rm-kpi__hint">Form capture on file</span>
+            <span className="rm-kpi__hint">{kpiScopeHint || 'Form capture on file'}</span>
             <span className="rm-kpi__icon" aria-hidden><i className="fas fa-camera" /></span>
           </button>
 
@@ -612,7 +617,7 @@ export default function VehiclesList() {
           >
             <span className="rm-kpi__label">Capture pending</span>
             <span className="rm-kpi__value">{fmt(capturePending)}</span>
-            <span className="rm-kpi__hint">Still awaiting /capture</span>
+            <span className="rm-kpi__hint">{kpiScopeHint || 'Still awaiting /capture'}</span>
             <span className="rm-kpi__icon" aria-hidden><i className="fas fa-hourglass-half" /></span>
           </button>
 
@@ -624,7 +629,7 @@ export default function VehiclesList() {
             <span className="rm-kpi__label">Pending review</span>
             <span className="rm-kpi__value">{fmt(pendingReview)}</span>
             <span className="rm-kpi__hint">
-              {canVerify ? 'Submitted · need to verify' : 'Submitted · awaiting verification'}
+              {kpiScopeHint || (canVerify ? 'Submitted · need to verify' : 'Submitted · awaiting verification')}
             </span>
             <span className="rm-kpi__icon" aria-hidden><i className="fas fa-clipboard-check" /></span>
           </button>
@@ -814,7 +819,7 @@ export default function VehiclesList() {
               placeholder="All fuel types"
               options={[
                 { value: '', label: 'All fuel types' },
-                ...((kpiFacets || chipFacets)?.fuel_types || []).map((o) => ({
+                ...((chipFacets)?.fuel_types || []).map((o) => ({
                   value: o.value,
                   label: `${o.value} (${o.c})`,
                 })),

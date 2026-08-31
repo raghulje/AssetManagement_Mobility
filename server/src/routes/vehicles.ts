@@ -247,6 +247,7 @@ function fuelFromCategory(category: string): string {
 }
 
 router.get('/facets', async (req, res) => {
+  const search = String(req.query.search || req.query.q || '').trim()
   const fuelType = String(req.query.fuel_type || '').trim()
   const cityId = String(req.query.city_id || '').trim()
   const location = String(req.query.location || '').trim()
@@ -254,11 +255,18 @@ router.get('/facets', async (req, res) => {
   const model = String(req.query.model || '').trim()
   const category = String(req.query.category || '').trim()
   const status = String(req.query.status || '').trim()
+  const verified = String(req.query.verified || req.query.verification_status || '').trim().toLowerCase()
+  const registered = String(req.query.registered || req.query.form_registered || '').trim().toLowerCase()
 
   /** Shared vehicle predicates for cascading facet counts (exclude the dimension being grouped). */
   function vehiclePred(exclude: 'fuel' | 'city' | 'model' | 'category' | 'status' | null = null) {
     const parts: string[] = ['v.deleted_at IS NULL']
     const p: unknown[] = []
+    if (search) {
+      parts.push('(v.vehicle_number LIKE ? OR v.model LIKE ? OR v.location_name LIKE ? OR v.name LIKE ? OR v.order_number LIKE ?)')
+      const like = `%${search}%`
+      p.push(like, like, like, like, like)
+    }
     if (exclude !== 'fuel' && fuelType) { parts.push('v.fuel_type = ?'); p.push(fuelType) }
     if (exclude !== 'city') {
       if (cityId) { parts.push('v.city_id = ?'); p.push(Number(cityId)) }
@@ -270,6 +278,34 @@ router.get('/facets', async (req, res) => {
     }
     if (exclude !== 'category' && category) { parts.push('v.category = ?'); p.push(category) }
     if (exclude !== 'status' && status) { parts.push('v.status = ?'); p.push(status) }
+    if (registered === '1' || registered === 'true' || registered === 'yes' || registered === 'submitted') {
+      parts.push(`EXISTS (
+        SELECT 1 FROM vehicle_capture_sessions s
+        WHERE s.vehicle_id = v.id AND s.source = 'public_form'
+      )`)
+    }
+    if (registered === '0' || registered === 'false' || registered === 'no' || registered === 'pending') {
+      parts.push(`NOT EXISTS (
+        SELECT 1 FROM vehicle_capture_sessions s
+        WHERE s.vehicle_id = v.id AND s.source = 'public_form'
+      )`)
+    }
+    if (verified === '1' || verified === 'true' || verified === 'verified' || verified === 'yes') {
+      parts.push(`EXISTS (
+        SELECT 1 FROM vehicle_capture_sessions s
+        WHERE s.vehicle_id = v.id AND s.source = 'public_form' AND s.verified_at IS NOT NULL
+      )`)
+    }
+    if (verified === '0' || verified === 'false' || verified === 'not_verified' || verified === 'no' || verified === 'unverified' || verified === 'pending_review') {
+      parts.push(`EXISTS (
+        SELECT 1 FROM vehicle_capture_sessions s
+        WHERE s.vehicle_id = v.id AND s.source = 'public_form' AND s.verified_at IS NULL
+      )`)
+      parts.push(`NOT EXISTS (
+        SELECT 1 FROM vehicle_capture_sessions s
+        WHERE s.vehicle_id = v.id AND s.source = 'public_form' AND s.verified_at IS NOT NULL
+      )`)
+    }
     return { sql: parts.join(' AND '), params: p }
   }
 
@@ -278,6 +314,7 @@ router.get('/facets', async (req, res) => {
   const catPred = vehiclePred('category')
   const fuelPred = vehiclePred('fuel')
   const statusPred = vehiclePred('status')
+  const allPred = vehiclePred(null)
 
   const [locations, models, categories, fuelTypes, statuses, captureStats] = await Promise.all([
     all<{ value: string; c: number; id: number }>(`
@@ -316,18 +353,18 @@ router.get('/facets', async (req, res) => {
       ORDER BY v.status`, statusPred.params),
     get<{ fleet: number; photos_submitted: number; pending_review: number }>(`
       SELECT
-        (SELECT COUNT(*) FROM vehicles v WHERE v.deleted_at IS NULL) AS fleet,
-        (SELECT COUNT(DISTINCT s.vehicle_id) FROM vehicle_capture_sessions s
-          INNER JOIN vehicles v ON v.id = s.vehicle_id AND v.deleted_at IS NULL
-          WHERE s.source = 'public_form') AS photos_submitted,
-        (SELECT COUNT(DISTINCT s.vehicle_id) FROM vehicle_capture_sessions s
-          INNER JOIN vehicles v ON v.id = s.vehicle_id AND v.deleted_at IS NULL
-          WHERE s.source = 'public_form' AND s.verified_at IS NULL
+        (SELECT COUNT(*) FROM vehicles v WHERE ${allPred.sql}) AS fleet,
+        (SELECT COUNT(DISTINCT v.id) FROM vehicles v
+          INNER JOIN vehicle_capture_sessions s ON s.vehicle_id = v.id AND s.source = 'public_form'
+          WHERE ${allPred.sql}) AS photos_submitted,
+        (SELECT COUNT(DISTINCT v.id) FROM vehicles v
+          INNER JOIN vehicle_capture_sessions s ON s.vehicle_id = v.id AND s.source = 'public_form' AND s.verified_at IS NULL
+          WHERE ${allPred.sql}
             AND NOT EXISTS (
               SELECT 1 FROM vehicle_capture_sessions s2
-              WHERE s2.vehicle_id = s.vehicle_id AND s2.source = 'public_form' AND s2.verified_at IS NOT NULL
+              WHERE s2.vehicle_id = v.id AND s2.source = 'public_form' AND s2.verified_at IS NOT NULL
             )) AS pending_review
-    `).catch(() => ({ fleet: 0, photos_submitted: 0, pending_review: 0 })),
+    `, [...allPred.params, ...allPred.params, ...allPred.params]).catch(() => ({ fleet: 0, photos_submitted: 0, pending_review: 0 })),
   ])
 
   const fleet = Number(captureStats?.fleet || 0)
