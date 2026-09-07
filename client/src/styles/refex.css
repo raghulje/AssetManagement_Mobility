@@ -164,8 +164,6 @@ img { max-width: 100%; }
 .main-header .logo-refexone {
   height: 28px;
   max-width: 108px;
-  /* Asset has a black plate — lift colors on the white header */
-  mix-blend-mode: screen;
 }
 .main-header .logo:hover img { transform: scale(1.02); opacity: 0.95; }
 
