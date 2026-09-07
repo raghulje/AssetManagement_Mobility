@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { authApi, setToken } from './client'
+import { goToRefexOne } from '../utils/refexOneUrl'
 
 type User = {
   id: number
@@ -84,6 +85,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     logout() {
       setToken(null)
       setUser(null)
+      // Match P2P: leave Mobility and return to RefexOne portal / app shell
+      goToRefexOne()
     },
     async refreshUser() {
       const u = await authApi.me()

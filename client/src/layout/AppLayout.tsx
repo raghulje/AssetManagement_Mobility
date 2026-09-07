@@ -379,7 +379,7 @@ export default function AppLayout({ children, title, subtitle, dense, hideHeader
                   <NavLink to="/account/profile" onClick={() => setUserOpen(false)}>Edit Profile</NavLink>
                   <NavLink to="/account/password" onClick={() => setUserOpen(false)}>Change Password</NavLink>
                   <div className="divider" />
-                  <button type="button" onClick={() => { logout(); navigate('/login') }}>Logout</button>
+                  <button type="button" onClick={() => { logout() }}>Logout</button>
                 </div>
               </li>
             </ul>

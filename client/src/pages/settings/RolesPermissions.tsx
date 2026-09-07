@@ -47,6 +47,17 @@ const ROLE_BLURBS: Record<string, string> = {
 }
 const ACTIONS = ['view', 'create', 'edit', 'delete', 'checkout', 'verify'] as const
 
+/** Server /users caps each page at 500 — page until we have everyone. */
+const USERS_PAGE_SIZE = 500
+
+type MemberUser = {
+  id: number
+  label: string
+  searchText: string
+}
+
+type RoleMember = { id: number; email: string | null; first_name: string; last_name: string; username: string }
+
 function userCountLabel(n: number) {
   const count = Number(n) || 0
   return count === 1 ? '1 user' : `${count} users`
@@ -58,6 +69,46 @@ function permsEqual(a: Record<string, boolean>, b: Record<string, boolean>) {
     if (Boolean(a[k]) !== Boolean(b[k])) return false
   }
   return true
+}
+
+function toMemberUser(u: {
+  id: number | string
+  first_name?: unknown
+  last_name?: unknown
+  username?: unknown
+  email?: unknown
+}): MemberUser {
+  const id = Number(u.id)
+  const name = `${String(u.first_name || '')} ${String(u.last_name || '')}`.trim()
+  const username = String(u.username || '').trim()
+  const email = String(u.email || '').trim()
+  const label = name || username || email || String(id)
+  const secondary = [username && username !== name ? username : '', email].filter(Boolean).join(' · ')
+  return {
+    id,
+    label: secondary ? `${label} (${secondary})` : label,
+    searchText: [name, username, email, String(id)].filter(Boolean).join(' ').toLowerCase(),
+  }
+}
+
+async function loadAllAppUsers(): Promise<MemberUser[]> {
+  const byId = new Map<number, MemberUser>()
+  let offset = 0
+  let total = Infinity
+  while (offset < total) {
+    const res = await usersApi.list({ limit: USERS_PAGE_SIZE, offset })
+    total = Number(res.total) || 0
+    const rows = res.rows || []
+    for (const u of rows) {
+      const mapped = toMemberUser(u as Parameters<typeof toMemberUser>[0])
+      byId.set(mapped.id, mapped)
+    }
+    if (!rows.length) break
+    offset += rows.length
+    // Safety: avoid infinite loop if API ignores offset
+    if (offset > 50_000) break
+  }
+  return [...byId.values()].sort((a, b) => a.label.localeCompare(b.label))
 }
 
 export default function RolesPermissions() {
@@ -72,8 +123,8 @@ export default function RolesPermissions() {
   const [savedPerms, setSavedPerms] = useState<Record<string, boolean>>({})
   const [name, setName] = useState('')
   const [savedName, setSavedName] = useState('')
-  const [members, setMembers] = useState<Array<{ id: number; email: string | null; first_name: string; last_name: string; username: string }>>([])
-  const [allUsers, setAllUsers] = useState<Array<{ id: number; label: string }>>([])
+  const [allUsers, setAllUsers] = useState<MemberUser[]>([])
+  const [usersLoading, setUsersLoading] = useState(true)
   const [memberIds, setMemberIds] = useState<number[]>([])
   const [savedMemberIds, setSavedMemberIds] = useState<number[]>([])
   const [busy, setBusy] = useState(false)
@@ -110,17 +161,17 @@ export default function RolesPermissions() {
 
   useEffect(() => {
     loadRoles().catch((e: Error) => setError(e.message))
-    usersApi.list({ limit: 500 }).then((r) => {
-      setAllUsers((r.rows || []).map((u) => ({
-        id: Number(u.id),
-        label: `${String(u.first_name || '')} ${String(u.last_name || '')}`.trim() || String(u.username || u.email || u.id),
-      })))
-    }).catch(() => undefined)
+    setUsersLoading(true)
+    loadAllAppUsers()
+      .then(setAllUsers)
+      .catch(() => undefined)
+      .finally(() => setUsersLoading(false))
   }, [])
 
   useEffect(() => {
     if (!selectedId) return
     setError('')
+    setMemberFilter('')
     groupsApi.get(selectedId)
       .then((role) => {
         const roleName = String(role.name || '')
@@ -135,11 +186,19 @@ export default function RolesPermissions() {
         }
         setPerms(map)
         setSavedPerms({ ...map })
-        const mem = (role.members as typeof members) || []
-        setMembers(mem)
+        const mem = (role.members as RoleMember[]) || []
         const ids = mem.map((m) => Number(m.id))
         setMemberIds(ids)
         setSavedMemberIds(ids)
+        // Ensure assigned members appear even if missing from the paged user list
+        setAllUsers((prev) => {
+          const byId = new Map(prev.map((u) => [u.id, u]))
+          for (const m of mem) {
+            const id = Number(m.id)
+            if (!byId.has(id)) byId.set(id, toMemberUser(m))
+          }
+          return [...byId.values()].sort((a, b) => a.label.localeCompare(b.label))
+        })
       })
       .catch((e: Error) => setError(e.message))
   }, [selectedId])
@@ -228,7 +287,7 @@ export default function RolesPermissions() {
   const filteredUsers = useMemo(() => {
     const q = memberFilter.trim().toLowerCase()
     if (!q) return allUsers
-    return allUsers.filter((u) => u.label.toLowerCase().includes(q))
+    return allUsers.filter((u) => u.searchText.includes(q) || u.label.toLowerCase().includes(q))
   }, [allUsers, memberFilter])
 
   return (
@@ -432,12 +491,16 @@ export default function RolesPermissions() {
 
               <h4 className="roles-section-title">Members</h4>
               <p className="help-block" style={{ marginTop: 0 }}>
-                Users in this role inherit the permissions above. {memberIds.length} selected.
+                Users in this role inherit the permissions above. {memberIds.length} selected
+                {usersLoading
+                  ? ' · loading all app users…'
+                  : ` · ${allUsers.length} app users available`}
+                .
               </p>
               <input
                 className="form-control"
                 style={{ maxWidth: 320, marginBottom: 10 }}
-                placeholder="Filter users…"
+                placeholder="Filter by name, email, or username…"
                 value={memberFilter}
                 onChange={(e) => setMemberFilter(e.target.value)}
               />
@@ -447,7 +510,7 @@ export default function RolesPermissions() {
                     <input
                       type="checkbox"
                       checked={memberIds.includes(u.id)}
-                      disabled={!canEdit}
+                      disabled={!canEdit || usersLoading}
                       onChange={(e) => {
                         setMemberIds((prev) => e.target.checked
                           ? [...prev, u.id]
@@ -457,7 +520,11 @@ export default function RolesPermissions() {
                     <span>{u.label}</span>
                   </label>
                 ))}
-                {filteredUsers.length === 0 ? <p className="text-muted">No users match.</p> : null}
+                {usersLoading ? (
+                  <p className="text-muted">Loading users…</p>
+                ) : filteredUsers.length === 0 ? (
+                  <p className="text-muted">No users match.</p>
+                ) : null}
               </div>
               <p style={{ marginTop: 12 }}>
                 <Link to="/users">Manage app users</Link>

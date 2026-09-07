@@ -11,7 +11,38 @@ const host = process.env.HOST || '0.0.0.0'
 const serveClient = process.env.SERVE_CLIENT === 'true'
 const publicApp = (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '')
 
-await seed()
+function formatDbBootError(err: unknown): string {
+  const e = err as { code?: string; message?: string; errors?: Array<{ code?: string; address?: string; port?: number }> }
+  const code = e?.code || e?.errors?.[0]?.code
+  const host = process.env.DB_HOST || 'localhost'
+  const portDb = process.env.DB_PORT || '3306'
+  const name = process.env.DB_NAME || 'ITAssetManagement_2026'
+  if (code === 'ECONNREFUSED') {
+    return [
+      `MySQL is not reachable at ${host}:${portDb} (ECONNREFUSED).`,
+      'Start the MySQL Windows service (or run mysqld), then retry.',
+      `Expected database from server/.env: ${name}`,
+      'Tip: MySQL Installer / mysql_configurator can create the service if it is missing.',
+    ].join('\n')
+  }
+  if (code === 'ER_BAD_DB_ERROR') {
+    return `Database "${name}" does not exist. Create it, then run: npm run migrate`
+  }
+  if (code === 'ER_ACCESS_DENIED_ERROR') {
+    return `MySQL rejected credentials for DB_USER=${process.env.DB_USER || 'root'}. Check server/.env`
+  }
+  return e?.message || String(err)
+}
+
+try {
+  await seed()
+} catch (err) {
+  console.error('\nFailed to start Refex Mobility API — database bootstrap failed:\n')
+  console.error(formatDbBootError(err))
+  console.error('')
+  process.exit(1)
+}
+
 try {
   const { ensureDefaultRoles } = await import('./services/permissions.js')
   await ensureDefaultRoles()

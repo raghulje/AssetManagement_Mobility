@@ -9,6 +9,7 @@ import RolesPermissions from './pages/settings/RolesPermissions'
 import NotificationsSettings from './pages/settings/NotificationsSettings'
 import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordReset'
 import SsoCallback from './pages/SsoCallback'
+import LogoutPage from './pages/Logout'
 import VehiclesList from './pages/vehicles/VehiclesList'
 import VehicleDetail from './pages/vehicles/VehicleDetail'
 import VehicleForm from './pages/vehicles/VehicleForm'
@@ -89,6 +90,7 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/login/sso/callback" element={<SsoCallback />} />
+            <Route path="/logout" element={<LogoutPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/vehicle/:token" element={<PublicVehicle />} />

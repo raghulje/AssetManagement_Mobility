@@ -42,10 +42,17 @@ async function openMigrationConnection() {
     CREATE TABLE IF NOT EXISTS schema_migrations (
       id INT UNSIGNED NOT NULL AUTO_INCREMENT,
       version VARCHAR(191) NOT NULL,
+      description VARCHAR(255) NULL,
       applied_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
       UNIQUE KEY uk_schema_migrations_version (version)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `).catch(() => undefined)
+
+  // Older installs created this table without `description`; later *.sql files INSERT it.
+  await root.query(`
+    ALTER TABLE schema_migrations
+      ADD COLUMN description VARCHAR(255) NULL AFTER version
   `).catch(() => undefined)
 
   return { root, database }
