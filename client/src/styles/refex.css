@@ -138,14 +138,15 @@ img { max-width: 100%; }
 .main-header .logo-pair {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   max-width: 100%;
   min-width: 0;
+  max-height: calc(var(--header-height) - 16px);
 }
 .main-header .logo-pair-divider {
   flex: 0 0 auto;
   width: 1px;
-  height: 28px;
+  height: 22px;
   background: #E2E8F0;
 }
 .main-header .logo img,
@@ -153,19 +154,20 @@ img { max-width: 100%; }
 .main-header .logo-refexone {
   width: auto;
   max-width: none;
+  max-height: calc(var(--header-height) - 18px);
   object-fit: contain;
   display: block;
-  transition: transform 220ms var(--ease), opacity 220ms var(--ease);
+  transition: opacity 220ms var(--ease);
 }
 .main-header .logo-mobility {
-  height: 40px;
-  max-width: 118px;
+  height: 32px;
+  max-width: 100px;
 }
 .main-header .logo-refexone {
-  height: 28px;
-  max-width: 108px;
+  height: 22px;
+  max-width: 92px;
 }
-.main-header .logo:hover img { transform: scale(1.02); opacity: 0.95; }
+.main-header .logo:hover img { opacity: 0.92; }
 
 .main-header .navbar {
   flex: 1;
@@ -706,11 +708,11 @@ a:hover .small-box .icon {
     box-shadow: 8px 0 28px rgba(15, 23, 42, 0.28);
   }
   .content-wrapper, .main-footer { margin-left: 0; }
-  .main-header .logo { width: auto; max-width: min(52vw, 220px); padding: 0 8px; }
-  .main-header .logo-pair { gap: 8px; }
-  .main-header .logo-pair-divider { height: 22px; }
-  .main-header .logo-mobility { height: 32px; max-width: 96px; }
-  .main-header .logo-refexone { height: 22px; max-width: 86px; }
+  .main-header .logo { width: auto; max-width: min(52vw, 200px); padding: 0 8px; }
+  .main-header .logo-pair { gap: 6px; }
+  .main-header .logo-pair-divider { height: 18px; }
+  .main-header .logo-mobility { height: 28px; max-width: 86px; }
+  .main-header .logo-refexone { height: 18px; max-width: 74px; }
   .main-header::after { left: 0; }
 }
 @media (max-width: 767px) {
@@ -718,9 +720,9 @@ a:hover .small-box .icon {
   .header-search { display: none; }
   .navbar-nav > li:not(.dropdown) { display: none; }
   .navbar-nav > li.dropdown { display: flex; }
-  .main-header .logo { max-width: min(48vw, 190px); padding: 0 6px; }
-  .main-header .logo-mobility { height: 28px; max-width: 84px; }
-  .main-header .logo-refexone { height: 20px; max-width: 76px; }
+  .main-header .logo { max-width: min(48vw, 170px); padding: 0 6px; }
+  .main-header .logo-mobility { height: 24px; max-width: 74px; }
+  .main-header .logo-refexone { height: 16px; max-width: 66px; }
 }
 
 /* Buttons */
