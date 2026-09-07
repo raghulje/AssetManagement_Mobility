@@ -8,9 +8,16 @@ export function getRefexOneUrl(): string {
 
 /**
  * Full-page navigate back to RefexOne after logout.
- * Matches P2P: when Mobility is opened from the RefexOne app shell
- * ("RefexOne Application" + Refresh header), logout returns to the portal.
+ * Clears nothing — caller must clear the session first when leaving the app.
  */
 export function goToRefexOne(): void {
   window.location.replace(getRefexOneUrl())
+}
+
+/**
+ * Return to the RefexOne portal without wiping the Mobility session
+ * (back arrow). User can reopen the app and stay signed in.
+ */
+export function returnToRefexOne(): void {
+  window.location.assign(getRefexOneUrl())
 }

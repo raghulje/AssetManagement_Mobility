@@ -27,6 +27,7 @@
   --text-help: #64748B;
   --sidebar-width: 256px;
   --header-height: 62px;
+  --refex-host-bar-height: 0px;
   --radius: 16px;
   --radius-sm: 12px;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -94,7 +95,7 @@ img { max-width: 100%; }
 
 .main-header {
   position: fixed;
-  top: 0; left: 0; right: 0;
+  top: var(--refex-host-bar-height); left: 0; right: 0;
   z-index: 1030;
   height: var(--header-height);
   display: flex;
@@ -244,7 +245,7 @@ img { max-width: 100%; }
 
 .main-sidebar {
   position: fixed;
-  top: var(--header-height);
+  top: calc(var(--header-height) + var(--refex-host-bar-height));
   left: 0;
   bottom: 0;
   width: var(--sidebar-width);
@@ -302,8 +303,8 @@ img { max-width: 100%; }
 
 .content-wrapper {
   margin-left: var(--sidebar-width);
-  margin-top: var(--header-height);
-  min-height: calc(100vh - var(--header-height) - 56px);
+  margin-top: calc(var(--header-height) + var(--refex-host-bar-height));
+  min-height: calc(100vh - var(--header-height) - var(--refex-host-bar-height) - 56px);
   background: transparent;
   padding-bottom: 24px;
   min-width: 0;
@@ -3489,6 +3490,113 @@ table.table tr.is-selected td { background: rgba(255, 107, 74, 0.08); }
   width: 100%;
   border-radius: 10px;
   font: inherit;
+}
+
+/* ==========================================================================
+   RefexOne host bar — mobile / tablet only (hidden on desktop web)
+   Back = return to portal (keep session). Refresh = leave-app logout.
+   ========================================================================== */
+
+.refex-host-bar {
+  display: none;
+}
+
+@media (max-width: 991px) {
+  .has-refex-host-bar {
+    --refex-host-bar-height: 48px;
+  }
+
+  .refex-host-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1040;
+    height: var(--refex-host-bar-height);
+    padding: 0 10px 0 4px;
+    background: #ffffff;
+    border-bottom: 1px solid #e8eaed;
+    font-family: var(--font-body);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .refex-host-bar__back {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border: 0;
+    background: transparent;
+    color: #1f2937;
+    font-size: 15px;
+    cursor: pointer;
+    border-radius: 8px;
+  }
+  .refex-host-bar__back:hover,
+  .refex-host-bar__back:focus-visible {
+    background: #f3f4f6;
+    outline: none;
+  }
+
+  .refex-host-bar__brand {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    line-height: 1.15;
+    padding-left: 2px;
+  }
+  .refex-host-bar__title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #111827;
+    letter-spacing: -0.01em;
+  }
+  .refex-host-bar__subtitle {
+    font-size: 11px;
+    font-weight: 500;
+    color: #9ca3af;
+  }
+
+  .refex-host-bar__refresh {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 36px;
+    padding: 0 10px;
+    border: 0;
+    background: transparent;
+    color: #16a34a;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: 8px;
+  }
+  .refex-host-bar__refresh i {
+    font-size: 14px;
+  }
+  .refex-host-bar__refresh:hover,
+  .refex-host-bar__refresh:focus-visible {
+    background: rgba(22, 163, 74, 0.08);
+    outline: none;
+  }
+}
+
+/* Desktop web: never show host bar even if markup is present */
+@media (min-width: 992px) {
+  .refex-host-bar {
+    display: none !important;
+  }
+  .has-refex-host-bar {
+    --refex-host-bar-height: 0px;
+  }
 }
 
 /* ==========================================================================

@@ -2,6 +2,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { siteName } from '../data/mockData'
 import { useAuth } from '../api/AuthContext'
+import RefexOneHostBar from '../components/RefexOneHostBar'
 
 const NARROW_MQ = '(max-width: 991px)'
 
@@ -321,7 +322,7 @@ export default function AppLayout({ children, title, subtitle, dense, hideHeader
   }
 
   return (
-    <div className={`wrapper ${collapsed ? 'sidebar-collapse' : ''} ${!collapsed ? 'sidebar-open' : ''}${isNarrow ? ' is-narrow' : ''}`}>
+    <div className={`wrapper ${collapsed ? 'sidebar-collapse' : ''} ${!collapsed ? 'sidebar-open' : ''}${isNarrow ? ' is-narrow' : ''}${isNarrow ? ' has-refex-host-bar' : ''}`}>
       {drawerOpen ? (
         <button
           type="button"
@@ -330,6 +331,8 @@ export default function AppLayout({ children, title, subtitle, dense, hideHeader
           onClick={closeDrawer}
         />
       ) : null}
+      {/* Portal chrome: mobile/tablet only — hidden on desktop web */}
+      {isNarrow ? <RefexOneHostBar /> : null}
       <header className="main-header">
         <NavLink to="/" className="logo" aria-label={siteName} onClick={closeDrawer}>
           <img src="/mobility_logo.png" alt={siteName} />
