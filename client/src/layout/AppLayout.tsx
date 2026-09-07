@@ -335,7 +335,11 @@ export default function AppLayout({ children, title, subtitle, dense, hideHeader
       {isNarrow ? <RefexOneHostBar /> : null}
       <header className="main-header">
         <NavLink to="/" className="logo" aria-label={siteName} onClick={closeDrawer}>
-          <img src="/mobility_logo.png" alt={siteName} />
+          <span className="logo-pair">
+            <img className="logo-refexone" src="/refexone-logo.png" alt="RefexOne" />
+            <span className="logo-pair-divider" aria-hidden="true" />
+            <img className="logo-mobility" src="/mobility_logo.png" alt={siteName} />
+          </span>
         </NavLink>
         <nav className="navbar">
           <button

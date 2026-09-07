@@ -487,6 +487,13 @@
   position: relative;
   z-index: 2;
 }
+.em-card-logos {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  flex: none;
+}
 .em-card-logo {
   flex: none;
   height: 44px;
@@ -494,6 +501,10 @@
   object-fit: contain;
   user-select: none;
   -webkit-user-drag: none;
+}
+.em-card-logo--refexone {
+  height: 30px;
+  mix-blend-mode: screen;
 }
 .em-card-head h2 {
   margin: 0;

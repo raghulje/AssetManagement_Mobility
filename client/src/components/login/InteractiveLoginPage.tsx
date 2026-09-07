@@ -82,7 +82,10 @@ export default function InteractiveLoginPage({ onSubmit: onSubmitProp }: Props) 
             transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1], delay: 0.12 }}
           >
             <div className="em-card-head">
-              <img className="em-card-logo" src="/mobility_logo.png" alt="Refex Mobility" />
+              <div className="em-card-logos">
+                <img className="em-card-logo em-card-logo--refexone" src="/refexone-logo.png" alt="RefexOne" />
+                <img className="em-card-logo" src="/mobility_logo.png" alt="Refex Mobility" />
+              </div>
               <div>
                 <h2>Welcome back!</h2>
                 <p>Sign in to your EV fleet workspace.</p>

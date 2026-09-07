@@ -133,15 +133,39 @@ img { max-width: 100%; }
   flex-shrink: 0;
   transition: background 200ms var(--ease);
   border-right: 1px solid #E2E8F0;
-  padding: 0 14px;
+  padding: 0 12px;
 }
-.main-header .logo img {
-  height: 44px;
+.main-header .logo-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  min-width: 0;
+}
+.main-header .logo-pair-divider {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 28px;
+  background: #E2E8F0;
+}
+.main-header .logo img,
+.main-header .logo-mobility,
+.main-header .logo-refexone {
   width: auto;
-  max-width: calc(100% - 4px);
+  max-width: none;
   object-fit: contain;
   display: block;
   transition: transform 220ms var(--ease), opacity 220ms var(--ease);
+}
+.main-header .logo-mobility {
+  height: 40px;
+  max-width: 118px;
+}
+.main-header .logo-refexone {
+  height: 28px;
+  max-width: 108px;
+  /* Asset has a black plate — lift colors on the white header */
+  mix-blend-mode: screen;
 }
 .main-header .logo:hover img { transform: scale(1.02); opacity: 0.95; }
 
@@ -684,7 +708,11 @@ a:hover .small-box .icon {
     box-shadow: 8px 0 28px rgba(15, 23, 42, 0.28);
   }
   .content-wrapper, .main-footer { margin-left: 0; }
-  .main-header .logo { width: auto; padding: 0 14px; }
+  .main-header .logo { width: auto; max-width: min(52vw, 220px); padding: 0 8px; }
+  .main-header .logo-pair { gap: 8px; }
+  .main-header .logo-pair-divider { height: 22px; }
+  .main-header .logo-mobility { height: 32px; max-width: 96px; }
+  .main-header .logo-refexone { height: 22px; max-width: 86px; }
   .main-header::after { left: 0; }
 }
 @media (max-width: 767px) {
@@ -692,6 +720,9 @@ a:hover .small-box .icon {
   .header-search { display: none; }
   .navbar-nav > li:not(.dropdown) { display: none; }
   .navbar-nav > li.dropdown { display: flex; }
+  .main-header .logo { max-width: min(48vw, 190px); padding: 0 6px; }
+  .main-header .logo-mobility { height: 28px; max-width: 84px; }
+  .main-header .logo-refexone { height: 20px; max-width: 76px; }
 }
 
 /* Buttons */
