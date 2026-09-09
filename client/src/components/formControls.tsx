@@ -50,11 +50,9 @@ function useFloatingStyle(
       const estimated = opts?.estimatedHeight ?? menuRef.current?.offsetHeight ?? 280
       const spaceBelow = vh - rect.bottom - gap
       const spaceAbove = rect.top - gap
-      // Prefer below; only flip up when below can't fit and above clearly can
-      const openUp =
-        spaceBelow < estimated &&
-        spaceAbove > spaceBelow &&
-        spaceAbove >= Math.min(estimated, spaceBelow + 40)
+      const openUp = spaceBelow < estimated && spaceAbove > spaceBelow
+      const avail = Math.max(0, openUp ? spaceAbove : spaceBelow)
+      const maxH = Math.min(320, Math.max(avail || 160, 140))
 
       const maxW = Math.min(opts?.maxWidth ?? 420, vw - pad * 2)
       const floor = opts?.minWidth ?? (opts?.matchTriggerWidth === false ? 280 : 160)
@@ -84,49 +82,18 @@ function useFloatingStyle(
       if (left < pad) left = pad
 
       setPlacement(openUp ? 'up' : 'down')
-      if (openUp) {
-        const projectedTop = rect.top - gap - estimated
-        if (projectedTop < pad) {
-          // Not enough room above — keep below and clamp into the viewport
-          setPlacement('down')
-          setStyle({
-            position: 'fixed',
-            left,
-            width,
-            minWidth: width,
-            maxWidth: width,
-            zIndex: 30100,
-            top: Math.min(rect.bottom + gap, Math.max(pad, vh - estimated - pad)),
-            bottom: 'auto',
-          })
-        } else {
-          setStyle({
-            position: 'fixed',
-            left,
-            width,
-            minWidth: width,
-            maxWidth: width,
-            zIndex: 30100,
-            bottom: vh - rect.top + gap,
-            top: 'auto',
-          })
-        }
-      } else {
-        let top = rect.bottom + gap
-        if (top + estimated > vh - pad) {
-          top = Math.max(pad, vh - estimated - pad)
-        }
-        setStyle({
-          position: 'fixed',
-          left,
-          width,
-          minWidth: width,
-          maxWidth: width,
-          zIndex: 30100,
-          top,
-          bottom: 'auto',
-        })
-      }
+      setStyle({
+        position: 'fixed',
+        left,
+        width,
+        minWidth: width,
+        maxWidth: width,
+        maxHeight: maxH,
+        zIndex: 30100,
+        ...(openUp
+          ? { bottom: vh - rect.top + gap, top: 'auto' }
+          : { top: rect.bottom + gap, bottom: 'auto' }),
+      })
     }
 
     update(true)
@@ -207,7 +174,7 @@ export function AppSelect({
     maxWidth: 480,
     // Prefer trigger width, grow for long labels; width is locked while open
     matchTriggerWidth: true,
-    estimatedHeight: 220,
+    estimatedHeight: 280,
   })
 
   const selected = options.find((o) => o.value === value)
@@ -255,6 +222,7 @@ export function AppSelect({
     if (!open) return
     if (e.key === 'Escape') {
       e.preventDefault()
+      e.stopPropagation()
       setOpen(false)
       setQuery('')
     } else if (e.key === 'ArrowDown') {
@@ -305,6 +273,7 @@ export function AppSelect({
           id={listId}
           ref={menuRef}
           style={menuStyle}
+          onKeyDown={onKeyDown}
         >
           {enableSearch ? (
             <div className="app-select-search">

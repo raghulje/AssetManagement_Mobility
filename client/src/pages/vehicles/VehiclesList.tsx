@@ -3,6 +3,12 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import AppLayout from '../../layout/AppLayout'
 import { AppSelect } from '../../components/formControls'
+import {
+  VehicleFilterSheet,
+  VehicleFiltersButton,
+  vehicleFilterCount,
+  type VehicleListFilters,
+} from '../../components/VehicleMobileFilters'
 import { vehiclesApi, type Vehicle, type VehicleFacets } from '../../api/vehicles'
 import { formatAppDateTime } from '../../lib/datetime'
 import { useAuth } from '../../api/AuthContext'
@@ -235,6 +241,7 @@ export default function VehiclesList() {
   const [error, setError] = useState('')
   const [drill, setDrill] = useState<Drill>('none')
   const [pendingRefresh, setPendingRefresh] = useState(0)
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false)
 
   useEffect(() => {
     setSearchInput(qParam)
@@ -519,6 +526,74 @@ export default function VehiclesList() {
 
   const chipFacets = facets
 
+  const cityOptions = useMemo(() => [
+    { value: '', label: 'All cities' },
+    ...(chipFacets?.locations || []).map((o) => ({
+      value: o.id != null ? String(o.id) : o.value,
+      label: `${o.value} (${o.c})`,
+    })),
+  ], [chipFacets?.locations])
+
+  const modelOptions = useMemo(() => [
+    { value: '', label: 'All models' },
+    ...(chipFacets?.models || []).map((o) => ({
+      value: o.id != null ? String(o.id) : o.value,
+      label: `${o.value} (${o.c})`,
+    })),
+  ], [chipFacets?.models])
+
+  const categoryOptions = useMemo(() => [
+    { value: '', label: 'All categories' },
+    ...(chipFacets?.categories || []).map((o) => ({ value: o.value, label: `${o.value} (${o.c})` })),
+  ], [chipFacets?.categories])
+
+  const fuelOptions = useMemo(() => [
+    { value: '', label: 'All fuel types' },
+    ...(chipFacets?.fuel_types || []).map((o) => ({
+      value: o.value,
+      label: `${o.value} (${o.c})`,
+    })),
+  ], [chipFacets?.fuel_types])
+
+  const verifiedOptions = [
+    { value: '', label: 'All capture status' },
+    { value: '1', label: 'Verified' },
+    { value: '0', label: 'Pending review' },
+  ]
+  const registeredOptions = [
+    { value: '', label: 'All form capture' },
+    { value: '1', label: 'Photos submitted' },
+    { value: '0', label: 'Capture pending' },
+  ]
+
+  const committedFilters: VehicleListFilters = {
+    search: searchInput,
+    cityId,
+    location,
+    modelId,
+    model,
+    category,
+    fuelType,
+    verified,
+    registered,
+  }
+  const activeFilterCount = vehicleFilterCount({ ...committedFilters, search: searchInput.trim() })
+
+  const applySheetFilters = (next: VehicleListFilters) => {
+    setSearchInput(next.search)
+    setSearch(next.search.trim())
+    setCityId(next.cityId)
+    setLocation(next.location)
+    setModelId(next.modelId)
+    setModel(next.model)
+    setCategory(next.category)
+    setFuelType(next.fuelType)
+    setVerified(next.verified)
+    setRegistered(next.registered)
+    if (next.fuelType) setDrill('models')
+    setFilterSheetOpen(false)
+  }
+
   const activeCityLabel =
     (facets?.locations || []).find((o) => String(o.id) === cityId || o.value === location)?.value
     || (cityId || location ? (location || undefined) : undefined)
@@ -544,6 +619,23 @@ export default function VehiclesList() {
       headerAside={canVerify ? <PendingVerifyAlert refreshKey={pendingRefresh} /> : undefined}
     >
       <div className="rm-page">
+        <div className="rm-filters-mobile">
+          <VehicleFiltersButton count={activeFilterCount} onClick={() => setFilterSheetOpen(true)} />
+        </div>
+        <VehicleFilterSheet
+          open={filterSheetOpen}
+          filters={committedFilters}
+          cityOptions={cityOptions}
+          modelOptions={modelOptions}
+          categoryOptions={categoryOptions}
+          fuelOptions={fuelOptions}
+          verifiedOptions={verifiedOptions}
+          registeredOptions={registeredOptions}
+          locations={chipFacets?.locations || []}
+          models={chipFacets?.models || []}
+          onClose={() => setFilterSheetOpen(false)}
+          onApply={applySheetFilters}
+        />
         <div className="rm-kpi-row">
           <button
             type="button"
@@ -748,7 +840,7 @@ export default function VehiclesList() {
             </div>
           </div>
 
-          <div className="rm-filters">
+          <div className="rm-filters rm-filters-desktop">
             <input
               className="form-control"
               placeholder="Search plate, model, city…"
@@ -759,13 +851,7 @@ export default function VehiclesList() {
               value={cityId || location}
               searchable
               placeholder="All cities"
-              options={[
-                { value: '', label: 'All cities' },
-                ...(chipFacets?.locations || []).map((o) => ({
-                  value: o.id != null ? String(o.id) : o.value,
-                  label: `${o.value} (${o.c})`,
-                })),
-              ]}
+              options={cityOptions}
               onChange={(val) => {
                 const hit = (chipFacets?.locations || []).find((o) => String(o.id) === val || o.value === val)
                 if (hit?.id != null) {
@@ -781,13 +867,7 @@ export default function VehiclesList() {
               value={modelId || model}
               searchable
               placeholder="All models"
-              options={[
-                { value: '', label: 'All models' },
-                ...(chipFacets?.models || []).map((o) => ({
-                  value: o.id != null ? String(o.id) : o.value,
-                  label: `${o.value} (${o.c})`,
-                })),
-              ]}
+              options={modelOptions}
               onChange={(val) => {
                 const hit = (chipFacets?.models || []).find((o) => String(o.id) === val || o.value === val)
                 if (hit?.id != null) {
@@ -804,10 +884,7 @@ export default function VehiclesList() {
               onChange={setCategory}
               searchable={false}
               placeholder="All categories"
-              options={[
-                { value: '', label: 'All categories' },
-                ...(chipFacets?.categories || []).map((o) => ({ value: o.value, label: `${o.value} (${o.c})` })),
-              ]}
+              options={categoryOptions}
             />
             <AppSelect
               value={fuelType}
@@ -817,13 +894,7 @@ export default function VehiclesList() {
               }}
               searchable={false}
               placeholder="All fuel types"
-              options={[
-                { value: '', label: 'All fuel types' },
-                ...((chipFacets)?.fuel_types || []).map((o) => ({
-                  value: o.value,
-                  label: `${o.value} (${o.c})`,
-                })),
-              ]}
+              options={fuelOptions}
             />
             <AppSelect
               value={verified}
@@ -833,11 +904,7 @@ export default function VehiclesList() {
               }}
               searchable={false}
               placeholder="All capture status"
-              options={[
-                { value: '', label: 'All capture status' },
-                { value: '1', label: 'Verified' },
-                { value: '0', label: 'Pending review' },
-              ]}
+              options={verifiedOptions}
             />
             <AppSelect
               value={registered}
@@ -847,11 +914,7 @@ export default function VehiclesList() {
               }}
               searchable={false}
               placeholder="All form capture"
-              options={[
-                { value: '', label: 'All form capture' },
-                { value: '1', label: 'Photos submitted' },
-                { value: '0', label: 'Capture pending' },
-              ]}
+              options={registeredOptions}
             />
           </div>
 

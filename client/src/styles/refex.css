@@ -956,9 +956,15 @@ input[type="date"].form-control::-webkit-calendar-picker-indicator {
   top: auto;
   bottom: auto;
   box-sizing: border-box;
-  max-height: min(240px, 55vh);
+  max-height: min(320px, 70vh);
   overflow: hidden;
   z-index: 30100 !important;
+}
+.app-select-menu--portal .app-select-options {
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 .app-select-menu--portal .app-select-option {
   min-width: 0;
